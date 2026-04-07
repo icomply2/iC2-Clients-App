@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 export const REX_TOKEN_ACCESS_COOKIE = "rex_token_access";
 export const REX_TOKEN_REFRESH_COOKIE = "rex_token_refresh";
@@ -43,7 +44,7 @@ export async function readRexConnectionStateFromCookies() {
   };
 }
 
-export function persistRexTokens(response: Response, tokenPayload: TokenResponse) {
+export function persistRexTokens(response: NextResponse, tokenPayload: TokenResponse) {
   if (!tokenPayload.access_token) {
     return;
   }
@@ -74,7 +75,7 @@ export function persistRexTokens(response: Response, tokenPayload: TokenResponse
   );
 }
 
-export function clearRexTokens(response: Response) {
+export function clearRexTokens(response: NextResponse) {
   response.cookies.set(REX_TOKEN_ACCESS_COOKIE, "", buildRexCookieOptions(0));
   response.cookies.set(REX_TOKEN_REFRESH_COOKIE, "", buildRexCookieOptions(0));
   response.cookies.set(REX_TOKEN_EXPIRES_AT_COOKIE, "", buildRexCookieOptions(0));
