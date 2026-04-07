@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { persistRexTokens, readRexRefreshTokenFromCookies } from "@/lib/rex-token";
+import { buildRexTokenUrl } from "../_shared";
 
 const REX_TOKEN_API_BASE_URL = process.env.REX_TOKEN_API_BASE_URL;
 const REX_TOKEN_SUBSCRIPTION_KEY = process.env.REX_TOKEN_SUBSCRIPTION_KEY;
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     formData.set("grant_type", "refresh_token");
     formData.set("refresh_token", refreshToken);
 
-    const response = await fetch(new URL("/", REX_TOKEN_API_BASE_URL), {
+    const response = await fetch(buildRexTokenUrl(REX_TOKEN_API_BASE_URL), {
       method: "POST",
       headers: {
         Accept: "application/json",

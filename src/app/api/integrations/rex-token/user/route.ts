@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readRexAccessTokenFromCookies } from "@/lib/rex-token";
+import { buildRexTokenUrl } from "../_shared";
 
 const REX_TOKEN_API_BASE_URL = process.env.REX_TOKEN_API_BASE_URL;
 const REX_TOKEN_BEARER_TOKEN = process.env.REX_TOKEN_BEARER_TOKEN;
@@ -23,7 +24,7 @@ export async function GET() {
   }
 
   try {
-    const response = await fetch(new URL("/user/", REX_TOKEN_API_BASE_URL), {
+    const response = await fetch(buildRexTokenUrl(REX_TOKEN_API_BASE_URL, "user/"), {
       method: "GET",
       headers: {
         Accept: "application/json",

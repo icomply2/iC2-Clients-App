@@ -6,6 +6,7 @@ import {
   clearRexTokens,
   persistRexTokens,
 } from "@/lib/rex-token";
+import { buildRexTokenUrl } from "../_shared";
 
 const REX_TOKEN_API_BASE_URL = process.env.REX_TOKEN_API_BASE_URL;
 const REX_TOKEN_SUBSCRIPTION_KEY = process.env.REX_TOKEN_SUBSCRIPTION_KEY;
@@ -51,57 +52,106 @@ export async function GET(request: NextRequest) {
     return response;
   }
 
-  if (
-    !code ||
-    !state ||
-    !expectedState ||
-    !codeVerifier ||
-    state !== expectedState ||
+  let validationMessage: string | null = null;
+
+  if (!code) {
+    validationMessage = "missing-code";
+  } else if (!state) {
+    validationMessage = "missing-state";
+  } else if (!expectedState) {
+    validationMessage = "missing-session-state";
+  } else if (!codeVerifier) {
+    validationMessage = "missing-code-verifier";
+  } else if (state !== expectedState) {
+    validationMessage = "state-mismatch";
+  } else if (
     !REX_TOKEN_API_BASE_URL ||
     !REX_TOKEN_SUBSCRIPTION_KEY ||
     !REX_TOKEN_CLIENT_ID ||
     !REX_TOKEN_CLIENT_SECRET ||
     !REX_TOKEN_REDIRECT_URI
   ) {
+    validationMessage = "missing-config";
+  }
+
+  if (validationMessage) {
     redirectUrl.searchParams.set("integration", "productrex");
     redirectUrl.searchParams.set("status", "error");
-    redirectUrl.searchParams.set("message", "callback-validation-failed");
+    redirectUrl.searchParams.set("message", validationMessage);
     const response = NextResponse.redirect(redirectUrl);
     clearOAuthCookies(response);
     return response;
   }
 
   try {
-    const formData = new FormData();
-    formData.set("client_id", REX_TOKEN_CLIENT_ID);
-    formData.set("client_secret", REX_TOKEN_CLIENT_SECRET);
-    formData.set("grant_type", "authorization_code");
-    formData.set("code", code);
-    formData.set("redirect_uri", REX_TOKEN_REDIRECT_URI);
-    formData.set("code_verifier", codeVerifier);
+    const authCode = code!;
+    const verifier = codeVerifier!;
+    const clientId = REX_TOKEN_CLIENT_ID!;
+    const clientSecret = REX_TOKEN_CLIENT_SECRET!;
+    const redirectUri = REX_TOKEN_REDIRECT_URI!;
+    const apiBaseUrl = REX_TOKEN_API_BASE_URL!;
+    const subscriptionKey = REX_TOKEN_SUBSCRIPTION_KEY!;
 
-    const upstream = await fetch(new URL("/", REX_TOKEN_API_BASE_URL), {
+    const formData = new FormData();
+    formData.set("client_id", clientId);
+    formData.set("client_secret", clientSecret);
+    formData.set("grant_type", "authorization_code");
+    formData.set("code", authCode);
+    formData.set("redirect_uri", redirectUri);
+    formData.set("code_verifier", verifier);
+
+    const upstream = await fetch(buildRexTokenUrl(apiBaseUrl), {
       method: "POST",
       headers: {
         Accept: "application/json",
-        "Ocp-Apim-Subscription-Key": REX_TOKEN_SUBSCRIPTION_KEY,
+        "Ocp-Apim-Subscription-Key": subscriptionKey,
       },
       body: formData,
       cache: "no-store",
     });
 
-    const tokenPayload = (await upstream.json().catch(() => null)) as
+    const rawBody = await upstream.text();
+    let parsedPayload: {
+      access_token?: string;
+      refresh_token?: string;
+      expires_in?: number;
+      error?: string;
+      error_description?: string;
+    } | null = null;
+
+    if (rawBody) {
+      try {
+        parsedPayload = JSON.parse(rawBody) as {
+          access_token?: string;
+          refresh_token?: string;
+          expires_in?: number;
+          error?: string;
+          error_description?: string;
+        };
+      } catch {
+        parsedPayload = null;
+      }
+    }
+
+    const tokenPayload = parsedPayload as
       | {
           access_token?: string;
           refresh_token?: string;
           expires_in?: number;
+          error?: string;
+          error_description?: string;
         }
       | null;
 
     if (!upstream.ok || !tokenPayload?.access_token) {
       redirectUrl.searchParams.set("integration", "productrex");
       redirectUrl.searchParams.set("status", "error");
-      redirectUrl.searchParams.set("message", "token-exchange-failed");
+      const upstreamMessage =
+        tokenPayload?.error_description ||
+        tokenPayload?.error ||
+        rawBody.trim() ||
+        `upstream-${upstream.status}`;
+      redirectUrl.searchParams.set("message", `token-exchange-${upstream.status}-${upstreamMessage}`);
       const response = NextResponse.redirect(redirectUrl);
       clearOAuthCookies(response);
       clearRexTokens(response);

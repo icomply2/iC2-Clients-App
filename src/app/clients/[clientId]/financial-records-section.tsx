@@ -300,7 +300,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       case "superannuation":
         return { title: "Superannuation", deleteTitle: "Delete Superannuation", savePath: "superannuation", deletePath: "superannuation", emptyName: "superannuation record" };
       case "retirement-income":
-        return { title: "Retirement Income", deleteTitle: "Delete Retirement Income", savePath: "retirement-income", deletePath: "retirement-income", emptyName: "retirement income record" };
+        return { title: "Pensions", deleteTitle: "Delete Pension", savePath: "retirement-income", deletePath: "retirement-income", emptyName: "pension record" };
       case "insurance":
         return { title: "Insurance", deleteTitle: "Delete Insurance", savePath: "insurance", deletePath: "insurance", emptyName: "insurance record" };
     }
@@ -311,13 +311,13 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       case "liabilities":
         return ["Owner", "Type", "Bank", "Balance", "Repayment"];
       case "income":
-        return ["Owner", "Type", "Description", "Amount", "Frequency", "Annualised"];
+        return ["Owner", "Description", "Amount", "Frequency", "Annualised"];
       case "expenses":
         return ["Owner", "Type", "Description", "Amount", "Frequency", "Annualised"];
       case "superannuation":
         return ["Owner", "Type", "Fund", "Balance", "Contribution"];
       case "retirement-income":
-        return ["Owner", "Type", "Fund", "Balance", "Payment"];
+        return ["Owner", "Fund", "Balance", "Payment", "Frequency"];
       case "insurance":
         return ["Owner", "Cover", "Insurer", "Sum Insured", "Premium", "Frequency", "Status"];
     }
@@ -339,7 +339,6 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
             id: record.id ?? "",
             cells: [
               record.owner?.name ?? "",
-              record.type ?? "",
               record.description ?? "",
               formatCurrency(record.amount),
               record.frequency?.value ?? "",
@@ -356,7 +355,6 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
                 id: `derived-asset-${asset.id}`,
                 cells: [
                   asset.owner?.name ?? "",
-                  "Asset Income",
                   asset.description ?? asset.assetType ?? "",
                   formatCurrency(asset.incomeAmount),
                   asset.incomeFrequency?.value ?? asset.incomeFrequency?.type ?? "",
@@ -376,8 +374,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
                 id: `derived-pension-${pension.id}`,
                 cells: [
                   pension.owner?.name ?? "",
-                  pension.type ?? "Retirement Income",
-                  pension.superFund ?? "",
+                  pension.superFund ?? pension.type ?? "",
                   formatCurrency(pension.payment),
                   pension.frequency?.value ?? pension.frequency?.type ?? "",
                   formatCurrency(annualiseAmount(toNumericValue(pension.payment), pension.frequency?.value ?? pension.frequency?.type).toFixed(2)),
@@ -440,12 +437,22 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           id: record.id ?? "",
           cells: [record.owner?.name ?? "", record.type ?? "", record.superFund ?? "", formatCurrency(record.balance), formatCurrency(record.contributionAmount)],
           label: record.superFund ?? record.type ?? "superannuation record",
+          amount: toNumericValue(record.balance),
+          secondaryAmount: toNumericValue(record.contributionAmount),
         }));
       case "retirement-income":
         return (records as ClientPensionRecord[]).map((record): DisplayRow => ({
           id: record.id ?? "",
-          cells: [record.owner?.name ?? "", record.type ?? "", record.superFund ?? "", formatCurrency(record.balance), formatCurrency(record.payment)],
+          cells: [
+            record.owner?.name ?? "",
+            record.superFund ?? "",
+            formatCurrency(record.balance),
+            formatCurrency(record.payment),
+            record.frequency?.value ?? record.frequency?.type ?? "",
+          ],
           label: record.type ?? record.superFund ?? "retirement income record",
+          amount: toNumericValue(record.balance),
+          secondaryAmount: toNumericValue(record.payment),
         }));
       case "insurance":
         return (records as ClientInsuranceRecord[]).map((record): DisplayRow => ({
@@ -471,11 +478,25 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
         const totalRepayment = rows.reduce((sum, row) => sum + (row.secondaryAmount ?? 0), 0);
         return ["", "", "Total", formatCurrency(totalBalance.toFixed(2)), formatCurrency(totalRepayment.toFixed(2))];
       }
-      case "income":
+      case "income": {
+        const totalAmount = rows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+        const totalAnnualised = rows.reduce((sum, row) => sum + (row.annualised ?? 0), 0);
+        return ["", "Total", formatCurrency(totalAmount.toFixed(2)), "", formatCurrency(totalAnnualised.toFixed(2))];
+      }
       case "expenses": {
         const totalAmount = rows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
         const totalAnnualised = rows.reduce((sum, row) => sum + (row.annualised ?? 0), 0);
         return ["", "", "Total", formatCurrency(totalAmount.toFixed(2)), "", formatCurrency(totalAnnualised.toFixed(2))];
+      }
+      case "superannuation": {
+        const totalBalance = rows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+        const totalContribution = rows.reduce((sum, row) => sum + (row.secondaryAmount ?? 0), 0);
+        return ["", "", "Total", formatCurrency(totalBalance.toFixed(2)), formatCurrency(totalContribution.toFixed(2))];
+      }
+      case "retirement-income": {
+        const totalBalance = rows.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+        const totalPayment = rows.reduce((sum, row) => sum + (row.secondaryAmount ?? 0), 0);
+        return ["", "Total", formatCurrency(totalBalance.toFixed(2)), formatCurrency(totalPayment.toFixed(2)), ""];
       }
       default:
         return null;
@@ -745,6 +766,18 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
   const rowData = displayRows();
   const totals = summaryCells(rowData);
   const usesAnnualisedGrid = kind === "income" || kind === "expenses" || kind === "insurance";
+  const usesIncomeGrid = kind === "income";
+  const usesFinancialSummaryRow = kind === "liabilities" || kind === "superannuation" || kind === "retirement-income";
+  const usesAnnualisedSummaryRow = kind === "income" || kind === "expenses";
+  const summaryLabelIndex = kind === "income" ? 1 : kind === "retirement-income" ? 1 : 2;
+  const summaryValueIndexes =
+    kind === "income"
+      ? [2, 4]
+      : kind === "retirement-income"
+        ? [2, 3]
+        : usesAnnualisedSummaryRow
+          ? [3, 5]
+          : [3, 4];
 
   return (
     <>
@@ -778,7 +811,11 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       ) : null}
 
       <section className={styles.financialSection}>
-        <div className={`${styles.financialHeader} ${usesAnnualisedGrid ? styles.financialRowAnnualised : ""}`.trim()}>
+        <div
+          className={`${styles.financialHeader} ${
+            usesIncomeGrid ? styles.financialRowIncomeAnnualised : usesAnnualisedGrid ? styles.financialRowAnnualised : ""
+          }`.trim()}
+        >
           {headerColumns.map((column) => (
             <div key={column}>{column}</div>
           ))}
@@ -786,7 +823,12 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
         </div>
 
         {rowData.map((row) => (
-          <div key={row.id || row.label} className={`${styles.financialRow} ${usesAnnualisedGrid ? styles.financialRowAnnualised : ""}`.trim()}>
+          <div
+            key={row.id || row.label}
+            className={`${styles.financialRow} ${
+              usesIncomeGrid ? styles.financialRowIncomeAnnualised : usesAnnualisedGrid ? styles.financialRowAnnualised : ""
+            }`.trim()}
+          >
             {row.cells.map((cell, index) => (
               <div key={`${row.id}-${index}`} className={index === 2 ? styles.financialWideCell : undefined}>
                 {cell}
@@ -829,22 +871,47 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
         ))}
 
         {totals ? (
-          <div className={`${styles.financialRow} ${styles.summaryRow} ${usesAnnualisedGrid ? styles.financialRowAnnualised : ""}`.trim()}>
+          <div
+            className={`${
+              usesFinancialSummaryRow
+                ? styles.financialSummaryRow
+                : usesAnnualisedSummaryRow
+                  ? usesIncomeGrid
+                    ? styles.financialSummaryRowIncomeAnnualised
+                    : styles.financialSummaryRowAnnualised
+                  : styles.financialRow
+            } ${styles.summaryRow}`.trim()}
+          >
             {totals.map((cell, index) => (
               <div
                 key={`summary-${index}`}
                 className={
-                  index === 2
-                    ? styles.summaryLabel
-                    : index === 3 || index === 4
-                      ? styles.summaryValue
+                  index === summaryLabelIndex
+                    ? `${styles.summaryLabel} ${
+                        usesFinancialSummaryRow || usesAnnualisedSummaryRow ? styles.financialSummaryLabelStart : ""
+                      }`.trim()
+                    : summaryValueIndexes.includes(index)
+                      ? `${styles.summaryValue} ${
+                          usesFinancialSummaryRow || usesAnnualisedSummaryRow ? styles.financialSummaryValueStart : ""
+                        }`.trim()
                       : undefined
                 }
               >
                 {cell}
               </div>
             ))}
-            <div />
+            <div
+              className={
+                usesFinancialSummaryRow || usesAnnualisedSummaryRow
+                  ? kind === "income"
+                    ? styles.incomeSummarySpacer
+                    : kind === "expenses"
+                      ? styles.expenseSummarySpacer
+                      : styles.financialSummarySpacer
+                  : undefined
+              }
+              aria-hidden="true"
+            />
           </div>
         ) : null}
       </section>

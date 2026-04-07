@@ -9,9 +9,13 @@ import { ClientDetailsSection } from "./client-details-section";
 import { DependentSection } from "./dependent-section";
 import { AssetsSection } from "./assets-section";
 import { EntitiesSection } from "./entities-section";
+import { EngagementLetterSection } from "./engagement-letter-section";
 import { FileNotesSection } from "./file-notes-section";
+import { FactFindSection } from "./fact-find-section";
 import { IdentityCheckSection } from "./identity-check-section";
 import { InsuranceSection } from "./insurance-section";
+import { PortfolioSection } from "./portfolio-section";
+import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WizardsSection } from "./wizards-section";
 import styles from "./page.module.css";
 
@@ -22,36 +26,21 @@ type SectionKey =
   | "dependents"
   | "file-notes"
   | "wizards"
+  | "wizards-fact-find"
+  | "wizards-engagement-letter"
   | "assets"
   | "liabilities"
   | "income"
   | "expenses"
   | "superannuation"
   | "retirement-income"
-  | "insurance";
+  | "insurance"
+  | "portfolio";
 
 type ClientWorkspaceProps = {
   clientId: string;
   section: SectionKey;
 };
-
-const navItems = [
-  { label: "All Clients", icon: "◔", href: "/clients", key: "all-clients" },
-  { label: "Client Details", icon: "◕", href: "", key: "details" },
-  { label: "Identity Check", icon: "◉", href: "/identity-check", key: "identity-check" },
-  { label: "Entities", icon: "⌘", href: "/entities", key: "entities" },
-  { label: "Dependents", icon: "◔", href: "/dependents", key: "dependents" },
-  { label: "Client File Notes", icon: "◫", href: "/file-notes", key: "file-notes" },
-  { label: "Ic2 Wizards", icon: "✲", href: "/wizards", key: "wizards" },
-  { label: "Assets", icon: "$", href: "/assets", key: "assets" },
-  { label: "Liability", icon: "▤", href: "/liabilities", key: "liabilities" },
-  { label: "Superannuation", icon: "▮", href: "/superannuation", key: "superannuation" },
-  { label: "Retirement Income", icon: "◫", href: "/retirement-income", key: "retirement-income" },
-  { label: "Insurance", icon: "✚", href: "/insurance", key: "insurance" },
-  { label: "Income", icon: "▥", href: "/income", key: "income" },
-  { label: "Expense", icon: "∿", href: "/expenses", key: "expenses" },
-  { label: "IPS Portfolio", icon: "⌘", href: "#", key: "ips-portfolio" },
-] as const;
 
 async function loadClientProfile(clientId: string) {
   if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
@@ -133,48 +122,7 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
               «
             </Link>
           </div>
-
-          <nav className={styles.nav} aria-label="Client sections">
-            {navItems.map((item) => {
-              const href =
-                item.key === "details"
-                  ? `/clients/${clientId}`
-                  : item.key === "identity-check"
-                    ? `/clients/${clientId}/identity-check`
-                    : item.key === "entities"
-                      ? `/clients/${clientId}/entities`
-                      : item.key === "dependents"
-                        ? `/clients/${clientId}/dependents`
-                        : item.key === "file-notes"
-                          ? `/clients/${clientId}/file-notes`
-                          : item.key === "wizards"
-                            ? `/clients/${clientId}/wizards`
-                        : item.key === "assets"
-                          ? `/clients/${clientId}/assets`
-                          : item.key === "liabilities"
-                            ? `/clients/${clientId}/liabilities`
-                            : item.key === "income"
-                              ? `/clients/${clientId}/income`
-                              : item.key === "expenses"
-                                ? `/clients/${clientId}/expenses`
-                                : item.key === "superannuation"
-                                  ? `/clients/${clientId}/superannuation`
-                                  : item.key === "retirement-income"
-                                    ? `/clients/${clientId}/retirement-income`
-                                    : item.key === "insurance"
-                                      ? `/clients/${clientId}/insurance`
-                          : item.href;
-
-              const isActive = item.key === section;
-
-              return (
-                <Link key={item.label} href={href} className={`${styles.navItem} ${isActive ? styles.navItemActive : ""}`.trim()}>
-                  <span className={styles.navIcon}>{item.icon}</span>
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
+          <WorkspaceSidebar clientId={clientId} section={section} />
         </aside>
 
         <div className={styles.main}>
@@ -213,12 +161,18 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
               <FileNotesSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "wizards" ? (
               <WizardsSection profile={profile} useMockFallback={useMockFallback} />
+            ) : section === "wizards-fact-find" ? (
+              <FactFindSection />
+            ) : section === "wizards-engagement-letter" ? (
+              <EngagementLetterSection />
             ) : section === "dependents" ? (
               <DependentSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "assets" ? (
               <AssetsSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "insurance" ? (
               <InsuranceSection profile={profile} useMockFallback={useMockFallback} />
+            ) : section === "portfolio" ? (
+              <PortfolioSection />
             ) : section === "liabilities" ||
               section === "income" ||
               section === "expenses" ||

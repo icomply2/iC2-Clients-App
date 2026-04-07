@@ -33,7 +33,6 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
       dependants.map((dependant) => ({
         id: dependant.id ?? "",
         name: dependant.name ?? "",
-        owner: dependant.owner?.name ?? "",
         type: dependant.type ?? "Child",
         birthday: dependant.birthday ?? "",
         birthdayDisplay: formatBirthday(dependant.birthday),
@@ -41,28 +40,15 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
     [dependants],
   );
 
-  const ownerOptions = [
+  const clientOwner =
     profile.client?.name && profile.client?.id
       ? { value: profile.client.id, label: profile.client.name }
-      : null,
-    profile.partner?.name && profile.partner?.id
-      ? { value: profile.partner.id, label: profile.partner.name }
-      : null,
-  ].filter((option): option is { value: string; label: string } => Boolean(option));
-
-  const [ownerId, setOwnerId] = useState(ownerOptions[0]?.value ?? "");
+      : null;
   const [name, setName] = useState("");
   const [birthday, setBirthday] = useState("");
   const [dependantType, setDependantType] = useState("Child");
 
-  useEffect(() => {
-    if (!ownerOptions.some((option) => option.value === ownerId)) {
-      setOwnerId(ownerOptions[0]?.value ?? "");
-    }
-  }, [ownerId, ownerOptions]);
-
   function resetForm() {
-    setOwnerId(ownerOptions[0]?.value ?? "");
     setName("");
     setBirthday("");
     setDependantType("Child");
@@ -84,7 +70,7 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
           (submittedDependant) =>
             (submittedDependant.name ?? "").trim().toLowerCase() === (returnedDependant.name ?? "").trim().toLowerCase() &&
             (submittedDependant.birthday ?? "") === (returnedDependant.birthday ?? "") &&
-            (submittedDependant.owner?.id ?? "") === (returnedDependant.owner?.id ?? ""),
+            (submittedDependant.owner?.id ?? clientOwner?.value ?? "") === (returnedDependant.owner?.id ?? clientOwner?.value ?? ""),
         );
 
       return {
@@ -179,15 +165,13 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
       return;
     }
 
-    const owner = ownerOptions.find((option) => option.value === ownerId);
-
     if (!profile.id) {
       setErrorMessage("This client profile does not have a profile id yet.");
       return;
     }
 
-    if (!owner) {
-      setErrorMessage("Please choose an owner.");
+    if (!clientOwner) {
+      setErrorMessage("This client does not have a valid owner entity yet.");
       return;
     }
 
@@ -209,8 +193,8 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
                   birthday: birthday || null,
                   type: dependantType,
                   owner: {
-                    id: owner.value,
-                    name: owner.label,
+                    id: clientOwner.value,
+                    name: clientOwner.label,
                   },
                 }
               : dependant,
@@ -234,8 +218,8 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
               birthday: birthday || null,
               type: dependantType,
               owner: {
-                id: owner.value,
-                name: owner.label,
+                id: clientOwner.value,
+                name: clientOwner.label,
               },
             },
           ];
@@ -263,7 +247,6 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
     }
 
     setEditingDependantId(dependant.id ?? null);
-    setOwnerId(dependant.owner?.id ?? ownerOptions[0]?.value ?? "");
     setName(dependant.name ?? "");
     setBirthday((dependant.birthday ?? "").slice(0, 10));
     setDependantType(dependant.type ?? "Child");
@@ -341,21 +324,19 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
       {useMockFallback ? <p className={styles.actionNotice}>{getFallbackMessage()}</p> : null}
 
       <section className={styles.entitiesSection}>
-        <div className={styles.entitiesHeader}>
+        <div className={styles.dependantsHeader}>
           <div>Name</div>
-          <div>Owner</div>
           <div>DOB</div>
           <div>Type</div>
-          <div className={styles.entitiesActionsHeader}></div>
+          <div className={styles.dependantsActionsHeader}></div>
         </div>
 
         {displayDependants.map((dependant) => (
-          <div key={dependant.id || dependant.name} className={styles.entitiesRow}>
+          <div key={dependant.id || dependant.name} className={styles.dependantsRow}>
             <div>{dependant.name}</div>
-            <div>{dependant.owner}</div>
             <div>{dependant.birthdayDisplay}</div>
             <div>{dependant.type}</div>
-            <div className={styles.entitiesActions}>
+            <div className={styles.dependantsActions}>
               <button
                 type="button"
                 className={styles.rowActionButton}
@@ -391,16 +372,6 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
           <div className={styles.identityModalCard}>
             <div className={styles.identityModalHeader}>{editingDependantId ? "Edit Dependant" : "Add Dependant"}</div>
             <div className={styles.identityModalBody}>
-              <label className={styles.identityFieldRow}>
-                <span>Owner</span>
-                <select value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
-                  {ownerOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label className={styles.identityFieldRow}>
                 <span>Name</span>
                 <input value={name} onChange={(event) => setName(event.target.value)} />

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { persistRexTokens } from "@/lib/rex-token";
+import { buildRexTokenUrl } from "../_shared";
 
 const REX_TOKEN_API_BASE_URL = process.env.REX_TOKEN_API_BASE_URL;
 const REX_TOKEN_SUBSCRIPTION_KEY = process.env.REX_TOKEN_SUBSCRIPTION_KEY;
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     formData.set("redirect_uri", payload.redirectUri ?? REX_TOKEN_REDIRECT_URI);
     formData.set("code_verifier", payload.codeVerifier);
 
-    const response = await fetch(new URL("/", REX_TOKEN_API_BASE_URL), {
+    const response = await fetch(buildRexTokenUrl(REX_TOKEN_API_BASE_URL), {
       method: "POST",
       headers: {
         Accept: "application/json",

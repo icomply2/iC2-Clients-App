@@ -532,13 +532,15 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
         ))}
 
         {displayAssets.length ? (
-          <div className={`${styles.assetsRow} ${styles.summaryRow}`.trim()}>
+          <div className={`${styles.assetSummaryRow} ${styles.summaryRow}`.trim()}>
             <div />
             <div />
             <div />
-            <div className={styles.summaryLabel}>Total</div>
-            <div className={styles.summaryValue}>{formatCurrency(totalCurrentValue.toFixed(2))}</div>
-            <div />
+            <div className={`${styles.summaryLabel} ${styles.assetSummaryLabel}`.trim()}>Total</div>
+            <div className={`${styles.summaryValue} ${styles.assetSummaryValue}`.trim()}>
+              {formatCurrency(totalCurrentValue.toFixed(2))}
+            </div>
+            <div className={styles.assetSummarySpacer} aria-hidden="true" />
           </div>
         ) : null}
       </section>
