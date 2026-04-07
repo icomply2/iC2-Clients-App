@@ -12,14 +12,30 @@ const REX_TOKEN_SUBSCRIPTION_KEY = process.env.REX_TOKEN_SUBSCRIPTION_KEY;
 const REX_TOKEN_CLIENT_ID = process.env.REX_TOKEN_CLIENT_ID;
 const REX_TOKEN_CLIENT_SECRET = process.env.REX_TOKEN_CLIENT_SECRET;
 const REX_TOKEN_REDIRECT_URI = process.env.REX_TOKEN_REDIRECT_URI;
+const APP_BASE_URL = process.env.APP_BASE_URL;
 
 function clearOAuthCookies(response: NextResponse) {
   response.cookies.set(REX_TOKEN_OAUTH_STATE_COOKIE, "", buildRexCookieOptions(0));
   response.cookies.set(REX_TOKEN_CODE_VERIFIER_COOKIE, "", buildRexCookieOptions(0));
 }
 
+function buildProfileRedirectUrl(request: NextRequest) {
+  if (APP_BASE_URL) {
+    return new URL("/profile", APP_BASE_URL);
+  }
+
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  const forwardedHost = request.headers.get("x-forwarded-host");
+
+  if (forwardedProto && forwardedHost) {
+    return new URL("/profile", `${forwardedProto}://${forwardedHost}`);
+  }
+
+  return new URL("/profile", request.url);
+}
+
 export async function GET(request: NextRequest) {
-  const redirectUrl = new URL("/profile", request.url);
+  const redirectUrl = buildProfileRedirectUrl(request);
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state");
   const error = request.nextUrl.searchParams.get("error");
