@@ -1,0 +1,115 @@
+.shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  height: 100vh;
+  padding: 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: rgba(250, 247, 241, 0.82);
+  backdrop-filter: blur(22px);
+}
+
+.brand {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.title {
+  margin: 0;
+  font-size: 1.6rem;
+  line-height: 1.1;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.nav {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.navLink {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.navLink:hover {
+  transform: translateY(-1px);
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.navLinkActive {
+  border-color: rgba(31, 95, 91, 0.28);
+  background: linear-gradient(180deg, rgba(31, 95, 91, 0.14), rgba(31, 95, 91, 0.06));
+}
+
+.navLabel {
+  font-weight: 700;
+}
+
+.navDescription {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.profileCard {
+  margin-top: auto;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.profileName {
+  margin: 0;
+  font-weight: 700;
+}
+
+.profileRole {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.content {
+  padding: 2rem;
+}
+
+@media (max-width: 980px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
