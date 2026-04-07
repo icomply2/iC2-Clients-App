@@ -55,6 +55,47 @@ export type PersonRecord = {
   email?: string | null;
   dob?: string | null;
   gender?: string | null;
+  status?: string | null;
+  clientStatus?: string | null;
+  clientCategory?: string | null;
+  category?: string | null;
+  maritalStatus?: string | null;
+  residentStatus?: string | null;
+  preferredPhone?: string | null;
+  phone?: string | null;
+  mobile?: string | null;
+  mobilePhone?: string | null;
+  street?: string | null;
+  suburb?: string | null;
+  state?: string | null;
+  postCode?: string | null;
+  postcode?: string | null;
+  fdsAnnualAgreementRequired?: string | null;
+  annualAgreementRequired?: string | null;
+  fdsRequired?: string | null;
+  agreementType?: string | null;
+  nextAnniversaryDate?: string | null;
+  annualAgreement?: {
+    type?: string | null;
+    agreementType?: string | null;
+    nextDueDate?: string | null;
+    nextAnniversaryDate?: string | null;
+  } | null;
+  address?: {
+    street?: string | null;
+    line1?: string | null;
+    suburb?: string | null;
+    city?: string | null;
+    state?: string | null;
+    region?: string | null;
+    postCode?: string | null;
+    postcode?: string | null;
+    zipCode?: string | null;
+  } | null;
+  contact?: {
+    preferredPhone?: string | null;
+    phone?: string | null;
+  } | null;
   nationalId?: {
     front?: string | null;
     back?: string | null;
