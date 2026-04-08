@@ -7,6 +7,22 @@ $publicDir = Join-Path $root "public"
 $artifactDir = Join-Path $root ".deploy_artifact"
 $zipPath = Join-Path $root "ic2-clients-app-deploy.zip"
 
+function Copy-DirectoryContents {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Source,
+    [Parameter(Mandatory = $true)]
+    [string]$Destination
+  )
+
+  New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+  $null = robocopy $Source $Destination /E /NFL /NDL /NJH /NJS /NP
+
+  if ($LASTEXITCODE -ge 8) {
+    throw "robocopy failed copying '$Source' to '$Destination' (exit code $LASTEXITCODE)."
+  }
+}
+
 if (!(Test-Path $standaloneDir)) {
   throw "Standalone build output was not found. Run 'npm run build' first."
 }
@@ -17,17 +33,17 @@ if (Test-Path $artifactDir) {
 
 New-Item -ItemType Directory -Path $artifactDir | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $standaloneDir "*") -Destination $artifactDir -Recurse -Force
+Copy-DirectoryContents -Source $standaloneDir -Destination $artifactDir
 
 $artifactNextDir = Join-Path $artifactDir ".next"
 New-Item -ItemType Directory -Path $artifactNextDir -Force | Out-Null
 
 if (Test-Path $staticDir) {
-  Copy-Item -LiteralPath $staticDir -Destination (Join-Path $artifactNextDir "static") -Recurse -Force
+  Copy-DirectoryContents -Source $staticDir -Destination (Join-Path $artifactNextDir "static")
 }
 
 if (Test-Path $publicDir) {
-  Copy-Item -LiteralPath $publicDir -Destination (Join-Path $artifactDir "public") -Recurse -Force
+  Copy-DirectoryContents -Source $publicDir -Destination (Join-Path $artifactDir "public")
 }
 
 if (Test-Path $zipPath) {
