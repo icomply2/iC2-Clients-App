@@ -50,7 +50,17 @@ if (Test-Path $zipPath) {
   Remove-Item -LiteralPath $zipPath -Force
 }
 
-Compress-Archive -Path (Join-Path $artifactDir "*") -DestinationPath $zipPath -Force
+Push-Location $artifactDir
+try {
+  & tar -a -cf $zipPath *
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "tar failed creating '$zipPath' (exit code $LASTEXITCODE)."
+  }
+}
+finally {
+  Pop-Location
+}
 
 Write-Host "Azure deploy package created:"
 Write-Host "  $zipPath"
