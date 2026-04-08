@@ -140,6 +140,10 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
             </div>
 
             <div className={styles.topbarRight}>
+              <Link href={`/finley?clientId=${encodeURIComponent(clientId)}`} className={styles.topLink}>
+                <span className={styles.icon}>F</span>
+                <span>Finley</span>
+              </Link>
               <Link href="/profile" className={styles.topLink}>
                 <UserInitialsAvatar className={styles.avatar} />
                 <span>Me</span>
