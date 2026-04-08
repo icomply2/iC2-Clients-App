@@ -1,0 +1,3 @@
+{
+  "/api/finley/plans/[planId]/approve/route": "app/api/finley/plans/[planId]/approve/route.js"
+}

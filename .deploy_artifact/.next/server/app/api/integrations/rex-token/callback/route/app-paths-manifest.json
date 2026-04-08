@@ -1,0 +1,3 @@
+{
+  "/api/integrations/rex-token/callback/route": "app/api/integrations/rex-token/callback/route.js"
+}

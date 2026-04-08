@@ -1,0 +1,3 @@
+{
+  "/api/client-profiles/file-notes/[fileNoteId]/route": "app/api/client-profiles/file-notes/[fileNoteId]/route.js"
+}

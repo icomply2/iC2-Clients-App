@@ -1,0 +1,3 @@
+{
+  "/clients/[clientId]/identity-check/page": "app/clients/[clientId]/identity-check/page.js"
+}
