@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "package:azure": "powershell -ExecutionPolicy Bypass -File ./scripts/package-azure.ps1"
   },
   "dependencies": {
     "next": "^16.2.2",
