@@ -7,7 +7,8 @@ import type { ClientSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import {
   FINLEY_FILE_NOTE_SUBTYPE_OPTIONS,
-  FINLEY_FILE_NOTE_TYPE_OPTIONS,
+  type FinleyDisplayCard,
+  type FinleyEditorCard,
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
 import styles from "./page.module.css";
@@ -28,10 +29,153 @@ type PlanStepView = {
   inputsPreview?: Record<string, unknown>;
 };
 
-type FileNoteOverrides = {
-  type: string;
-  subType: string;
-};
+const CURRENCY_FIELD_KEYS = new Set([
+  "amount",
+  "currentValue",
+  "balance",
+  "payment",
+  "repaymentAmount",
+  "contributionAmount",
+  "cost",
+  "incomeAmount",
+  "outstandingBalance",
+]);
+
+const PERCENT_FIELD_KEYS = new Set(["interestRate", "indexation", "annualReturn"]);
+const DATE_FIELD_KEYS = new Set([
+  "dateOfBirth",
+  "nextAnniversaryDate",
+  "serviceDate",
+  "acquisitionDate",
+  "birthday",
+]);
+
+function isCurrencyFieldKey(key: string) {
+  return CURRENCY_FIELD_KEYS.has(key);
+}
+
+function isPercentFieldKey(key: string) {
+  return PERCENT_FIELD_KEYS.has(key);
+}
+
+function isDateFieldKey(key: string) {
+  return DATE_FIELD_KEYS.has(key);
+}
+
+function parseCurrencyValue(value: string) {
+  const sanitized = value.replace(/[^0-9.-]/g, "").trim();
+  if (!sanitized || sanitized === "-" || sanitized === "." || sanitized === "-.") {
+    return null;
+  }
+
+  const numeric = Number(sanitized);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatCurrencyValue(value: string) {
+  const numeric = parseCurrencyValue(value);
+  if (numeric == null) return value.trim();
+
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numeric);
+}
+
+function parsePercentValue(value: string) {
+  const sanitized = value.replace(/[^0-9.-]/g, "").trim();
+  if (!sanitized || sanitized === "-" || sanitized === "." || sanitized === "-.") {
+    return null;
+  }
+
+  const numeric = Number(sanitized);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatPercentValue(value: string) {
+  const numeric = parsePercentValue(value);
+  if (numeric == null) return value.trim();
+
+  return `${new Intl.NumberFormat("en-AU", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numeric)}%`;
+}
+
+function parseDateValue(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return trimmed;
+  }
+
+  const slashMatch = trimmed.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (slashMatch) {
+    const day = slashMatch[1].padStart(2, "0");
+    const month = slashMatch[2].padStart(2, "0");
+    const year = slashMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+}
+
+function formatDateValue(value: string) {
+  const iso = parseDateValue(value);
+  if (!iso) return value.trim();
+
+  const [year, month, day] = iso.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function normalizeEditorCard(editorCard: FinleyEditorCard | null) {
+  if (!editorCard) return null;
+
+  return {
+    ...editorCard,
+    fields: editorCard.fields.map((field) =>
+      isCurrencyFieldKey(field.key)
+        ? {
+            ...field,
+            value: formatCurrencyValue(field.value),
+          }
+        : isPercentFieldKey(field.key)
+          ? {
+              ...field,
+              value: formatPercentValue(field.value),
+            }
+          : isDateFieldKey(field.key)
+            ? {
+                ...field,
+                value: formatDateValue(field.value),
+              }
+        : field,
+    ),
+  };
+}
+
+function buildEditorRecord(editorCard: FinleyEditorCard | null) {
+  if (!editorCard) return null;
+  return Object.fromEntries(
+    editorCard.fields.map((field) => [
+      field.key,
+      isCurrencyFieldKey(field.key)
+        ? (parseCurrencyValue(field.value)?.toFixed(2) ?? "")
+        : isPercentFieldKey(field.key)
+          ? (parsePercentValue(field.value)?.toFixed(2) ?? "")
+          : isDateFieldKey(field.key)
+            ? (parseDateValue(field.value) ?? "")
+          : field.value,
+    ]),
+  );
+}
 
 type FinleyClientSummary = ClientSummary & {
   isDraft?: boolean;
@@ -57,11 +201,31 @@ function previewRows(inputsPreview?: Record<string, unknown>) {
   if (!inputsPreview) return [] as Array<{ label: string; value: string }>;
 
   const preferredOrder = [
+    "section",
+    "owner",
     "target",
     "clientId",
     "subject",
     "requestedChange",
     "extractedFields",
+    "type",
+    "assetType",
+    "loanType",
+    "superFund",
+    "description",
+    "amount",
+    "currentValue",
+    "balance",
+    "payment",
+    "repaymentAmount",
+    "contributionAmount",
+    "interestRate",
+    "taxType",
+    "frequency",
+    "incomeFrequency",
+    "indexation",
+    "securityAsset",
+    "linkedLiability",
     "email",
     "preferredPhone",
     "dateOfBirth",
@@ -92,7 +256,14 @@ function previewRows(inputsPreview?: Record<string, unknown>) {
   return orderedEntries
     .map(([key, value]) => ({
       label: key.replace(/([A-Z])/g, " $1").replace(/^./, (char) => char.toUpperCase()),
-      value: formatPreviewValue(value),
+      value:
+        typeof value === "string" && isCurrencyFieldKey(key)
+          ? formatCurrencyValue(value)
+          : typeof value === "string" && isPercentFieldKey(key)
+            ? formatPercentValue(value)
+            : typeof value === "string" && isDateFieldKey(key)
+              ? formatDateValue(value)
+          : formatPreviewValue(value),
     }))
     .filter((entry): entry is { label: string; value: string } => Boolean(entry.value));
 }
@@ -108,6 +279,10 @@ function confirmationCopy(toolName: string, description: string) {
 
   if (toolName === "update_partner_person_details") {
     return "Apply these partner detail changes.";
+  }
+
+  if (toolName.startsWith("add_")) {
+    return "Create this new record on the selected client profile.";
   }
 
   return description;
@@ -135,7 +310,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [newClientAdviserName, setNewClientAdviserName] = useState("");
   const [newClientPracticeName, setNewClientPracticeName] = useState("");
   const [newClientError, setNewClientError] = useState<string | null>(null);
-  const [fileNoteOverrides, setFileNoteOverrides] = useState<FileNoteOverrides | null>(null);
+  const [displayCard, setDisplayCard] = useState<FinleyDisplayCard | null>(null);
+  const [editorCard, setEditorCard] = useState<FinleyEditorCard | null>(null);
 
   const clients = useMemo(() => [...draftClients, ...serverClients], [draftClients, serverClients]);
 
@@ -234,7 +410,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setWarnings([]);
     setPendingPlanId(null);
     setComposerValue("");
-    setFileNoteOverrides(null);
+    setDisplayCard(null);
+    setEditorCard(null);
   }
 
   function openCreateClient() {
@@ -341,16 +518,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       );
       setWarnings(body.warnings ?? []);
       setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
-      const fileNoteStep = (body.plan?.steps ?? []).find((step) => step.toolName === "create_file_note");
-      setFileNoteOverrides(
-        fileNoteStep
-          ? {
-              type: typeof fileNoteStep.inputsPreview?.type === "string" ? fileNoteStep.inputsPreview.type : "Administration",
-              subType:
-                typeof fileNoteStep.inputsPreview?.subType === "string" ? fileNoteStep.inputsPreview.subType : "Task Update",
-            }
-          : null,
-      );
+      setDisplayCard(body.displayCard ?? null);
+      setEditorCard(normalizeEditorCard(body.editorCard ?? null));
     } catch (error) {
       setMessages((current) => [
         ...current,
@@ -364,7 +533,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setPlanSteps([]);
       setWarnings([]);
       setPendingPlanId(null);
-      setFileNoteOverrides(null);
+      setDisplayCard(null);
+      setEditorCard(null);
     } finally {
       setIsSending(false);
     }
@@ -382,8 +552,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           "Content-Type": "application/json",
         },
         body:
-          action === "approve_plan" && fileNoteOverrides
-            ? JSON.stringify(fileNoteOverrides)
+          action === "approve_plan"
+            ? JSON.stringify({
+                ...(editorCard ? { record: buildEditorRecord(editorCard) } : {}),
+              })
             : undefined,
       });
 
@@ -410,7 +582,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setPlanSteps([]);
         setWarnings([]);
         setPendingPlanId(null);
-        setFileNoteOverrides(null);
+        setDisplayCard(body.displayCard ?? null);
+        setEditorCard(null);
       } else {
         setPlanSummary(body.plan?.summary ?? null);
         setPlanSteps(
@@ -422,16 +595,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         );
         setWarnings(body.warnings ?? []);
         setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
-        const fileNoteStep = (body.plan?.steps ?? []).find((step) => step.toolName === "create_file_note");
-        setFileNoteOverrides(
-          fileNoteStep
-            ? {
-                type: typeof fileNoteStep.inputsPreview?.type === "string" ? fileNoteStep.inputsPreview.type : "Administration",
-                subType:
-                  typeof fileNoteStep.inputsPreview?.subType === "string" ? fileNoteStep.inputsPreview.subType : "Task Update",
-              }
-            : null,
-        );
+        setDisplayCard(body.displayCard ?? null);
+        setEditorCard(normalizeEditorCard(body.editorCard ?? null));
       }
     } catch (error) {
       setMessages((current) => [
@@ -442,6 +607,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           content: error instanceof Error ? error.message : "Unable to complete the requested plan action.",
         },
       ]);
+      setDisplayCard(null);
     } finally {
       setIsSending(false);
     }
@@ -576,6 +742,31 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           ) : null}
 
+          {displayCard ? (
+            <div className={styles.dataCard}>
+              <div className={styles.planLabel}>Client Data</div>
+              <div className={styles.planSummary}>{displayCard.title}</div>
+              <div className={styles.dataTableWrap}>
+                <div className={styles.dataTableHeader}>
+                  {displayCard.columns.map((column) => (
+                    <span key={column} className={styles.dataTableHeaderCell}>
+                      {column}
+                    </span>
+                  ))}
+                </div>
+                {displayCard.rows.map((row) => (
+                  <div key={row.id} className={styles.dataTableRow}>
+                    {row.cells.map((cell, index) => (
+                      <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
+                        {cell || "-"}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {planSummary ? (
             <div className={styles.planCard}>
               <div className={styles.planLabel}>Confirmation</div>
@@ -586,53 +777,116 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   .map((step, index) => (
                     <div key={`${step.toolName}-${index}`} className={styles.planStep}>
                       <span className={styles.planStepText}>{confirmationCopy(step.toolName, step.description)}</span>
-                      {step.toolName === "create_file_note" && fileNoteOverrides ? (
+                      {editorCard && step.toolName === editorCard.toolName ? (
                         <div className={styles.confirmationEditor}>
-                          <label className={styles.confirmationField}>
-                            <span className={styles.planPreviewLabel}>Type</span>
-                            <select
-                              className={styles.confirmationSelect}
-                              value={fileNoteOverrides.type}
-                              onChange={(event) => {
-                                const nextType = event.target.value;
-                                const nextSubType = FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[nextType]?.[0] ?? "";
-                                setFileNoteOverrides({
-                                  type: nextType,
-                                  subType: nextSubType,
-                                });
-                              }}
+                          {editorCard.fields.map((field) => (
+                            <label
+                              key={field.key}
+                              className={`${styles.confirmationField} ${field.input === "textarea" ? styles.confirmationFieldFull : ""}`.trim()}
                             >
-                              {FINLEY_FILE_NOTE_TYPE_OPTIONS.map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                              <span className={styles.planPreviewLabel}>{field.label}</span>
+                              {field.input === "select" ? (
+                                <select
+                                  className={styles.confirmationSelect}
+                                  value={field.value}
+                                  onChange={(event) =>
+                                    setEditorCard((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            fields: current.fields.map((entry) => {
+                                              if (entry.key === field.key) {
+                                                return { ...entry, value: event.target.value };
+                                              }
 
-                          <label className={styles.confirmationField}>
-                            <span className={styles.planPreviewLabel}>Subtype</span>
-                            <select
-                              className={styles.confirmationSelect}
-                              value={fileNoteOverrides.subType}
-                              onChange={(event) =>
-                                setFileNoteOverrides((current) =>
-                                  current
-                                    ? {
-                                        ...current,
-                                        subType: event.target.value,
-                                      }
-                                    : current,
-                                )
-                              }
-                            >
-                              {(FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[fileNoteOverrides.type] ?? []).map((option) => (
-                                <option key={option} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                                              if (
+                                                current.toolName === "create_file_note" &&
+                                                field.key === "type" &&
+                                                entry.key === "subType"
+                                              ) {
+                                                const nextSubTypes = FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[event.target.value] ?? [];
+                                                return {
+                                                  ...entry,
+                                                  value: nextSubTypes[0] ?? "",
+                                                  options: nextSubTypes.map((option) => ({ label: option, value: option })),
+                                                };
+                                              }
+
+                                              return entry;
+                                            }),
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                >
+                                  <option value="">Select...</option>
+                                  {(field.options ?? []).map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : field.input === "textarea" ? (
+                                <textarea
+                                  className={styles.confirmationSelect}
+                                  rows={6}
+                                  value={field.value}
+                                  onChange={(event) =>
+                                    setEditorCard((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            fields: current.fields.map((entry) =>
+                                              entry.key === field.key
+                                                ? {
+                                                    ...entry,
+                                                    value: event.target.value,
+                                                  }
+                                                : entry,
+                                            ),
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                />
+                              ) : (
+                                <input
+                                  className={styles.confirmationSelect}
+                                  value={field.value}
+                                  inputMode={
+                                    isCurrencyFieldKey(field.key) || isPercentFieldKey(field.key)
+                                      ? "decimal"
+                                      : isDateFieldKey(field.key)
+                                        ? "numeric"
+                                        : undefined
+                                  }
+                                  onChange={(event) =>
+                                    setEditorCard((current) =>
+                                      current
+                                        ? {
+                                            ...current,
+                                            fields: current.fields.map((entry) =>
+                                              entry.key === field.key
+                                                ? {
+                                                    ...entry,
+                                                    value: isCurrencyFieldKey(field.key)
+                                                      ? formatCurrencyValue(event.target.value)
+                                                      : isPercentFieldKey(field.key)
+                                                        ? formatPercentValue(event.target.value)
+                                                        : isDateFieldKey(field.key)
+                                                          ? formatDateValue(event.target.value)
+                                                      : event.target.value,
+                                                  }
+                                                : entry,
+                                            ),
+                                          }
+                                        : current,
+                                    )
+                                  }
+                                />
+                              )}
+                            </label>
+                          ))}
                         </div>
                       ) : null}
                       {previewRows(step.inputsPreview).length ? (
@@ -642,7 +896,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                               (entry) =>
                                 entry.label !== "Client Id" &&
                                 entry.label !== "Profile Id" &&
-                                (step.toolName !== "create_file_note" || (entry.label !== "Type" && entry.label !== "Sub Type")),
+                                (step.toolName !== "create_file_note" || (entry.label !== "Type" && entry.label !== "Sub Type")) &&
+                                (!editorCard || !editorCard.fields.some((field) => field.label === entry.label)),
                             )
                             .map((entry) => (
                               <div key={`${step.toolName}-${entry.label}`} className={styles.planPreviewItem}>

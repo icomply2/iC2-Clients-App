@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
-  ApiResult,
   ClientExpenseRecord,
   ClientIncomeRecord,
   ClientInsuranceRecord,
@@ -12,6 +11,11 @@ import type {
   ClientProfile,
   ClientSuperannuationRecord,
 } from "@/lib/api/types";
+import {
+  deleteFinancialCollectionItem,
+  saveFinancialCollection,
+  upsertFinancialCollection,
+} from "@/lib/services/profile-collections";
 import styles from "./page.module.css";
 
 type SectionKind = "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance";
@@ -113,17 +117,6 @@ function annualiseAmount(amount: number, frequency?: string | null) {
   }
 }
 
-function parseResponseBody<T>(responseText: string) {
-  if (!responseText) return null;
-  try {
-    return JSON.parse(responseText) as
-      | ApiResult<T[]>
-      | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null };
-  } catch {
-    return null;
-  }
-}
-
 function ownerOptionsFromProfile(profile: ClientProfile) {
   return [
     profile.client?.name && profile.client?.id ? { value: profile.client.id, label: profile.client.name } : null,
@@ -192,19 +185,6 @@ function defaultSecondaryText(kind: SectionKind) {
     default:
       return "";
   }
-}
-
-function getErrorMessage(
-  result: ReturnType<typeof parseResponseBody<FinancialRecord>>,
-  responseText: string,
-  fallback: string,
-  status: number,
-) {
-  const modelError =
-    result && "modelErrors" in result && Array.isArray(result.modelErrors)
-      ? result.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-      : null;
-  return modelError ?? (result && "message" in result && result.message ? result.message : responseText || `${fallback} (status ${status}).`);
 }
 
 function getFallbackMessage() {
@@ -593,30 +573,10 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
     }
   }
 
-  function mergeReturnedRecords(returnedRecords: FinancialRecord[], submittedRecords: FinancialRecord[]) {
-    return returnedRecords.map((returnedRecord) => {
-      const matchedRecord =
-        submittedRecords.find((submittedRecord) => submittedRecord.id && returnedRecord.id && submittedRecord.id === returnedRecord.id) ??
-        submittedRecords.find((submittedRecord) => JSON.stringify(submittedRecord.owner) === JSON.stringify(returnedRecord.owner));
-      return { ...returnedRecord, ...matchedRecord };
-    });
-  }
-
-  async function saveRecords(nextRecords: FinancialRecord[], fallbackError: string) {
+  async function saveRecords(nextRecords: FinancialRecord[]) {
     if (!profile.id) throw new Error("This client profile does not have a profile id yet.");
-    const meta = getSectionMeta();
-    const response = await fetch(`/api/client-profiles/${encodeURIComponent(profile.id)}/${meta.savePath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentUser: null, request: nextRecords }),
-    });
-    const responseText = await response.text();
-    const result = parseResponseBody<FinancialRecord>(responseText);
-    if (!response.ok) {
-      throw new Error(`Save failed (${response.status}): ${getErrorMessage(result, responseText, fallbackError, response.status)}`);
-    }
-    const returnedRecords = result && "data" in result && Array.isArray(result.data) ? (result.data as FinancialRecord[]) : null;
-    setRecords(returnedRecords ? mergeReturnedRecords(returnedRecords, nextRecords) : nextRecords);
+    const savedRecords = await saveFinancialCollection(kind, profile.id, nextRecords as never);
+    setRecords(savedRecords as FinancialRecord[]);
     router.refresh();
   }
 
@@ -630,10 +590,8 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
     setErrorMessage("");
     try {
       const record = buildRecord();
-      const nextRecords = editingId
-        ? records.map((item) => (item.id === editingId ? { ...item, ...record } : item))
-        : [...records.map((item) => ({ ...item })), { id: null, ...record }];
-      await saveRecords(nextRecords, `Unable to save the ${getSectionMeta().emptyName} right now`);
+      const nextRecords = upsertFinancialCollection(kind, records as never, record as never, editingId) as FinancialRecord[];
+      await saveRecords(nextRecords);
       resetForm();
       setIsOpen(false);
     } catch (error) {
@@ -741,16 +699,10 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
     }
 
     if (!profile.id || !deleteCandidateId) return;
-    const meta = getSectionMeta();
     setIsSaving(true);
     setDeleteErrorMessage("");
     try {
-      const response = await fetch(`/api/client-profiles/${encodeURIComponent(profile.id)}/${meta.deletePath}/${encodeURIComponent(deleteCandidateId)}`, { method: "DELETE" });
-      const responseText = await response.text();
-      const result = parseResponseBody<FinancialRecord>(responseText);
-      if (!response.ok) {
-        throw new Error(`Delete failed (${response.status}): ${getErrorMessage(result, responseText, `Unable to delete the ${meta.emptyName} right now`, response.status)}`);
-      }
+      await deleteFinancialCollectionItem(kind, profile.id, deleteCandidateId);
       setRecords((current) => current.filter((item) => item.id !== deleteCandidateId));
       router.refresh();
       setDeleteCandidateId(null);

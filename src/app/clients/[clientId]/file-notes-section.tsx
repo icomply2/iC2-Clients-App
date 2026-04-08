@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ApiResult, ClientProfile, FileNoteRecord } from "@/lib/api/types";
+import type { ClientProfile, FileNoteRecord } from "@/lib/api/types";
+import { FILE_NOTE_SUBTYPE_OPTIONS, FILE_NOTE_TYPE_OPTIONS } from "@/lib/api/contracts/file-notes";
+import {
+  createFileNote as createFileNoteAction,
+  deleteFileNote as deleteFileNoteAction,
+  listFileNotes as listFileNotesAction,
+  updateFileNote as updateFileNoteAction,
+} from "@/lib/services/file-notes";
 import styles from "./page.module.css";
 
 type FileNotesSectionProps = {
@@ -16,17 +23,6 @@ type FileNoteDraft = {
   subject: string;
   serviceDate: string;
   content: string;
-};
-
-const noteTypeOptions = ["Client Meeting", "Phone Call", "Email", "Review", "Advice", "Administration", "Other"];
-const subTypeOptionsByType: Record<string, string[]> = {
-  "Client Meeting": ["Initial Meeting", "Review Meeting", "Strategy Meeting", "Implementation Meeting"],
-  "Phone Call": ["Inbound", "Outbound", "Follow Up"],
-  Email: ["Client Email", "Adviser Email", "Provider Email"],
-  Review: ["Annual Review", "Portfolio Review", "FDS Review"],
-  Advice: ["SOA", "ROA", "Strategy Note"],
-  Administration: ["Task Update", "Document Request", "Compliance"],
-  Other: ["General"],
 };
 
 function formatDate(value?: string | null) {
@@ -70,34 +66,6 @@ function emptyDraft(): FileNoteDraft {
   };
 }
 
-function parseResponseBody<T>(responseText: string) {
-  if (!responseText) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(responseText) as
-      | ApiResult<T>
-      | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null };
-  } catch {
-    return null;
-  }
-}
-
-function getErrorMessage(
-  result: ReturnType<typeof parseResponseBody<FileNoteRecord[] | FileNoteRecord>>,
-  responseText: string,
-  fallback: string,
-  status: number,
-) {
-  const modelError =
-    result && "modelErrors" in result && Array.isArray(result.modelErrors)
-      ? result.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-      : null;
-
-  return modelError ?? (result && "message" in result && result.message ? result.message : responseText || `${fallback} (status ${status}).`);
-}
-
 function getFallbackMessage() {
   return "Live client data is temporarily unavailable. Editing is disabled while sample data is shown.";
 }
@@ -116,7 +84,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
   const [deleteCandidate, setDeleteCandidate] = useState<FileNoteRecord | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
 
-  const subtypeOptions = useMemo(() => subTypeOptionsByType[draft.type] ?? [], [draft.type]);
+  const subtypeOptions = useMemo(() => FILE_NOTE_SUBTYPE_OPTIONS[draft.type] ?? [], [draft.type]);
 
   async function loadNotes() {
     const resolvedClientId = profile.client?.id;
@@ -132,24 +100,14 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     setApiForbidden(false);
 
     try {
-      const response = await fetch(`/api/client-profiles/file-notes/client/${encodeURIComponent(resolvedClientId)}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-      const responseText = await response.text();
-      const result = parseResponseBody<FileNoteRecord[]>(responseText);
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          setApiForbidden(true);
-        }
-        throw new Error(getErrorMessage(result, responseText, "Unable to load file notes right now", response.status));
-      }
-
-      const data = result && "data" in result && Array.isArray(result.data) ? result.data : [];
-      setNotes(data ?? []);
+      const data = await listFileNotesAction(resolvedClientId);
+      setNotes(data);
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load file notes right now.");
+      const message = error instanceof Error ? error.message : "Unable to load file notes right now.";
+      if (message.includes("403")) {
+        setApiForbidden(true);
+      }
+      setLoadError(message);
     } finally {
       setLoading(false);
     }
@@ -216,56 +174,29 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     setSaving(true);
     setErrorMessage("");
 
-    const requestBody: FileNoteRecord = {
-      id: draft.id,
-      clientId: profile.client.id,
-      owner: profile.client?.id
-        ? {
-            id: profile.client.id,
-            name: profile.client.name ?? "",
-          }
-        : null,
-      joint: false,
-      licensee: profile.licensee ?? null,
-      practice: profile.practice ?? null,
-      adviser: profile.adviser
-        ? {
-            name: profile.adviser.name ?? null,
-            email: profile.adviser.email ?? null,
-          }
-        : null,
-      content: draft.content,
-      serviceDate: draft.serviceDate,
-      type: draft.type,
-      subType: draft.subType,
-      subject: draft.subject,
-      attachment: [],
-    };
-
     try {
-      const response = await fetch(
-        draft.id
-          ? `/api/client-profiles/file-notes/${encodeURIComponent(draft.id)}`
-          : "/api/client-profiles/file-notes",
-        {
-          method: draft.id ? "PUT" : "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            request: requestBody,
-          }),
-        },
-      );
+      const input = {
+        id: draft.id,
+        clientId: profile.client.id,
+        ownerId: profile.client.id,
+        ownerName: profile.client.name ?? "",
+        joint: false,
+        licensee: profile.licensee ?? null,
+        practice: profile.practice ?? null,
+        adviserName: profile.adviser?.name ?? null,
+        adviserEmail: profile.adviser?.email ?? null,
+        content: draft.content,
+        serviceDate: draft.serviceDate,
+        type: draft.type,
+        subType: draft.subType,
+        subject: draft.subject,
+        attachment: [],
+      };
 
-      const responseText = await response.text();
-      const result = parseResponseBody<FileNoteRecord>(responseText);
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          setApiForbidden(true);
-        }
-        throw new Error(getErrorMessage(result, responseText, "Unable to save the file note right now", response.status));
+      if (draft.id) {
+        await updateFileNoteAction(draft.id, input);
+      } else {
+        await createFileNoteAction(input);
       }
 
       setIsModalOpen(false);
@@ -287,15 +218,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     setDeleteErrorMessage("");
 
     try {
-      const response = await fetch(`/api/client-profiles/file-notes/${encodeURIComponent(deleteCandidate.id)}`, {
-        method: "DELETE",
-      });
-      const responseText = await response.text();
-      const result = parseResponseBody<FileNoteRecord>(responseText);
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(result, responseText, "Unable to delete the file note right now", response.status));
-      }
+      await deleteFileNoteAction(deleteCandidate.id);
 
       setDeleteCandidate(null);
       await loadNotes();
@@ -318,7 +241,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
         />
         <select className={styles.fileNotesFilter} value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
           <option value="">Choose an option...</option>
-          {noteTypeOptions.map((option) => (
+          {FILE_NOTE_TYPE_OPTIONS.map((option) => (
             <option key={option} value={option}>
               {option}
             </option>
@@ -413,7 +336,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
                     }
                   >
                     <option value="">Note type</option>
-                    {noteTypeOptions.map((option) => (
+                    {FILE_NOTE_TYPE_OPTIONS.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>

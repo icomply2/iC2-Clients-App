@@ -10,6 +10,7 @@ export async function POST(
     | {
         type?: string;
         subType?: string;
+        record?: Record<string, unknown>;
       }
     | null;
   const result = await approveStoredPlan(planId, payload, {

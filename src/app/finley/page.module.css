@@ -541,6 +541,57 @@
   background: #fff9de;
 }
 
+.dataCard {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 1rem;
+  background: #fff;
+}
+
+.dataTableWrap {
+  display: grid;
+  border: 1px solid #e3ebf3;
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.dataTableHeader,
+.dataTableRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+}
+
+.dataTableHeader {
+  background: #f8fafc;
+}
+
+.dataTableRow:nth-child(even) {
+  background: #fcfdff;
+}
+
+.dataTableHeaderCell,
+.dataTableCell {
+  padding: 0.75rem 0.8rem;
+  color: #163a61;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.dataTableHeaderCell {
+  color: #6b7c93;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dataTableCell {
+  border-top: 1px solid #edf2f7;
+  word-break: break-word;
+}
+
 .planLabel {
   color: #7e5e00;
   font-size: 0.74rem;
@@ -631,6 +682,10 @@
 .confirmationField {
   display: grid;
   gap: 0.28rem;
+}
+
+.confirmationFieldFull {
+  grid-column: 1 / -1;
 }
 
 .confirmationSelect {

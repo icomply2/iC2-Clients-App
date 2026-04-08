@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { updateClientDetails, updatePartnerDetails } from "@/lib/services/client-updates";
 import type { ClientProfile, PersonRecord } from "@/lib/api/types";
 import styles from "./page.module.css";
 
@@ -325,26 +326,39 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     setSaveError(null);
 
     try {
-      const payload = {
-        ...draft,
-        riskProfileResponse: {
-          ...(person.riskProfileResponse ?? {}),
-          resultDisplay: draft.riskProfile,
-        },
+      const changes = {
+        title: draft.title,
+        name: draft.name,
+        status: draft.status,
+        clientCategory: draft.clientCategory,
+        riskProfile: draft.riskProfile,
+        gender: draft.gender,
+        maritalStatus: draft.maritalStatus,
+        residentStatus: draft.residentStatus,
+        dateOfBirth: draft.dateOfBirth,
+        street: draft.street,
+        suburb: draft.suburb,
+        state: draft.state,
+        postCode: draft.postCode,
+        preferredPhone: draft.preferredPhone,
+        email: draft.email,
+        adviceAgreementRequired: draft.adviceAgreementRequired,
+        agreementType: draft.agreementType,
+        nextAnniversaryDate: draft.nextAnniversaryDate,
       };
 
-      const response = await fetch(`/api/client-profiles/${profile.id}/${editing}/${person.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const body = (await response.json().catch(() => null)) as { message?: string } | null;
-
-      if (!response.ok) {
-        throw new Error(body?.message ?? "Unable to save changes.");
+      if (editing === "client") {
+        await updateClientDetails({
+          profileId: profile.id,
+          personId: person.id,
+          changes,
+        });
+      } else {
+        await updatePartnerDetails({
+          profileId: profile.id,
+          personId: person.id,
+          changes,
+        });
       }
 
       const updatedPerson: PersonRecord = {

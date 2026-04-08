@@ -1,10 +1,42 @@
 import { getClientProfile, getClientProfileId } from "@/lib/api/clients";
-import type { ClientProfile, FileNoteRecord, UserSummary } from "@/lib/api/types";
+import type {
+  ClientAssetRecord,
+  ClientDependantRecord,
+  ClientEntityRecord,
+  ClientExpenseRecord,
+  ClientIncomeRecord,
+  ClientInsuranceRecord,
+  ClientLiabilityRecord,
+  ClientPensionRecord,
+  ClientProfile,
+  ClientSuperannuationRecord,
+  FileNoteRecord,
+  UserSummary,
+} from "@/lib/api/types";
 import { readAuthTokenFromCookies } from "@/lib/auth";
-import { API_BASE_URL, requireCurrentUser } from "@/app/api/client-profiles/_shared";
+import { API_BASE_URL } from "@/app/api/client-profiles/_shared";
+import { createFileNote as createFileNoteAction } from "@/lib/services/file-notes";
+import {
+  updateClientDetails as updateClientDetailsAction,
+  updatePartnerDetails as updatePartnerDetailsAction,
+} from "@/lib/services/client-updates";
+import {
+  saveAssetCollection,
+  saveFinancialCollection,
+  upsertAssetCollection,
+  upsertFinancialCollection,
+} from "@/lib/services/profile-collections";
+import {
+  saveDependantCollection,
+  saveEntityCollection,
+  upsertDependantCollection,
+  upsertEntityCollection,
+} from "@/lib/services/identity-relations";
 import {
   FINLEY_FILE_NOTE_SUBTYPE_OPTIONS,
   FINLEY_FILE_NOTE_TYPE_OPTIONS,
+  type FinleyDisplayCard,
+  type FinleyEditorCard,
   type FinleyChatRequest,
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
@@ -28,12 +60,24 @@ type StoredPlan = {
   userRole?: string | null;
   status: "pending" | "approved" | "completed" | "failed" | "cancelled";
   summary: string;
-  toolName: "create_file_note" | "update_client_person_details" | "update_partner_person_details";
+  toolName:
+    | "create_file_note"
+    | "update_client_person_details"
+    | "update_partner_person_details"
+    | "add_asset_record"
+    | "add_liability_record"
+    | "add_income_record"
+    | "add_expense_record"
+    | "add_superannuation_record"
+    | "add_retirement_income_record"
+    | "add_insurance_record"
+    | "add_entity_record"
+    | "add_dependant_record";
   stepId: string;
   description: string;
   inputsPreview?: Record<string, unknown>;
   execution: {
-    kind: "file_note" | "client_update";
+    kind: "file_note" | "client_update" | "profile_collection";
     payload: Record<string, unknown>;
   };
 };
@@ -41,6 +85,7 @@ type StoredPlan = {
 type PlanExecutionOverrides = {
   type?: string;
   subType?: string;
+  record?: Record<string, unknown>;
 };
 
 declare global {
@@ -52,6 +97,37 @@ const planStore = globalThis.__finleyPlanStore ?? new Map<string, StoredPlan>();
 if (!globalThis.__finleyPlanStore) {
   globalThis.__finleyPlanStore = planStore;
 }
+
+const ASSET_CATEGORY_OPTIONS = ["Cash", "Investment", "Property", "Superannuation", "Business", "Personal"] as const;
+const ASSET_TYPE_OPTIONS_BY_CATEGORY: Record<string, string[]> = {
+  Cash: ["Cash on Hand", "Current Savings", "Fixed Deposits"],
+  Investment: ["Bonds", "Other Investments", "Stocks", "Unit Trusts", "Annuity"],
+  Property: ["Investment Property", "Primary Residence"],
+  Superannuation: ["Pension", "Superannuation"],
+  Business: ["Other Investments"],
+  Personal: ["Antiques", "Artwork", "Household Contents", "Jewellery", "Motor Vehicle", "Other Life Style"],
+};
+const LIABILITY_TYPE_OPTIONS = ["Home Loan", "Investment Loan", "Personal Loan", "Credit Card", "Other"] as const;
+const INCOME_TYPE_OPTIONS = ["Salary", "Bonus", "Rental", "Investment", "Pension", "Other"] as const;
+const EXPENSE_TYPE_OPTIONS = ["Living", "Mortgage", "Rent", "Utilities", "Insurance", "Other"] as const;
+const SUPER_TYPE_OPTIONS = ["Industry Fund", "Retail Fund", "SMSF", "Defined Benefit", "Other"] as const;
+const PENSION_TYPE_OPTIONS = ["Account Based Pension", "Allocated Pension", "Annuity", "Other"] as const;
+const INSURANCE_COVER_OPTIONS = ["Life", "TPD", "Trauma", "Income Protection", "Health", "Other"] as const;
+const INSURANCE_STATUS_OPTIONS = ["Active", "Pending", "Cancelled", "Claimed"] as const;
+const FREQUENCY_OPTIONS = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"] as const;
+const ENTITY_TYPE_OPTIONS = ["SMSF", "Trust", "Company", "Partnership"] as const;
+const DEPENDANT_TYPE_OPTIONS = ["Child", "Grandchild", "Parent", "Sibling", "Other"] as const;
+
+type CollectionIntentResult = {
+  kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
+  toolName: StoredPlan["toolName"];
+  summary: string;
+  description: string;
+  payload: Record<string, unknown>;
+  inputsPreview: Record<string, unknown>;
+  missingInformation: string[];
+  editorCard?: FinleyEditorCard | null;
+};
 
 function normalizeFileNoteText(message: string) {
   const trimmed = message.trim();
@@ -85,10 +161,44 @@ function getFinleyFileNoteType(message: string) {
 }
 
 function applyFileNoteOverrides(plan: StoredPlan, overrides?: PlanExecutionOverrides | null) {
-  if (!overrides || plan.execution.kind !== "file_note") return plan;
+  if (!overrides) return plan;
+
+  if (plan.execution.kind === "profile_collection" && overrides.record && typeof overrides.record === "object") {
+    return {
+      ...plan,
+      inputsPreview: {
+        ...(plan.inputsPreview ?? {}),
+        ...overrides.record,
+      },
+      execution: {
+        ...plan.execution,
+        payload: {
+          ...plan.execution.payload,
+          record: {
+            ...(plan.execution.payload.record && typeof plan.execution.payload.record === "object" ? plan.execution.payload.record : {}),
+            ...overrides.record,
+          },
+        },
+      },
+    };
+  }
+
+  if (plan.execution.kind !== "file_note") return plan;
 
   const payload = { ...plan.execution.payload };
   const inputsPreview = { ...(plan.inputsPreview ?? {}) };
+  const recordOverride = overrides.record && typeof overrides.record === "object" ? overrides.record : null;
+
+  if (recordOverride) {
+    Object.assign(payload, recordOverride);
+    Object.assign(inputsPreview, {
+      subject: typeof recordOverride.subject === "string" ? recordOverride.subject : inputsPreview.subject,
+      content: typeof recordOverride.content === "string" ? recordOverride.content : inputsPreview.content,
+      serviceDate: typeof recordOverride.serviceDate === "string" ? recordOverride.serviceDate : inputsPreview.serviceDate,
+      type: typeof recordOverride.type === "string" ? recordOverride.type : inputsPreview.type,
+      subType: typeof recordOverride.subType === "string" ? recordOverride.subType : inputsPreview.subType,
+    });
+  }
 
   const requestedType = typeof overrides.type === "string" ? overrides.type.trim() : "";
   const requestedSubType = typeof overrides.subType === "string" ? overrides.subType.trim() : "";
@@ -352,6 +462,346 @@ function buildProfileReadAnswer(message: string, context: LiveContext) {
   };
 }
 
+function buildCollectionReadAnswer(message: string, context: LiveContext) {
+  const lower = message.toLowerCase();
+  const clientName = context.resolvedClientName ?? "the selected client";
+
+  if (lower.includes("asset")) {
+    const assets = context.profile?.assets ?? [];
+    if (!assets.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any asset records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+      };
+    }
+
+    const assetSummary = assets
+      .slice(0, 5)
+      .map((asset) => asset.description ?? asset.assetType ?? asset.type ?? "Asset")
+      .join(", ");
+    const remaining = assets.length > 5 ? `, plus ${assets.length - 5} more` : "";
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${assets.length} asset record${assets.length === 1 ? "" : "s"}: ${assetSummary}${remaining}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Assets`,
+        columns: ["Category", "Type", "Description", "Current Value"],
+        rows: assets.map((asset, index) => ({
+          id: asset.id ?? `asset-${index}`,
+          cells: [
+            asset.type ?? "",
+            asset.assetType ?? "",
+            asset.description ?? "",
+            formatCurrencyDisplay(asset.currentValue),
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("dependant") || lower.includes("dependent")) {
+    const dependants = context.profile?.dependants ?? [];
+    if (!dependants.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any dependant records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${dependants.length} dependant record${dependants.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Dependants`,
+        columns: ["Name", "Type", "Birthday"],
+        rows: dependants.map((item, index) => ({
+          id: item.id ?? `dependant-${index}`,
+          cells: [item.name ?? "", item.type ?? "Child", formatDateForDisplay(item.birthday) ?? ""],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("entit")) {
+    const entities = context.profile?.entities ?? [];
+    if (!entities.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any entity records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${entities.length} entity record${entities.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Entities`,
+        columns: ["Name", "Owner", "Type"],
+        rows: entities.map((item, index) => ({
+          id: item.id ?? `entity-${index}`,
+          cells: [item.name ?? "", item.owner?.name ?? "", item.type ?? ""],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("liabil")) {
+    const liabilities = context.profile?.liabilities ?? [];
+    if (!liabilities.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any liability records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${liabilities.length} liability record${liabilities.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Liabilities`,
+        columns: ["Type", "Bank", "Balance", "Repayment"],
+        rows: liabilities.map((item, index) => ({
+          id: item.id ?? `liability-${index}`,
+          cells: [
+            item.loanType ?? "",
+            item.bankName ?? "",
+            formatCurrencyDisplay(item.outstandingBalance),
+            formatCurrencyDisplay(item.repaymentAmount),
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("income")) {
+    const income = context.profile?.income ?? [];
+    if (!income.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any income records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${income.length} income record${income.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Income`,
+        columns: ["Type", "Description", "Amount", "Frequency"],
+        rows: income.map((item, index) => ({
+          id: item.id ?? `income-${index}`,
+          cells: [
+            item.type ?? "",
+            item.description ?? "",
+            formatCurrencyDisplay(item.amount),
+            item.frequency?.value ?? item.frequency?.type ?? "",
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("expense")) {
+    const expenses = context.profile?.expense ?? [];
+    if (!expenses.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any expense records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${expenses.length} expense record${expenses.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Expenses`,
+        columns: ["Type", "Description", "Amount", "Frequency"],
+        rows: expenses.map((item, index) => ({
+          id: item.id ?? `expense-${index}`,
+          cells: [
+            item.type ?? "",
+            item.description ?? "",
+            formatCurrencyDisplay(item.amount),
+            item.frequency?.value ?? item.frequency?.type ?? "",
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("insurance") || lower.includes("cover")) {
+    const insurance = context.profile?.insurance ?? [];
+    if (!insurance.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any insurance records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${insurance.length} insurance record${insurance.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Insurance`,
+        columns: ["Cover", "Insurer", "Sum Insured", "Premium"],
+        rows: insurance.map((item, index) => ({
+          id: item.id ?? `insurance-${index}`,
+          cells: [
+            item.coverRequired ?? "",
+            item.insurer ?? "",
+            formatCurrencyDisplay(item.sumInsured),
+            formatCurrencyDisplay(item.premiumAmount),
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("super")) {
+    const superRecords = context.profile?.superannuation ?? [];
+    if (!superRecords.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any superannuation records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${superRecords.length} superannuation record${superRecords.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Superannuation`,
+        columns: ["Type", "Fund", "Balance", "Contribution"],
+        rows: superRecords.map((item, index) => ({
+          id: item.id ?? `super-${index}`,
+          cells: [
+            item.type ?? "",
+            item.superFund ?? "",
+            formatCurrencyDisplay(item.balance),
+            formatCurrencyDisplay(item.contributionAmount),
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("retirement income") || lower.includes("pension")) {
+    const pensionRecords = context.profile?.pension ?? [];
+    if (!pensionRecords.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any retirement income records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${pensionRecords.length} retirement income record${pensionRecords.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Retirement Income`,
+        columns: ["Type", "Fund", "Balance", "Payment"],
+        rows: pensionRecords.map((item, index) => ({
+          id: item.id ?? `pension-${index}`,
+          cells: [
+            item.type ?? "",
+            item.superFund ?? "",
+            formatCurrencyDisplay(item.balance),
+            formatCurrencyDisplay(item.payment),
+          ],
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  return {
+    matched: false,
+    assistantMessage: "",
+    missingInformation: [],
+    warnings: [],
+    displayCard: null,
+  };
+}
+
+function formatCurrencyDisplay(value: string | number | null | undefined) {
+  if (value == null) return "";
+
+  const stringValue = String(value).trim();
+  if (!stringValue) return "";
+
+  const numeric = Number(stringValue.replace(/[^0-9.-]/g, ""));
+  if (!Number.isFinite(numeric)) return stringValue;
+
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numeric);
+}
+
 function normalizeDateToIso(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return null;
@@ -380,6 +830,943 @@ function formatDateForDisplay(value?: string | null) {
 
   const [year, month, day] = normalized.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function normalizeCurrencyLikeValue(value?: string | null) {
+  if (!value?.trim()) return null;
+  const normalized = value.replace(/[^0-9.]/g, "");
+  if (!normalized) return null;
+  const numeric = Number(normalized);
+  return Number.isNaN(numeric) ? null : numeric.toFixed(2);
+}
+
+function extractAfterLabel(message: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match?.[1]) {
+      return match[1].trim().replace(/[.]+$/, "");
+    }
+  }
+
+  return null;
+}
+
+function extractSegment(message: string, label: string, stopWords: string[]) {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const stopPattern = stopWords.map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const match = message.match(new RegExp(`\\b${escapedLabel}\\b\\s*(?:to|is|=|:)?\\s*(.+?)(?=\\b(?:${stopPattern})\\b|$)`, "i"));
+  return match?.[1]?.trim().replace(/[.]+$/, "") ?? null;
+}
+
+function extractMoneyValue(message: string, labels: string[]) {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = message.match(new RegExp(`\\b${escaped}\\b\\s*(?:to|is|of|=|:)?\\s*\\$?\\s*([0-9][0-9,]*(?:\\.\\d{1,2})?)`, "i"));
+    if (match?.[1]) {
+      return normalizeCurrencyLikeValue(match[1]);
+    }
+  }
+
+  return null;
+}
+
+function extractPercentValue(message: string, labels: string[]) {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = message.match(new RegExp(`\\b${escaped}\\b\\s*(?:to|is|of|=|:)?\\s*([0-9]+(?:\\.\\d+)?)%?`, "i"));
+    if (match?.[1]) {
+      return `${match[1]}%`;
+    }
+  }
+
+  return null;
+}
+
+function extractMatchingOption(message: string, options: readonly string[]) {
+  const lower = message.toLowerCase();
+  return [...options]
+    .sort((a, b) => b.length - a.length)
+    .find((option) => lower.includes(option.toLowerCase())) ?? null;
+}
+
+function extractFrequencyOption(message: string) {
+  return extractMatchingOption(message, FREQUENCY_OPTIONS);
+}
+
+function resolveCollectionOwner(message: string, profile: ClientProfile | null) {
+  const lower = message.toLowerCase();
+
+  if (lower.includes("partner") && profile?.partner?.id && profile.partner.name) {
+    return { id: profile.partner.id, name: profile.partner.name };
+  }
+
+  const matchedEntity = (profile?.entities ?? []).find(
+    (entity: ClientEntityRecord | null | undefined) =>
+      entity?.id && entity.name && lower.includes(entity.name.toLowerCase()),
+  );
+
+  if (matchedEntity?.id && matchedEntity.name) {
+    return { id: matchedEntity.id, name: matchedEntity.name };
+  }
+
+  if (profile?.client?.id && profile.client.name) {
+    return { id: profile.client.id, name: profile.client.name };
+  }
+
+  return null;
+}
+
+function inferAssetCategoryFromType(assetType?: string | null) {
+  if (!assetType) return null;
+  for (const [category, types] of Object.entries(ASSET_TYPE_OPTIONS_BY_CATEGORY)) {
+    if (types.includes(assetType)) {
+      return category;
+    }
+  }
+  return null;
+}
+
+function toCardOptions(options: readonly string[]) {
+  return [...options].map((option) => ({ label: option, value: option }));
+}
+
+function getOwnerOptions(profile: ClientProfile | null) {
+  return [
+    profile?.client?.id && profile.client.name ? { label: profile.client.name, value: profile.client.id } : null,
+    profile?.partner?.id && profile.partner.name ? { label: profile.partner.name, value: profile.partner.id } : null,
+    ...((profile?.entities ?? [])
+      .filter((entity) => entity.id && entity.name)
+      .map((entity) => ({ label: entity.name!, value: entity.id! }))),
+  ].filter((entry): entry is { label: string; value: string } => Boolean(entry));
+}
+
+function extractAssetIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const category =
+    extractSegment(message, "category", ["type", "asset type", "description", "value", "cost", "income", "acquisition date"]) ??
+    extractMatchingOption(message, ASSET_CATEGORY_OPTIONS) ??
+    null;
+  const assetType =
+    extractSegment(message, "asset type", ["description", "value", "cost", "income", "acquisition date", "category"]) ??
+    extractSegment(message, "type", ["description", "value", "cost", "income", "acquisition date", "category"]) ??
+    extractMatchingOption(message, Object.values(ASSET_TYPE_OPTIONS_BY_CATEGORY).flat()) ??
+    null;
+  const resolvedCategory = category || inferAssetCategoryFromType(assetType) || null;
+  const description =
+    extractSegment(message, "description", ["value", "cost", "income", "acquisition date", "category", "type", "asset type"]) ??
+    extractAfterLabel(message, [/\basset\s+(?:for|called|named)\s+([A-Za-z0-9'&().,/ -]+)/i]);
+
+  const record: ClientAssetRecord = {
+    type: resolvedCategory,
+    assetType,
+    description: description?.trim() || null,
+    currentValue: extractMoneyValue(message, ["current value", "value", "balance", "worth"]),
+    cost: extractMoneyValue(message, ["cost"]),
+    incomeAmount: extractMoneyValue(message, ["income amount", "income"]),
+    incomeFrequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : { type: "", value: "" },
+    acquisitionDate: normalizeDateToIso(extractAfterLabel(message, [/\bacquisition date\s*(?:to|is|=|:)?\s*([A-Za-z0-9/\s-]+)/i]) ?? "") ?? null,
+    joint: /\bjoint\b/.test(message.toLowerCase()),
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.type) missingInformation.push("asset category");
+  if (!record.assetType) missingInformation.push("asset type");
+  if (!record.description) missingInformation.push("description");
+
+  return {
+    kind: "assets",
+    toolName: "add_asset_record",
+    summary: `Add an asset for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new asset record on the selected client profile.",
+    payload: { kind: "assets", record },
+    inputsPreview: {
+      section: "Assets",
+      owner: record.owner?.name ?? null,
+      type: record.type,
+      assetType: record.assetType,
+      description: record.description,
+      currentValue: record.currentValue,
+      cost: record.cost,
+      incomeAmount: record.incomeAmount,
+      incomeFrequency: record.incomeFrequency?.value ?? null,
+      acquisitionDate: record.acquisitionDate,
+      joint: record.joint ? "Yes" : "No",
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Asset",
+      toolName: "add_asset_record",
+      fields: [
+        {
+          key: "type",
+          label: "Category",
+          input: "select",
+          value: record.type ?? "",
+          options: ASSET_CATEGORY_OPTIONS.map((option) => ({ label: option, value: option })),
+        },
+        {
+          key: "assetType",
+          label: "Type",
+          input: "select",
+          value: record.assetType ?? "",
+          options: Object.values(ASSET_TYPE_OPTIONS_BY_CATEGORY)
+            .flat()
+            .map((option) => ({ label: option, value: option })),
+        },
+        {
+          key: "description",
+          label: "Description",
+          input: "text",
+          value: record.description ?? "",
+        },
+        {
+          key: "currentValue",
+          label: "Current Value",
+          input: "text",
+          value: record.currentValue ?? "",
+        },
+      ],
+    },
+  };
+}
+
+function extractLiabilityIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const loanType =
+    extractAfterLabel(message, [/\bloan type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\bliability type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, LIABILITY_TYPE_OPTIONS);
+  const bankName = extractAfterLabel(message, [/\bbank\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i]);
+  const securityAsset = (context.profile?.assets ?? []).find(
+    (asset) => asset.id && (message.toLowerCase().includes((asset.description ?? "").toLowerCase()) || message.toLowerCase().includes((asset.assetType ?? "").toLowerCase())),
+  );
+  const record: ClientLiabilityRecord = {
+    loanType: loanType?.trim() || null,
+    bankName: bankName?.trim() || null,
+    outstandingBalance: extractMoneyValue(message, ["balance", "outstanding balance"]),
+    repaymentAmount: extractMoneyValue(message, ["repayment", "repayment amount"]),
+    accountNumber: extractAfterLabel(message, [/\baccount(?: number| no\.?)?\s*(?:to|is|=|:)?\s*([A-Za-z0-9-]+)/i]),
+    interestRate: extractPercentValue(message, ["interest rate"]),
+    repaymentFrequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : null,
+    securityAssets: securityAsset?.id
+      ? { id: securityAsset.id, type: securityAsset.assetType ?? "Asset", description: securityAsset.description ?? null }
+      : null,
+    joint: /\bjoint\b/.test(message.toLowerCase()),
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.loanType) missingInformation.push("liability type");
+
+  return {
+    kind: "liabilities",
+    toolName: "add_liability_record",
+    summary: `Add a liability for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new liability record on the selected client profile.",
+    payload: { kind: "liabilities", record },
+    inputsPreview: {
+      section: "Liabilities",
+      owner: record.owner?.name ?? null,
+      loanType: record.loanType,
+      bankName: record.bankName,
+      outstandingBalance: record.outstandingBalance,
+      repaymentAmount: record.repaymentAmount,
+      interestRate: record.interestRate,
+      repaymentFrequency: record.repaymentFrequency?.value ?? null,
+      securityAsset: record.securityAssets?.description ?? null,
+      joint: record.joint ? "Yes" : "No",
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Liability",
+      toolName: "add_liability_record",
+      fields: [
+        {
+          key: "loanType",
+          label: "Type",
+          input: "select",
+          value: record.loanType ?? "",
+          options: toCardOptions(LIABILITY_TYPE_OPTIONS),
+        },
+        {
+          key: "bankName",
+          label: "Bank",
+          input: "text",
+          value: record.bankName ?? "",
+        },
+        {
+          key: "outstandingBalance",
+          label: "Balance",
+          input: "text",
+          value: record.outstandingBalance ?? "",
+        },
+        {
+          key: "repaymentAmount",
+          label: "Repayment",
+          input: "text",
+          value: record.repaymentAmount ?? "",
+        },
+        {
+          key: "interestRate",
+          label: "Interest Rate",
+          input: "text",
+          value: record.interestRate ?? "",
+        },
+        {
+          key: "repaymentFrequency",
+          label: "Repayment Frequency",
+          input: "select",
+          value: record.repaymentFrequency?.value ?? "",
+          options: toCardOptions(FREQUENCY_OPTIONS),
+        },
+        {
+          key: "securityAssetId",
+          label: "Security Asset",
+          input: "select",
+          value: record.securityAssets?.id ?? "",
+          options: (context.profile?.assets ?? [])
+            .filter((asset) => asset.id)
+            .map((asset) => ({
+              label: asset.description ?? asset.assetType ?? asset.type ?? "Asset",
+              value: asset.id!,
+            })),
+        },
+      ],
+    },
+  };
+}
+
+function extractIncomeIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const incomeType =
+    extractAfterLabel(message, [/\bincome type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\btype\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, INCOME_TYPE_OPTIONS);
+  const record: ClientIncomeRecord = {
+    type: incomeType?.trim() || null,
+    description: extractAfterLabel(message, [/\bdescription\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i]) ?? null,
+    amount: extractMoneyValue(message, ["amount", "income", "salary"]),
+    taxType:
+      extractAfterLabel(message, [/\btax type\s*(?:to|is|=|:)?\s*([A-Za-z -]+)/i]) ??
+      extractMatchingOption(message, ["Taxable", "Non-taxable"]),
+    frequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : null,
+    pension: { id: "", type: "" },
+    joint: /\bjoint\b/.test(message.toLowerCase()),
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.type) missingInformation.push("income type");
+
+  return {
+    kind: "income",
+    toolName: "add_income_record",
+    summary: `Add an income record for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new income record on the selected client profile.",
+    payload: { kind: "income", record },
+    inputsPreview: {
+      section: "Income",
+      owner: record.owner?.name ?? null,
+      type: record.type,
+      description: record.description,
+      amount: record.amount,
+      taxType: record.taxType,
+      frequency: record.frequency?.value ?? null,
+      joint: record.joint ? "Yes" : "No",
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Income Record",
+      toolName: "add_income_record",
+      fields: [
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: record.type ?? "",
+          options: toCardOptions(INCOME_TYPE_OPTIONS),
+        },
+        {
+          key: "description",
+          label: "Description",
+          input: "text",
+          value: record.description ?? "",
+        },
+        {
+          key: "amount",
+          label: "Amount",
+          input: "text",
+          value: record.amount ?? "",
+        },
+        {
+          key: "taxType",
+          label: "Tax Type",
+          input: "select",
+          value: record.taxType ?? "",
+          options: toCardOptions(["Taxable", "Non-taxable"]),
+        },
+        {
+          key: "frequency",
+          label: "Frequency",
+          input: "select",
+          value: record.frequency?.value ?? "",
+          options: toCardOptions(FREQUENCY_OPTIONS),
+        },
+      ],
+    },
+  };
+}
+
+function extractExpenseIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const expenseType =
+    extractAfterLabel(message, [/\bexpense type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\btype\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, EXPENSE_TYPE_OPTIONS);
+  const linkedLiability = (context.profile?.liabilities ?? []).find(
+    (item) => item.id && (message.toLowerCase().includes((item.loanType ?? "").toLowerCase()) || message.toLowerCase().includes((item.bankName ?? "").toLowerCase())),
+  );
+  const record: ClientExpenseRecord = {
+    type: expenseType?.trim() || null,
+    description: extractAfterLabel(message, [/\bdescription\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i]) ?? null,
+    amount: extractMoneyValue(message, ["amount", "expense"]),
+    indexation: extractPercentValue(message, ["indexation"]),
+    frequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : null,
+    liability: linkedLiability?.id ? { id: linkedLiability.id, type: linkedLiability.loanType ?? "Liability" } : { id: "", type: "" },
+    joint: /\bjoint\b/.test(message.toLowerCase()),
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.type) missingInformation.push("expense type");
+
+  return {
+    kind: "expenses",
+    toolName: "add_expense_record",
+    summary: `Add an expense for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new expense record on the selected client profile.",
+    payload: { kind: "expenses", record },
+    inputsPreview: {
+      section: "Expenses",
+      owner: record.owner?.name ?? null,
+      type: record.type,
+      description: record.description,
+      amount: record.amount,
+      frequency: record.frequency?.value ?? null,
+      indexation: record.indexation,
+      linkedLiability: record.liability?.type ?? null,
+      joint: record.joint ? "Yes" : "No",
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Expense",
+      toolName: "add_expense_record",
+      fields: [
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: record.type ?? "",
+          options: toCardOptions(EXPENSE_TYPE_OPTIONS),
+        },
+        {
+          key: "description",
+          label: "Description",
+          input: "text",
+          value: record.description ?? "",
+        },
+        {
+          key: "amount",
+          label: "Amount",
+          input: "text",
+          value: record.amount ?? "",
+        },
+        {
+          key: "indexation",
+          label: "Indexation",
+          input: "text",
+          value: record.indexation ?? "",
+        },
+        {
+          key: "frequency",
+          label: "Frequency",
+          input: "select",
+          value: record.frequency?.value ?? "",
+          options: toCardOptions(FREQUENCY_OPTIONS),
+        },
+        {
+          key: "liabilityId",
+          label: "Linked Liability",
+          input: "select",
+          value: record.liability?.id ?? "",
+          options: (context.profile?.liabilities ?? [])
+            .filter((item) => item.id)
+            .map((item) => ({
+              label: item.loanType ?? item.bankName ?? "Liability",
+              value: item.id!,
+            })),
+        },
+      ],
+    },
+  };
+}
+
+function extractSuperIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const superType =
+    extractAfterLabel(message, [/\bsuper(?:annuation)? type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\btype\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, SUPER_TYPE_OPTIONS);
+  const record: ClientSuperannuationRecord = {
+    type: superType?.trim() || null,
+    superFund: extractAfterLabel(message, [/\bfund\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i]) ?? null,
+    balance: extractMoneyValue(message, ["balance"]),
+    contributionAmount: extractMoneyValue(message, ["contribution", "contribution amount"]),
+    accountNumber: extractAfterLabel(message, [/\baccount(?: number| no\.?)?\s*(?:to|is|=|:)?\s*([A-Za-z0-9-]+)/i]) ?? null,
+    frequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : null,
+    joint: /\bjoint\b/.test(message.toLowerCase()),
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.type) missingInformation.push("superannuation type");
+
+  return {
+    kind: "superannuation",
+    toolName: "add_superannuation_record",
+    summary: `Add a superannuation record for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new superannuation record on the selected client profile.",
+    payload: { kind: "superannuation", record },
+    inputsPreview: {
+      section: "Superannuation",
+      owner: record.owner?.name ?? null,
+      type: record.type,
+      superFund: record.superFund,
+      balance: record.balance,
+      contributionAmount: record.contributionAmount,
+      frequency: record.frequency?.value ?? null,
+      joint: record.joint ? "Yes" : "No",
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Superannuation Record",
+      toolName: "add_superannuation_record",
+      fields: [
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: record.type ?? "",
+          options: toCardOptions(SUPER_TYPE_OPTIONS),
+        },
+        {
+          key: "superFund",
+          label: "Fund",
+          input: "text",
+          value: record.superFund ?? "",
+        },
+        {
+          key: "balance",
+          label: "Balance",
+          input: "text",
+          value: record.balance ?? "",
+        },
+        {
+          key: "contributionAmount",
+          label: "Contribution",
+          input: "text",
+          value: record.contributionAmount ?? "",
+        },
+        {
+          key: "frequency",
+          label: "Frequency",
+          input: "select",
+          value: record.frequency?.value ?? "",
+          options: toCardOptions(FREQUENCY_OPTIONS),
+        },
+        {
+          key: "accountNumber",
+          label: "Account Number",
+          input: "text",
+          value: record.accountNumber ?? "",
+        },
+      ],
+    },
+  };
+}
+
+function extractRetirementIncomeIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const pensionType =
+    extractAfterLabel(message, [/\b(?:retirement income|pension) type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\btype\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, PENSION_TYPE_OPTIONS);
+  const record: ClientPensionRecord = {
+    type: pensionType?.trim() || null,
+    superFund: extractAfterLabel(message, [/\bfund\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i]) ?? null,
+    balance: extractMoneyValue(message, ["balance"]),
+    payment: extractMoneyValue(message, ["payment"]),
+    accountNumber: extractAfterLabel(message, [/\baccount(?: number| no\.?)?\s*(?:to|is|=|:)?\s*([A-Za-z0-9-]+)/i]) ?? null,
+    annualReturn: extractPercentValue(message, ["annual return", "return"]),
+    frequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : null,
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.type) missingInformation.push("retirement income type");
+
+  return {
+    kind: "retirement-income",
+    toolName: "add_retirement_income_record",
+    summary: `Add a retirement income record for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new retirement income record on the selected client profile.",
+    payload: { kind: "retirement-income", record },
+    inputsPreview: {
+      section: "Retirement Income",
+      owner: record.owner?.name ?? null,
+      type: record.type,
+      superFund: record.superFund,
+      balance: record.balance,
+      payment: record.payment,
+      annualReturn: record.annualReturn,
+      frequency: record.frequency?.value ?? null,
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Retirement Income Record",
+      toolName: "add_retirement_income_record",
+      fields: [
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: record.type ?? "",
+          options: toCardOptions(PENSION_TYPE_OPTIONS),
+        },
+        {
+          key: "superFund",
+          label: "Fund",
+          input: "text",
+          value: record.superFund ?? "",
+        },
+        {
+          key: "balance",
+          label: "Balance",
+          input: "text",
+          value: record.balance ?? "",
+        },
+        {
+          key: "payment",
+          label: "Payment",
+          input: "text",
+          value: record.payment ?? "",
+        },
+        {
+          key: "annualReturn",
+          label: "Annual Return",
+          input: "text",
+          value: record.annualReturn ?? "",
+        },
+        {
+          key: "frequency",
+          label: "Frequency",
+          input: "select",
+          value: record.frequency?.value ?? "",
+          options: toCardOptions(FREQUENCY_OPTIONS),
+        },
+        {
+          key: "accountNumber",
+          label: "Account Number",
+          input: "text",
+          value: record.accountNumber ?? "",
+        },
+      ],
+    },
+  };
+}
+
+function extractInsuranceIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const matchedSuper = (context.profile?.superannuation ?? []).find(
+    (item) => item.id && (message.toLowerCase().includes((item.superFund ?? "").toLowerCase()) || message.toLowerCase().includes((item.type ?? "").toLowerCase())),
+  );
+  const coverRequired =
+    extractAfterLabel(message, [/\bcover\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\binsurance type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, INSURANCE_COVER_OPTIONS);
+  const record: ClientInsuranceRecord = {
+    coverRequired: coverRequired?.trim() || null,
+    insurer: extractAfterLabel(message, [/\binsurer\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i]) ?? null,
+    sumInsured: extractMoneyValue(message, ["sum insured", "insured amount", "cover amount"]),
+    premiumAmount: extractMoneyValue(message, ["premium", "premium amount"]),
+    frequency: extractFrequencyOption(message) ? { type: extractFrequencyOption(message), value: extractFrequencyOption(message) } : null,
+    status:
+      extractAfterLabel(message, [/\bstatus\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+      extractMatchingOption(message, INSURANCE_STATUS_OPTIONS),
+    superFund: matchedSuper?.id ? { id: matchedSuper.id, type: matchedSuper.superFund ?? matchedSuper.type ?? "Super" } : null,
+    joint: /\bjoint\b/.test(message.toLowerCase()),
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.coverRequired) missingInformation.push("cover");
+
+  return {
+    kind: "insurance",
+    toolName: "add_insurance_record",
+    summary: `Add an insurance record for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new insurance record on the selected client profile.",
+    payload: { kind: "insurance", record },
+    inputsPreview: {
+      section: "Insurance",
+      owner: record.owner?.name ?? null,
+      coverRequired: record.coverRequired,
+      insurer: record.insurer,
+      sumInsured: record.sumInsured,
+      premiumAmount: record.premiumAmount,
+      status: record.status,
+      frequency: record.frequency?.value ?? null,
+      superFund: record.superFund?.type ?? null,
+      joint: record.joint ? "Yes" : "No",
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Insurance Record",
+      toolName: "add_insurance_record",
+      fields: [
+        {
+          key: "coverRequired",
+          label: "Cover",
+          input: "select",
+          value: record.coverRequired ?? "",
+          options: toCardOptions(INSURANCE_COVER_OPTIONS),
+        },
+        {
+          key: "insurer",
+          label: "Insurer",
+          input: "text",
+          value: record.insurer ?? "",
+        },
+        {
+          key: "sumInsured",
+          label: "Sum Insured",
+          input: "text",
+          value: record.sumInsured ?? "",
+        },
+        {
+          key: "premiumAmount",
+          label: "Premium Amount",
+          input: "text",
+          value: record.premiumAmount ?? "",
+        },
+        {
+          key: "status",
+          label: "Status",
+          input: "select",
+          value: record.status ?? "",
+          options: toCardOptions(INSURANCE_STATUS_OPTIONS),
+        },
+        {
+          key: "frequency",
+          label: "Frequency",
+          input: "select",
+          value: record.frequency?.value ?? "",
+          options: toCardOptions(FREQUENCY_OPTIONS),
+        },
+        {
+          key: "superFundId",
+          label: "Super Fund",
+          input: "select",
+          value: record.superFund?.id ?? "",
+          options: (context.profile?.superannuation ?? [])
+            .filter((item) => item.id)
+            .map((item) => ({
+              label: item.superFund ?? item.type ?? "Super Fund",
+              value: item.id!,
+            })),
+        },
+      ],
+    },
+  };
+}
+
+function extractEntityIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const entityType =
+    extractAfterLabel(message, [/\bentity type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\btype\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, ENTITY_TYPE_OPTIONS);
+  const name =
+    extractAfterLabel(message, [/\bname\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i, /\bentity\s+(?:called|named)\s+([A-Za-z0-9'&().,/ -]+)/i]) ??
+    null;
+  const record: ClientEntityRecord = {
+    entitiesId: null,
+    name: name?.trim() || null,
+    type: entityType?.trim() || null,
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.name) missingInformation.push("entity name");
+  if (!record.type) missingInformation.push("entity type");
+
+  return {
+    kind: "entities",
+    toolName: "add_entity_record",
+    summary: `Add an entity for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new entity linked to the selected client profile.",
+    payload: { kind: "entities", record },
+    inputsPreview: {
+      section: "Entities",
+      owner: record.owner?.name ?? null,
+      name: record.name,
+      type: record.type,
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Entity",
+      toolName: "add_entity_record",
+      fields: [
+        {
+          key: "ownerId",
+          label: "Owner",
+          input: "select",
+          value: record.owner?.id ?? "",
+          options: getOwnerOptions(context.profile),
+        },
+        {
+          key: "name",
+          label: "Name",
+          input: "text",
+          value: record.name ?? "",
+        },
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: record.type ?? "",
+          options: toCardOptions(ENTITY_TYPE_OPTIONS),
+        },
+      ],
+    },
+  };
+}
+
+function extractDependantIntent(message: string, context: LiveContext): CollectionIntentResult {
+  const owner = resolveCollectionOwner(message, context.profile);
+  const dependantType =
+    extractAfterLabel(message, [/\bdependant type\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i, /\btype\s*(?:to|is|=|:)?\s*([A-Za-z ]+)/i]) ??
+    extractMatchingOption(message, DEPENDANT_TYPE_OPTIONS);
+  const name =
+    extractAfterLabel(message, [/\bname\s*(?:to|is|=|:)?\s*([A-Za-z0-9'&().,/ -]+)/i, /\bdependant\s+(?:called|named)\s+([A-Za-z0-9'&().,/ -]+)/i]) ??
+    null;
+  const birthday = normalizeDateToIso(extractAfterLabel(message, [/\b(?:date of birth|birthday|dob)\s*(?:to|is|=|:)?\s*([A-Za-z0-9/\s-]+)/i]) ?? "");
+  const record: ClientDependantRecord = {
+    name: name?.trim() || null,
+    type: dependantType?.trim() || "Child",
+    birthday: birthday ?? null,
+    owner: owner ? { id: owner.id, name: owner.name } : null,
+  };
+
+  const missingInformation: string[] = [];
+  if (!record.owner?.id) missingInformation.push("owner");
+  if (!record.name) missingInformation.push("dependant name");
+
+  return {
+    kind: "dependants",
+    toolName: "add_dependant_record",
+    summary: `Add a dependant for ${context.resolvedClientName ?? "the selected client"}`,
+    description: "Create a new dependant linked to the selected client profile.",
+    payload: { kind: "dependants", record },
+    inputsPreview: {
+      section: "Dependants",
+      owner: record.owner?.name ?? null,
+      name: record.name,
+      type: record.type,
+      birthday: record.birthday,
+    },
+    missingInformation,
+    editorCard: {
+      kind: "collection_form",
+      title: "New Dependant",
+      toolName: "add_dependant_record",
+      fields: [
+        {
+          key: "ownerId",
+          label: "Owner",
+          input: "select",
+          value: record.owner?.id ?? "",
+          options: getOwnerOptions(context.profile),
+        },
+        {
+          key: "name",
+          label: "Name",
+          input: "text",
+          value: record.name ?? "",
+        },
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: record.type ?? "Child",
+          options: toCardOptions(DEPENDANT_TYPE_OPTIONS),
+        },
+        {
+          key: "birthday",
+          label: "Birthday",
+          input: "text",
+          value: record.birthday ?? "",
+        },
+      ],
+    },
+  };
+}
+
+function extractCollectionIntent(message: string, context: LiveContext) {
+  const lower = message.toLowerCase();
+  const isCreate = lower.includes("add") || lower.includes("create") || lower.includes("new ");
+  if (!isCreate) return null;
+
+  if (lower.includes("dependant") || lower.includes("dependent")) return extractDependantIntent(message, context);
+  if (lower.includes("entit")) return extractEntityIntent(message, context);
+  if (lower.includes("asset")) return extractAssetIntent(message, context);
+  if (lower.includes("liability") || lower.includes("loan") || lower.includes("debt")) return extractLiabilityIntent(message, context);
+  if (lower.includes("income") && !lower.includes("retirement income")) return extractIncomeIntent(message, context);
+  if (lower.includes("expense")) return extractExpenseIntent(message, context);
+  if (lower.includes("insurance") || lower.includes("cover")) return extractInsuranceIntent(message, context);
+  if (lower.includes("super") || lower.includes("superannuation")) return extractSuperIntent(message, context);
+  if (lower.includes("retirement income") || lower.includes("pension")) return extractRetirementIncomeIntent(message, context);
+
+  return null;
+}
+
+function getRecentRelevantUserMessage(recentMessages?: FinleyChatRequest["recentMessages"]) {
+  const isClarificationPrompt = (text: string) => {
+    const lower = text.toLowerCase();
+    return (
+      lower.includes("what else do you need") ||
+      lower.includes("what do you need") ||
+      lower.includes("what details do you need") ||
+      lower.includes("what information do you need")
+    );
+  };
+
+  const userMessages = (recentMessages ?? [])
+    .filter((entry) => entry.role === "user" && entry.content?.trim())
+    .map((entry) => entry.content!.trim())
+    .filter((content) => !isClarificationPrompt(content));
+
+  return userMessages.length ? userMessages[userMessages.length - 1] : null;
 }
 
 function applyAddressParts(target: Record<string, unknown>, value: string) {
@@ -478,7 +1865,7 @@ function extractClientUpdatePayload(message: string, recentMessages?: FinleyChat
   }
 
   const dobValue = extractAfterLabel([
-    /\b(?:dob|date of birth)\s*(?:to|is|=|:)?\s*([A-Za-z0-9/\-\s]+)/i,
+    /\b(?:dob|date of birth)\s*(?:to|is|=|:)?\s*([A-Za-z0-9/\s-]+)/i,
   ]);
   const normalizedDob = dobValue ? normalizeDateToIso(dobValue) : null;
   if (normalizedDob) {
@@ -487,8 +1874,8 @@ function extractClientUpdatePayload(message: string, recentMessages?: FinleyChat
 
   const inferredContextField = inferContextField(message, recentMessages);
   const genericValue = extractAfterLabel([
-    /\b(?:update|change)(?:\s+it)?\s+to\s+([A-Za-z0-9@./\-\s]+)\b/i,
-    /\bset(?:\s+it)?\s+to\s+([A-Za-z0-9@./\-\s]+)\b/i,
+    /\b(?:update|change)(?:\s+it)?\s+to\s+([A-Za-z0-9@./\s-]+)\b/i,
+    /\bset(?:\s+it)?\s+to\s+([A-Za-z0-9@./\s-]+)\b/i,
   ]);
 
   if (genericValue && inferredContextField && Object.keys(payload).length === 0) {
@@ -603,7 +1990,7 @@ function extractClientUpdatePayload(message: string, recentMessages?: FinleyChat
   }
 
   const anniversaryValue = extractAfterLabel([
-    /\b(?:next anniversary date|anniversary date)\s*(?:to|is|=|:)?\s*([A-Za-z0-9/\-\s]+)/i,
+    /\b(?:next anniversary date|anniversary date)\s*(?:to|is|=|:)?\s*([A-Za-z0-9/\s-]+)/i,
   ]);
   const normalizedAnniversary = anniversaryValue ? normalizeDateToIso(anniversaryValue) : null;
   if (normalizedAnniversary) {
@@ -681,92 +2068,47 @@ export function cancelStoredPlan(planId: string) {
   return plan;
 }
 
-async function executeFileNotePlan(plan: StoredPlan, token: string, origin?: string | null, cookieHeader?: string | null) {
-  if (!API_BASE_URL) {
-    throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
-  }
-
-  if (origin && cookieHeader) {
-    const response = await fetch(`${origin}/api/client-profiles/file-notes`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Cookie: cookieHeader,
-      },
-      body: JSON.stringify({
-        request: plan.execution.payload,
-      }),
-      cache: "no-store",
-    });
-
-    const responseText = await response.text();
-    const body = (() => {
-      if (!responseText) return null;
-      try {
-        return JSON.parse(responseText) as
-          | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null }
-          | null;
-      } catch {
-        return null;
-      }
-    })();
-
-    if (!response.ok) {
-      const modelError = Array.isArray(body?.modelErrors)
-        ? body?.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-        : null;
-      throw new Error((modelError ?? body?.message ?? responseText) || "Unable to create the file note.");
-    }
-
-    return;
-  }
-
-  const currentUserResult = await requireCurrentUser(token);
-  if ("error" in currentUserResult) {
-    throw new Error(currentUserResult.error.message);
-  }
-
-  const response = await fetch(new URL("/api/ClientProfiles/FileNote", API_BASE_URL), {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      request: plan.execution.payload,
-      currentUser: currentUserResult.currentUser,
-    }),
-    cache: "no-store",
-  });
-
-  const responseText = await response.text();
-  const body = (() => {
-    if (!responseText) return null;
-    try {
-      return JSON.parse(responseText) as
-        | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null }
-        | null;
-    } catch {
-      return null;
-    }
-  })() as
-    | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null }
-    | null;
-  if (!response.ok) {
-    const modelError = Array.isArray(body?.modelErrors)
-      ? body?.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
+async function executeFileNotePlan(plan: StoredPlan, origin?: string | null, cookieHeader?: string | null) {
+  const payload = plan.execution.payload;
+  const owner =
+    payload.owner && typeof payload.owner === "object"
+      ? (payload.owner as { id?: string | null; name?: string | null })
       : null;
-    throw new Error((modelError ?? body?.message ?? responseText) || "Unable to create the file note.");
+  const adviser =
+    payload.adviser && typeof payload.adviser === "object"
+      ? (payload.adviser as { name?: string | null; email?: string | null })
+      : null;
+
+  if (!payload.clientId || !owner?.id || !owner.name) {
+    throw new Error("Finley could not determine the client and owner needed to create this file note.");
   }
+
+  await createFileNoteAction(
+    {
+      id: typeof payload.id === "string" ? payload.id : null,
+      clientId: String(payload.clientId),
+      ownerId: owner.id,
+      ownerName: owner.name,
+      joint: typeof payload.joint === "boolean" ? payload.joint : false,
+      licensee: typeof payload.licensee === "string" ? payload.licensee : null,
+      practice: typeof payload.practice === "string" ? payload.practice : null,
+      adviserName: adviser?.name ?? null,
+      adviserEmail: adviser?.email ?? null,
+      subject: typeof payload.subject === "string" ? payload.subject : "",
+      content: typeof payload.content === "string" ? payload.content : "",
+      serviceDate: typeof payload.serviceDate === "string" ? payload.serviceDate : new Date().toISOString().slice(0, 10),
+      type: typeof payload.type === "string" ? payload.type : "Administration",
+      subType: typeof payload.subType === "string" ? payload.subType : "Task Update",
+      attachment: Array.isArray(payload.attachment) ? (payload.attachment as FileNoteRecord["attachment"]) : [],
+    },
+    {
+      origin,
+      cookieHeader,
+    },
+  );
 }
 
-async function executeClientUpdatePlan(plan: StoredPlan, token: string) {
-  if (!API_BASE_URL) {
-    throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
-  }
-
+async function executeClientUpdatePlan(plan: StoredPlan, origin?: string | null, cookieHeader?: string | null) {
   const profileId = plan.profileId;
   const personId = typeof plan.execution.payload.personId === "string" ? plan.execution.payload.personId : null;
   const target = typeof plan.execution.payload.target === "string" ? plan.execution.payload.target : "client";
@@ -779,53 +2121,200 @@ async function executeClientUpdatePlan(plan: StoredPlan, token: string) {
     throw new Error("Finley could not determine a safe set of client fields to update from this request.");
   }
 
-  const executableChanges: Record<string, unknown> = { ...changes };
-
-  if (typeof changes.dateOfBirth === "string" && !("dob" in executableChanges)) {
-    executableChanges.dob = changes.dateOfBirth;
+  if (target === "partner") {
+    await updatePartnerDetailsAction(
+      {
+        profileId,
+        personId,
+        changes: changes as never,
+      },
+      {
+        origin,
+        cookieHeader,
+      },
+    );
+    return;
   }
 
-  if (typeof changes.preferredPhone === "string") {
-    executableChanges.phone = changes.preferredPhone;
-    executableChanges.mobile = changes.preferredPhone;
-    executableChanges.mobilePhone = changes.preferredPhone;
-    executableChanges.contact = {
-      preferredPhone: changes.preferredPhone,
-      phone: changes.preferredPhone,
-    };
-  }
-
-  if (
-    typeof changes.street === "string" ||
-    typeof changes.suburb === "string" ||
-    typeof changes.state === "string" ||
-    typeof changes.postCode === "string"
-  ) {
-    executableChanges.address = {
-      ...(typeof changes.street === "string" ? { street: changes.street } : {}),
-      ...(typeof changes.suburb === "string" ? { suburb: changes.suburb } : {}),
-      ...(typeof changes.state === "string" ? { state: changes.state } : {}),
-      ...(typeof changes.postCode === "string" ? { postCode: changes.postCode, postcode: changes.postCode } : {}),
-    };
-  }
-
-  const targetSegment = target === "partner" ? "Partner" : "Client";
-
-  const response = await fetch(new URL(`/api/ClientProfiles/${encodeURIComponent(profileId)}/${targetSegment}/${encodeURIComponent(personId)}`, API_BASE_URL), {
-    method: "PATCH",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+  await updateClientDetailsAction(
+    {
+      profileId,
+      personId,
+      changes: changes as never,
     },
-    body: JSON.stringify(executableChanges),
-    cache: "no-store",
-  });
+    {
+      origin,
+      cookieHeader,
+    },
+  );
+}
 
-  const body = (await response.json().catch(() => null)) as { message?: string } | null;
-  if (!response.ok) {
-    throw new Error(body?.message ?? "Unable to update the client details.");
+async function executeCollectionPlan(
+  plan: StoredPlan,
+  liveContext: LiveContext,
+  origin?: string | null,
+  cookieHeader?: string | null,
+) {
+  const profileId = plan.profileId;
+  const kind = typeof plan.execution.payload.kind === "string" ? plan.execution.payload.kind : null;
+  const record =
+    plan.execution.payload.record && typeof plan.execution.payload.record === "object"
+      ? plan.execution.payload.record
+      : null;
+
+  if (!profileId || !kind || !record) {
+    throw new Error("Finley could not determine a complete collection action for this request.");
   }
+
+  const context = { origin, cookieHeader };
+  const normalizedRecord = normalizeApprovedCollectionRecord(kind, record as Record<string, unknown>, liveContext);
+
+  switch (kind) {
+    case "assets": {
+      const nextRecords = upsertAssetCollection(liveContext.profile?.assets ?? [], normalizedRecord as ClientAssetRecord);
+      await saveAssetCollection(profileId, nextRecords, context);
+      return;
+    }
+    case "liabilities": {
+      const nextRecords = upsertFinancialCollection(
+        "liabilities",
+        (liveContext.profile?.liabilities ?? []) as ClientLiabilityRecord[],
+        normalizedRecord as ClientLiabilityRecord,
+      );
+      await saveFinancialCollection("liabilities", profileId, nextRecords, context);
+      return;
+    }
+    case "income": {
+      const nextRecords = upsertFinancialCollection(
+        "income",
+        (liveContext.profile?.income ?? []) as ClientIncomeRecord[],
+        normalizedRecord as ClientIncomeRecord,
+      );
+      await saveFinancialCollection("income", profileId, nextRecords, context);
+      return;
+    }
+    case "expenses": {
+      const nextRecords = upsertFinancialCollection(
+        "expenses",
+        (liveContext.profile?.expense ?? []) as ClientExpenseRecord[],
+        normalizedRecord as ClientExpenseRecord,
+      );
+      await saveFinancialCollection("expenses", profileId, nextRecords, context);
+      return;
+    }
+    case "superannuation": {
+      const nextRecords = upsertFinancialCollection(
+        "superannuation",
+        (liveContext.profile?.superannuation ?? []) as ClientSuperannuationRecord[],
+        normalizedRecord as ClientSuperannuationRecord,
+      );
+      await saveFinancialCollection("superannuation", profileId, nextRecords, context);
+      return;
+    }
+    case "retirement-income": {
+      const nextRecords = upsertFinancialCollection(
+        "retirement-income",
+        (liveContext.profile?.pension ?? []) as ClientPensionRecord[],
+        normalizedRecord as ClientPensionRecord,
+      );
+      await saveFinancialCollection("retirement-income", profileId, nextRecords, context);
+      return;
+    }
+    case "insurance": {
+      const nextRecords = upsertFinancialCollection(
+        "insurance",
+        (liveContext.profile?.insurance ?? []) as ClientInsuranceRecord[],
+        normalizedRecord as ClientInsuranceRecord,
+      );
+      await saveFinancialCollection("insurance", profileId, nextRecords, context);
+      return;
+    }
+    case "entities": {
+      const nextRecords = upsertEntityCollection((liveContext.profile?.entities ?? []) as ClientEntityRecord[], normalizedRecord as ClientEntityRecord);
+      await saveEntityCollection(profileId, nextRecords, context);
+      return;
+    }
+    case "dependants": {
+      const nextRecords = upsertDependantCollection((liveContext.profile?.dependants ?? []) as ClientDependantRecord[], normalizedRecord as ClientDependantRecord);
+      await saveDependantCollection(profileId, nextRecords, context);
+      return;
+    }
+    default:
+      throw new Error("This collection workflow is not supported yet.");
+  }
+}
+
+function normalizeApprovedCollectionRecord(kind: string, record: Record<string, unknown>, liveContext: LiveContext) {
+  const normalized = { ...record };
+
+  if (typeof normalized.frequency === "string") {
+    normalized.frequency = normalized.frequency
+      ? { type: normalized.frequency, value: normalized.frequency }
+      : null;
+  }
+
+  if (typeof normalized.incomeFrequency === "string") {
+    normalized.incomeFrequency = normalized.incomeFrequency
+      ? { type: normalized.incomeFrequency, value: normalized.incomeFrequency }
+      : { type: "", value: "" };
+  }
+
+  if (typeof normalized.repaymentFrequency === "string") {
+    normalized.repaymentFrequency = normalized.repaymentFrequency
+      ? { type: normalized.repaymentFrequency, value: normalized.repaymentFrequency }
+      : null;
+  }
+
+  if (kind === "liabilities" && typeof normalized.securityAssetId === "string") {
+    const asset = (liveContext.profile?.assets ?? []).find((entry) => entry.id === normalized.securityAssetId);
+    normalized.securityAssets = asset?.id
+      ? {
+          id: asset.id,
+          type: asset.assetType ?? "Asset",
+          description: asset.description ?? null,
+        }
+      : null;
+    delete normalized.securityAssetId;
+  }
+
+  if (kind === "expenses" && typeof normalized.liabilityId === "string") {
+    const liability = (liveContext.profile?.liabilities ?? []).find((entry) => entry.id === normalized.liabilityId);
+    normalized.liability = liability?.id
+      ? {
+          id: liability.id,
+          type: liability.loanType ?? "Liability",
+        }
+      : { id: "", type: "" };
+    delete normalized.liabilityId;
+  }
+
+  if (kind === "insurance" && typeof normalized.superFundId === "string") {
+    const superFund = (liveContext.profile?.superannuation ?? []).find((entry) => entry.id === normalized.superFundId);
+    normalized.superFund = superFund?.id
+      ? {
+          id: superFund.id,
+          type: superFund.superFund ?? superFund.type ?? "Super",
+        }
+      : null;
+    delete normalized.superFundId;
+  }
+
+  if ((kind === "entities" || kind === "dependants") && typeof normalized.ownerId === "string") {
+    const owner = getOwnerOptions(liveContext.profile).find((entry) => entry.value === normalized.ownerId);
+    normalized.owner = owner
+      ? {
+          id: owner.value,
+          name: owner.label,
+        }
+      : null;
+    delete normalized.ownerId;
+  }
+
+  if (kind === "dependants" && typeof normalized.birthday === "string") {
+    normalized.birthday = normalizeDateToIso(normalized.birthday) ?? normalized.birthday;
+  }
+
+  return normalized;
 }
 
 export async function approveStoredPlan(
@@ -869,7 +2358,7 @@ export async function approveStoredPlan(
     plan.status = "approved";
 
     if (plan.execution.kind === "file_note") {
-      await executeFileNotePlan(plan, token, requestContext?.origin, requestContext?.cookieHeader);
+      await executeFileNotePlan(plan, requestContext?.origin, requestContext?.cookieHeader);
       plan.status = "completed";
       persistPlan(plan);
 
@@ -909,7 +2398,7 @@ export async function approveStoredPlan(
     }
 
     if (plan.execution.kind === "client_update") {
-      await executeClientUpdatePlan(plan, token);
+      await executeClientUpdatePlan(plan, requestContext?.origin, requestContext?.cookieHeader);
       plan.status = "completed";
       persistPlan(plan);
 
@@ -939,6 +2428,46 @@ export async function approveStoredPlan(
             toolName: plan.toolName,
             status: "succeeded",
             summary: `Updated the selected ${plan.toolName === "update_partner_person_details" ? "partner" : "client"} details.`,
+          },
+        ],
+        missingInformation: [],
+        warnings: [],
+        errors: [],
+        suggestedActions: [],
+      };
+    }
+
+    if (plan.execution.kind === "profile_collection") {
+      await executeCollectionPlan(plan, liveContext, requestContext?.origin, requestContext?.cookieHeader);
+      plan.status = "completed";
+      persistPlan(plan);
+
+      return {
+        ...base,
+        status: "completed",
+        responseMode: "execution_result",
+        assistantMessage: `The new ${String(plan.execution.payload.kind).replace("-", " ")} record was created successfully for ${plan.clientName ?? "the selected client"}.`,
+        plan: {
+          planId: plan.planId,
+          summary: plan.summary,
+          requiresApproval: true,
+          steps: [
+            {
+              stepId: plan.stepId,
+              toolName: plan.toolName,
+              kind: "write",
+              status: "succeeded",
+              description: plan.description,
+              inputsPreview: plan.inputsPreview,
+            },
+          ],
+        },
+        results: [
+          {
+            stepId: plan.stepId,
+            toolName: plan.toolName,
+            status: "succeeded",
+            summary: `Created the requested ${String(plan.execution.payload.kind).replace("-", " ")} record.`,
           },
         ],
         missingInformation: [],
@@ -1064,6 +2593,7 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
   const looksLikeReadQuestion =
     lower.includes("what is") ||
     lower.includes("what's") ||
+    lower.startsWith("what ") ||
     lower.includes("show me") ||
     lower.includes("tell me") ||
     lower.includes("summarise") ||
@@ -1088,6 +2618,27 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         missingInformation: readAnswer.missingInformation,
         warnings: readAnswer.warnings,
         errors: [],
+        displayCard: null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
+    const collectionReadAnswer = buildCollectionReadAnswer(message, liveContext);
+
+    if (collectionReadAnswer.matched) {
+      return {
+        ...base,
+        status: "completed",
+        responseMode: "inform",
+        assistantMessage: collectionReadAnswer.assistantMessage,
+        plan: null,
+        results: [],
+        missingInformation: collectionReadAnswer.missingInformation,
+        warnings: collectionReadAnswer.warnings,
+        errors: [],
+        displayCard: collectionReadAnswer.displayCard ?? null,
+        editorCard: null,
         suggestedActions: [],
       };
     }
@@ -1142,6 +2693,8 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
       inputsPreview: {
         clientId: liveContext.resolvedClientId,
         subject,
+        content: noteText,
+        serviceDate: payload.serviceDate,
         type: noteKind.type,
         subType: noteKind.subType,
       },
@@ -1156,6 +2709,45 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
       status: "awaiting_approval",
       responseMode: "plan",
       assistantMessage: `I am ready to create a file note for ${clientName}. I will save the note subject, service date, and content against the selected client record after approval.`,
+      editorCard: {
+        kind: "collection_form",
+        title: "New File Note",
+        toolName: "create_file_note",
+        fields: [
+          {
+            key: "serviceDate",
+            label: "Service Date",
+            input: "text",
+            value: payload.serviceDate,
+          },
+          {
+            key: "type",
+            label: "Type",
+            input: "select",
+            value: noteKind.type,
+            options: toCardOptions(FINLEY_FILE_NOTE_TYPE_OPTIONS),
+          },
+          {
+            key: "subType",
+            label: "Subtype",
+            input: "select",
+            value: noteKind.subType,
+            options: toCardOptions(FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[noteKind.type] ?? []),
+          },
+          {
+            key: "subject",
+            label: "Subject",
+            input: "text",
+            value: subject,
+          },
+          {
+            key: "content",
+            label: "Body",
+            input: "textarea",
+            value: noteText,
+          },
+        ],
+      },
       plan: {
         planId,
         summary: `Create a file note for ${clientName}`,
@@ -1170,6 +2762,10 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
             inputsPreview: {
               clientId: liveContext.resolvedClientId,
               subject,
+              content: noteText,
+              serviceDate: payload.serviceDate,
+              type: noteKind.type,
+              subType: noteKind.subType,
             },
           },
         ],
@@ -1183,6 +2779,115 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         { label: "Cancel", action: "cancel_plan", planId },
       ],
     };
+  }
+
+  const collectionIntent = extractCollectionIntent(message, liveContext);
+
+  if (collectionIntent) {
+    if (collectionIntent.missingInformation.length > 0) {
+      return {
+        ...base,
+        status: "needs_clarification",
+        responseMode: "clarification",
+        assistantMessage: `I can create that ${collectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"} for ${clientName}, but I still need a bit more detail first.`,
+        plan: null,
+        results: [],
+        missingInformation: collectionIntent.missingInformation.map((field) => ({
+          field,
+          question: `Please provide the ${field} for this new ${collectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"}.`,
+        })),
+        warnings: [],
+        errors: [],
+        displayCard: null,
+        editorCard: collectionIntent.editorCard ?? null,
+        suggestedActions: [],
+      };
+    }
+
+    const planId = makeId("plan");
+    const stepId = makeId("step");
+
+    persistPlan({
+      planId,
+      threadId: base.threadId,
+      createdAt: base.timestamp,
+      clientId: liveContext.resolvedClientId,
+      clientName,
+      profileId: liveContext.profile?.id ?? undefined,
+      userId: liveContext.currentUser?.id ?? null,
+      userRole: liveContext.currentUser?.userRole ?? null,
+      status: "pending",
+      summary: collectionIntent.summary,
+      toolName: collectionIntent.toolName,
+      stepId,
+      description: collectionIntent.description,
+      inputsPreview: collectionIntent.inputsPreview,
+      execution: {
+        kind: "profile_collection",
+        payload: collectionIntent.payload,
+      },
+    });
+
+    return {
+      ...base,
+      status: "awaiting_approval",
+      responseMode: "plan",
+      assistantMessage: `I am ready to create this ${collectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"} for ${clientName}. I will save it to the selected client profile after approval.`,
+      plan: {
+        planId,
+        summary: collectionIntent.summary,
+        requiresApproval: true,
+        steps: [
+          {
+            stepId,
+            toolName: collectionIntent.toolName,
+            kind: "write",
+            status: "pending",
+            description: collectionIntent.description,
+            inputsPreview: collectionIntent.inputsPreview,
+          },
+        ],
+      },
+      results: [],
+      missingInformation: [],
+      warnings: [],
+      errors: [],
+      displayCard: null,
+      editorCard: collectionIntent.editorCard ?? null,
+      suggestedActions: [
+        { label: "Approve and run", action: "approve_plan", planId },
+        { label: "Cancel", action: "cancel_plan", planId },
+      ],
+    };
+  }
+
+  const wantsClarificationHelp =
+    lower.includes("what else do you need") ||
+    lower.includes("what do you need") ||
+    lower.includes("what details do you need") ||
+    lower.includes("what information do you need");
+
+  if (wantsClarificationHelp) {
+    const recentUserMessage = getRecentRelevantUserMessage(request.recentMessages);
+    const recentCollectionIntent = recentUserMessage ? extractCollectionIntent(recentUserMessage, liveContext) : null;
+
+    if (recentCollectionIntent?.missingInformation.length) {
+      return {
+        ...base,
+        status: "needs_clarification",
+        responseMode: "clarification",
+        assistantMessage: `To create this ${recentCollectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"} for ${clientName}, I still need: ${recentCollectionIntent.missingInformation.join(", ")}.`,
+        plan: null,
+        results: [],
+        missingInformation: recentCollectionIntent.missingInformation.map((field) => ({
+          field,
+          question: `Provide the ${field} for this new ${recentCollectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"}.`,
+        })),
+        warnings: [],
+        errors: [],
+        suggestedActions: [],
+      };
+    }
   }
 
   const looksLikeMissingInfoReview =
@@ -1318,14 +3023,7 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
     status: "needs_clarification",
     responseMode: "clarification",
     assistantMessage: `I understand the request for ${clientName}, but I need a little more specificity before I map it to the correct client workflow.`,
-    plan: {
-      planId: makeId("plan"),
-      summary: `Clarify the requested workflow for ${clientName}`,
-      requiresApproval: false,
-      steps: [
-        buildPlanStep("classify_request", "Determine whether this is a read request, a profile update, a document task, or a note workflow."),
-      ],
-    },
+    plan: null,
     results: [],
     missingInformation: [
       {
@@ -1335,6 +3033,8 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
     ],
     warnings: [],
     errors: [],
+    displayCard: null,
+    editorCard: null,
     suggestedActions: [],
   };
 }

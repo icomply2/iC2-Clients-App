@@ -1,3 +1,8 @@
+import {
+  FILE_NOTE_SUBTYPE_OPTIONS,
+  FILE_NOTE_TYPE_OPTIONS,
+} from "@/lib/api/contracts/file-notes";
+
 export type FinleyChatRequest = {
   message: string;
   activeClientId?: string | null;
@@ -9,27 +14,40 @@ export type FinleyChatRequest = {
   }> | null;
 };
 
-export const FINLEY_FILE_NOTE_TYPE_OPTIONS = [
-  "Client Meeting",
-  "Phone Call",
-  "Email",
-  "Review",
-  "Advice",
-  "Administration",
-  "Other",
-] as const;
+export const FINLEY_FILE_NOTE_TYPE_OPTIONS = FILE_NOTE_TYPE_OPTIONS;
 
-export const FINLEY_FILE_NOTE_SUBTYPE_OPTIONS: Record<string, string[]> = {
-  "Client Meeting": ["Initial Meeting", "Review Meeting", "Strategy Meeting", "Implementation Meeting"],
-  "Phone Call": ["Inbound", "Outbound", "Follow Up"],
-  Email: ["Client Email", "Adviser Email", "Provider Email"],
-  Review: ["Annual Review", "Portfolio Review", "FDS Review"],
-  Advice: ["SOA", "ROA", "Strategy Note"],
-  Administration: ["Task Update", "Document Request", "Compliance"],
-  Other: ["General"],
-};
+export const FINLEY_FILE_NOTE_SUBTYPE_OPTIONS = FILE_NOTE_SUBTYPE_OPTIONS;
 
 export type FinleyPlanAction = "approve_plan" | "cancel_plan";
+
+export type FinleyCardOption = {
+  label: string;
+  value: string;
+};
+
+export type FinleyDisplayCard = {
+  kind: "collection_summary";
+  title: string;
+  columns: string[];
+  rows: Array<{
+    id: string;
+    cells: string[];
+  }>;
+  footer?: string | null;
+};
+
+export type FinleyEditorCard = {
+  kind: "collection_form";
+  title: string;
+  toolName: string;
+  fields: Array<{
+    key: string;
+    label: string;
+    input: "text" | "select" | "textarea";
+    value: string;
+    options?: FinleyCardOption[];
+  }>;
+};
 
 export type FinleyChatResponse = {
   threadId: string;
@@ -75,6 +93,8 @@ export type FinleyChatResponse = {
     message: string;
     retryable?: boolean;
   }>;
+  displayCard?: FinleyDisplayCard | null;
+  editorCard?: FinleyEditorCard | null;
   suggestedActions: Array<{
     label: string;
     action: FinleyPlanAction;
