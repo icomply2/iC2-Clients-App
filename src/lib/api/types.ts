@@ -294,6 +294,7 @@ export type FileNoteRecord = {
   licensee?: string | null;
   practice?: string | null;
   adviser?: {
+    id?: string | null;
     name?: string | null;
     email?: string | null;
   } | null;
@@ -307,10 +308,12 @@ export type FileNoteRecord = {
   subType?: string | null;
   subject?: string | null;
   creator?: {
+    id?: string | null;
     name?: string | null;
     email?: string | null;
   } | null;
   modifier?: {
+    id?: string | null;
     name?: string | null;
     email?: string | null;
   } | null;

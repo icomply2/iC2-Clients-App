@@ -15,6 +15,7 @@ import {
   type FinleyTableEditorCard,
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
+import { cacheFileNoteAttachments } from "@/lib/file-note-attachment-cache";
 import finleyAvatar from "./finley-avatar.png";
 import styles from "./page.module.css";
 
@@ -59,12 +60,19 @@ type InvoicePlaceholderItem = {
   totalGst: string;
 };
 
+type InvoiceRecipientOption = {
+  value: string;
+  label: string;
+  email: string;
+};
+
 type InvoicePlaceholderCard = {
   title: string;
   description: string;
   note: string;
   referenceNumber: string;
   clientName: string;
+  clientNameOptions: InvoiceRecipientOption[];
   clientEmail: string;
   adviserName: string;
   serviceType: string;
@@ -74,6 +82,30 @@ type InvoicePlaceholderCard = {
   printAsPdf: boolean;
   items: InvoicePlaceholderItem[];
 };
+
+type CurrentUserScope = {
+  name?: string | null;
+  userRole?: string | null;
+  practice?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+};
+
+function filterClientSummariesByPractice(
+  clients: FinleyClientSummary[],
+  practiceName?: string | null,
+) {
+  const normalizedPractice = practiceName?.trim().toLowerCase();
+
+  if (!normalizedPractice) {
+    return clients;
+  }
+
+  return clients.filter(
+    (client) => client.clientAdviserPracticeName?.trim().toLowerCase() === normalizedPractice,
+  );
+}
 
 const CURRENCY_FIELD_KEYS = new Set([
   "amount",
@@ -285,6 +317,18 @@ function buildEditorPayload(editorCard: FinleyEditorCard | FinleyTableEditorCard
   };
 }
 
+function normalizeFactFindWorkflow(workflow: FinleyFactFindWorkflow | null) {
+  if (!workflow) return null;
+
+  return {
+    ...workflow,
+    steps: workflow.steps.map((step) => ({
+      ...step,
+      editorCard: normalizeEditorCard(step.editorCard ?? null),
+    })),
+  };
+}
+
 type FinleyClientSummary = ClientSummary & {
   isDraft?: boolean;
   primaryClientName?: string;
@@ -417,6 +461,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [newPartnerName, setNewPartnerName] = useState("");
   const [newClientAdviserName, setNewClientAdviserName] = useState("");
   const [newClientPracticeName, setNewClientPracticeName] = useState("");
+  const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
   const [newClientError, setNewClientError] = useState<string | null>(null);
   const [displayCard, setDisplayCard] = useState<FinleyDisplayCard | null>(null);
   const [editorCard, setEditorCard] = useState<FinleyEditorCard | FinleyTableEditorCard | null>(null);
@@ -435,6 +480,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [activeAssistField, setActiveAssistField] = useState<"subject" | "content" | null>(null);
   const [fileNoteSubjectManuallyEdited, setFileNoteSubjectManuallyEdited] = useState(false);
   const [fileNoteAttachments, setFileNoteAttachments] = useState<NonNullable<FileNoteRecord["attachment"]>>([]);
+  const [fileNoteAttachmentFiles, setFileNoteAttachmentFiles] = useState<File[]>([]);
   const fileNoteAttachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   const clients = useMemo(() => [...draftClients, ...serverClients], [draftClients, serverClients]);
@@ -500,11 +546,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           })) ?? [];
 
         if (!cancelled && nextClients.length) {
-          setServerClients(nextClients);
+          setServerClients(filterClientSummariesByPractice(nextClients, currentUserScope?.practice?.name));
         }
       } catch {
         if (!cancelled) {
-          setServerClients(mockClientSummaries);
+          setServerClients(filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name));
         }
       } finally {
         if (!cancelled) {
@@ -518,7 +564,36 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     return () => {
       cancelled = true;
     };
-  }, [clientSearch]);
+  }, [clientSearch, currentUserScope?.practice?.name]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCurrentUserScope() {
+      try {
+        const response = await fetch("/api/users/me", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const body = (await response.json().catch(() => null)) as { data?: CurrentUserScope | null } | null;
+
+        if (!response.ok || !body?.data || cancelled) {
+          return;
+        }
+
+        setCurrentUserScope(body.data);
+      } catch {
+        // Leave the new client defaults blank if the current user cannot be resolved.
+      }
+    }
+
+    void loadCurrentUserScope();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function selectClient(clientId: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -558,6 +633,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setActiveAssistField(null);
     setFileNoteSubjectManuallyEdited(false);
     setFileNoteAttachments([]);
+    setFileNoteAttachmentFiles([]);
   }
 
   function handleRefreshChat() {
@@ -567,8 +643,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   function openCreateClient() {
     setNewClientName("");
     setNewPartnerName("");
-    setNewClientAdviserName(activeClient?.clientAdviserName ?? "");
-    setNewClientPracticeName(activeClient?.clientAdviserPracticeName ?? "");
+    setNewClientAdviserName(currentUserScope?.name ?? activeClient?.clientAdviserName ?? "");
+    setNewClientPracticeName(currentUserScope?.practice?.name ?? activeClient?.clientAdviserPracticeName ?? "");
     setNewClientError(null);
     setIsCreateClientOpen(true);
   }
@@ -612,11 +688,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setPendingPlanId(null);
         setDisplayCard(null);
         setEditorCard(null);
-        setFactFindWorkflow(body.workflow);
+        setFactFindWorkflow(normalizeFactFindWorkflow(body.workflow));
         setFactFindStepIndex(0);
         setFactFindWorkflowError(null);
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
+        setFileNoteAttachmentFiles([]);
       } catch (error) {
         setMessages((current) => [
           ...current,
@@ -640,7 +717,41 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     ) {
       if (action === "create_invoice") {
         const today = new Date();
-        const dueDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+        const defaultDueDate = new Date(today);
+        defaultDueDate.setDate(defaultDueDate.getDate() + 14);
+        const dueDate = `${defaultDueDate.getFullYear()}-${String(defaultDueDate.getMonth() + 1).padStart(2, "0")}-${String(defaultDueDate.getDate()).padStart(2, "0")}`;
+        let clientEmail = "";
+        let adviserName = activeClient.clientAdviserName ?? "";
+        let clientEntityId = activeClient.id ?? "";
+        let clientName = activeClient.name ?? "";
+        let clientNameOptions: InvoiceRecipientOption[] = clientName ? [{ value: clientName, label: clientName, email: "" }] : [];
+
+        try {
+          const response = await fetch(`/api/finley/invoice/prefill?clientId=${encodeURIComponent(activeClient.id ?? "")}`, {
+            method: "GET",
+            cache: "no-store",
+          });
+          const body = (await response.json().catch(() => null)) as
+            | {
+                clientName?: string | null;
+                clientEmail?: string | null;
+                adviserName?: string | null;
+                clientEntityId?: string | null;
+                clientNameOptions?: InvoiceRecipientOption[] | null;
+                error?: string | null;
+              }
+            | null;
+
+          if (response.ok && body) {
+            clientName = body.clientName ?? clientName;
+            clientEmail = body.clientEmail ?? "";
+            adviserName = body.adviserName ?? adviserName;
+            clientEntityId = body.clientEntityId ?? clientEntityId;
+            clientNameOptions = Array.isArray(body.clientNameOptions) && body.clientNameOptions.length ? body.clientNameOptions : clientNameOptions;
+          }
+        } catch {
+          // Fall back to the lightweight client summary values already on hand.
+        }
 
         setMessages([
           {
@@ -666,11 +777,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           description: "Capture invoice details, line items, and payment settings before the issuing flow is connected.",
           note: "Placeholder only for now. The next build will connect this card to calculations, PDF output, and invoice generation.",
           referenceNumber: `${Math.floor(1000 + Math.random() * 9000)}`,
-          clientName: activeClient.name ?? "",
-          clientEmail: "",
-          adviserName: activeClient.clientAdviserName ?? "",
+          clientName,
+          clientNameOptions,
+          clientEmail,
+          adviserName,
           serviceType: "",
-          clientEntityId: activeClient.id ?? "",
+          clientEntityId,
           dueDate,
           includeStripePaymentLink: false,
           printAsPdf: false,
@@ -1161,6 +1273,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setEditorCard(null);
       setActiveAssistField(null);
       setFileNoteSubjectManuallyEdited(false);
+      setFileNoteAttachmentFiles([]);
     } finally {
       setIsSending(false);
     }
@@ -1172,26 +1285,50 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setIsSending(true);
 
     try {
-        const response = await fetch(`/api/finley/plans/${encodeURIComponent(pendingPlanId)}/${action === "approve_plan" ? "approve" : "cancel"}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body:
-            action === "approve_plan"
-              ? JSON.stringify({
-                ...(editorCard ? buildEditorPayload(editorCard) : {}),
-                ...(editorCard && editorCard.kind === "collection_form" && editorCard.toolName === "create_file_note"
-                  ? {
-                      record: {
-                        ...(((buildEditorPayload(editorCard) as { record?: Record<string, unknown> } | null)?.record ?? {}) as Record<string, unknown>),
-                        attachment: fileNoteAttachments,
-                      },
-                    }
-                  : {}),
-              })
-            : undefined,
-      });
+      const approveUrl = `/api/finley/plans/${encodeURIComponent(pendingPlanId)}/${action === "approve_plan" ? "approve" : "cancel"}`;
+      const isFileNoteApproval =
+        action === "approve_plan"
+        && editorCard
+        && editorCard.kind === "collection_form"
+        && editorCard.toolName === "create_file_note";
+      const payload =
+        action === "approve_plan"
+          ? {
+              ...(editorCard ? buildEditorPayload(editorCard) : {}),
+              ...(isFileNoteApproval
+                ? {
+                    record: {
+                      ...(((buildEditorPayload(editorCard) as { record?: Record<string, unknown> } | null)?.record ?? {}) as Record<string, unknown>),
+                      attachment: fileNoteAttachments,
+                    },
+                  }
+                : {}),
+            }
+          : undefined;
+      const fileNoteRecordPayload =
+        isFileNoteApproval
+          ? (((payload as { record?: Record<string, unknown> } | undefined)?.record ?? null) as Record<string, unknown> | null)
+          : null;
+
+      const response = isFileNoteApproval && fileNoteAttachmentFiles.length
+        ? await (async () => {
+            const formData = new FormData();
+            formData.append("payload", JSON.stringify(payload));
+            for (const file of fileNoteAttachmentFiles) {
+              formData.append("files", file);
+            }
+            return fetch(approveUrl, {
+              method: "POST",
+              body: formData,
+            });
+          })()
+        : await fetch(approveUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: payload ? JSON.stringify(payload) : undefined,
+          });
 
       const body = (await response.json().catch(() => null)) as FinleyChatResponse | null;
 
@@ -1211,6 +1348,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           content: body.assistantMessage,
         },
       ]);
+      if (isFileNoteApproval && fileNoteRecordPayload && activeClientId) {
+        cacheFileNoteAttachments({
+          clientId: activeClientId,
+          id: typeof fileNoteRecordPayload.id === "string" ? fileNoteRecordPayload.id : null,
+          subject: typeof fileNoteRecordPayload.subject === "string" ? fileNoteRecordPayload.subject : "",
+          content: typeof fileNoteRecordPayload.content === "string" ? fileNoteRecordPayload.content : "",
+          serviceDate: typeof fileNoteRecordPayload.serviceDate === "string" ? fileNoteRecordPayload.serviceDate : "",
+          type: typeof fileNoteRecordPayload.type === "string" ? fileNoteRecordPayload.type : "",
+          subType: typeof fileNoteRecordPayload.subType === "string" ? fileNoteRecordPayload.subType : "",
+          attachment: fileNoteAttachments,
+        });
+      }
       if (body.responseMode === "execution_result" || body.status === "completed" || body.status === "cancelled") {
         setPlanSummary(null);
         setPlanSteps([]);
@@ -1220,6 +1369,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setEditorCard(null);
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
+        setFileNoteAttachmentFiles([]);
       } else {
         setPlanSummary(body.plan?.summary ?? null);
         setPlanSteps(
@@ -1235,6 +1385,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setEditorCard(normalizeEditorCard(body.editorCard ?? null));
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
+        setFileNoteAttachmentFiles([]);
       }
     } catch (error) {
       setMessages((current) => [
@@ -1302,6 +1453,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setEditorCard(normalizeEditorCard(body.editorCard ?? null));
       setFileNoteSubjectManuallyEdited(false);
       setFileNoteAttachments([]);
+      setFileNoteAttachmentFiles([]);
     } catch (error) {
       setMessages((current) => [
         ...current,
@@ -1401,12 +1553,14 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   function handleFileNoteAttachmentsSelected(files: FileList | null) {
     if (!files?.length) return;
 
-    const nextAttachments = Array.from(files).map((file) => ({
+    const nextFiles = Array.from(files);
+    const nextAttachments = nextFiles.map((file) => ({
       name: file.name,
       url: null,
     }));
 
     setFileNoteAttachments((current) => [...current, ...nextAttachments]);
+    setFileNoteAttachmentFiles((current) => [...current, ...nextFiles]);
   }
 
   function updateFactFindField(stepId: string, key: string, value: string) {
@@ -1587,9 +1741,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 <div className={styles.emptyStateTitle}>Start a new Finley chat</div>
                 <div className={styles.emptyStateText}>
                   {activeClient
-                    ? `Choose a workflow to begin, or ask Finley directly to update client details, create a file note, or prepare ${
-                        activeClient.partnerName ? "this household" : "the client"
-                      } for the next review.`
+                    ? "Choose a workflow to begin, or ask Finley directly to update client details, create a file note, or create invoice."
                     : "Select a client from the left rail or create a new client to begin working in Finley."}
                 </div>
                 {activeClient ? (
@@ -1852,14 +2004,16 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   Back
                 </button>
                 <div className={styles.workflowActionsRight}>
-                  <button
-                    type="button"
-                    className={styles.planCancelButton}
-                    onClick={() => void handleFactFindGenerateDocx()}
-                    disabled={isSavingFactFindStep || isGeneratingFactFindDocx}
-                  >
-                    {isGeneratingFactFindDocx ? "Generating..." : "Generate .docx"}
-                  </button>
+                  {factFindWorkflow && factFindStepIndex >= factFindWorkflow.steps.length - 1 ? (
+                    <button
+                      type="button"
+                      className={styles.planApproveButton}
+                      onClick={() => void handleFactFindGenerateDocx()}
+                      disabled={isSavingFactFindStep || isGeneratingFactFindDocx}
+                    >
+                      {isGeneratingFactFindDocx ? "Generating..." : "Generate Fact Find"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className={styles.planCancelButton}
@@ -1960,33 +2114,42 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               {invoiceWorkflowError ? <div className={styles.planWarning}>{invoiceWorkflowError}</div> : null}
 
               <div className={styles.invoiceCardForm}>
-                <label className={`${styles.confirmationField} ${styles.confirmationFieldFull}`.trim()}>
+                <label className={styles.confirmationField}>
                   <span className={styles.planPreviewLabel}>Reference Number</span>
                   <input
                     className={styles.confirmationSelect}
                     value={invoicePlaceholderCard.referenceNumber}
-                    onChange={(event) =>
-                      setInvoicePlaceholderCard((current) =>
-                        current ? { ...current, referenceNumber: event.target.value } : current,
-                      )
-                    }
+                    readOnly
                   />
                 </label>
 
-                <label className={`${styles.confirmationField} ${styles.confirmationFieldFull}`.trim()}>
+                <label className={styles.confirmationField}>
                   <span className={styles.planPreviewLabel}>Client Name</span>
-                  <input
+                  <select
                     className={styles.confirmationSelect}
                     value={invoicePlaceholderCard.clientName}
                     onChange={(event) =>
                       setInvoicePlaceholderCard((current) =>
-                        current ? { ...current, clientName: event.target.value } : current,
+                        current
+                          ? {
+                              ...current,
+                              clientName: event.target.value,
+                              clientEmail:
+                                current.clientNameOptions.find((option) => option.value === event.target.value)?.email ?? current.clientEmail,
+                            }
+                          : current,
                       )
                     }
-                  />
+                  >
+                    {invoicePlaceholderCard.clientNameOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
-                <label className={`${styles.confirmationField} ${styles.confirmationFieldFull}`.trim()}>
+                <label className={styles.confirmationField}>
                   <span className={styles.planPreviewLabel}>Client Email</span>
                   <input
                     className={styles.confirmationSelect}
@@ -1999,20 +2162,16 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   />
                 </label>
 
-                <label className={`${styles.confirmationField} ${styles.confirmationFieldFull}`.trim()}>
+                <label className={styles.confirmationField}>
                   <span className={styles.planPreviewLabel}>Adviser Name</span>
                   <input
                     className={styles.confirmationSelect}
                     value={invoicePlaceholderCard.adviserName}
-                    onChange={(event) =>
-                      setInvoicePlaceholderCard((current) =>
-                        current ? { ...current, adviserName: event.target.value } : current,
-                      )
-                    }
+                    readOnly
                   />
                 </label>
 
-                <label className={`${styles.confirmationField} ${styles.confirmationFieldFull}`.trim()}>
+                <label className={styles.confirmationField}>
                   <span className={styles.planPreviewLabel}>Service Type</span>
                   <select
                     className={styles.confirmationSelect}
@@ -2037,11 +2196,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   <input
                     className={styles.confirmationSelect}
                     value={invoicePlaceholderCard.clientEntityId}
-                    onChange={(event) =>
-                      setInvoicePlaceholderCard((current) =>
-                        current ? { ...current, clientEntityId: event.target.value } : current,
-                      )
-                    }
+                    readOnly
                   />
                 </label>
 
@@ -2059,20 +2214,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   />
                 </label>
 
-                <label className={`${styles.confirmationField} ${styles.confirmationFieldFull} ${styles.invoiceCheckboxField}`.trim()}>
-                  <span className={styles.invoiceCheckboxRow}>
-                    <input
-                      type="checkbox"
-                      checked={invoicePlaceholderCard.includeStripePaymentLink}
-                      onChange={(event) =>
-                        setInvoicePlaceholderCard((current) =>
-                          current ? { ...current, includeStripePaymentLink: event.target.checked } : current,
-                        )
-                      }
-                    />
-                    <span>Include stripe payment link (stripe fees apply)</span>
-                  </span>
-                </label>
               </div>
 
               <div className={styles.invoiceLineItemsCard}>
@@ -2620,9 +2761,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                                           type="button"
                                           className={styles.attachmentRemoveButton}
                                           onClick={() =>
-                                            setFileNoteAttachments((current) =>
+                                            (setFileNoteAttachments((current) =>
                                               current.filter((_, currentIndex) => currentIndex !== index),
-                                            )
+                                            ),
+                                            setFileNoteAttachmentFiles((current) =>
+                                              current.filter((_, currentIndex) => currentIndex !== index),
+                                            ))
                                           }
                                         >
                                           Remove
@@ -2725,7 +2869,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 {activeClient
                   ? activeAssistField
                     ? `Selected field: ${activeAssistField === "content" ? "File note body" : "File note subject"}. Start your message with "Finley:" to draft into that field.`
-                    : "Approval and execution appear here when Finley prepares a workflow."
+                    : ""
                   : "Client context will appear here once you select a client."}
               </div>
               <div className={styles.composerActions}>
@@ -2761,42 +2905,29 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             onClick={(event) => event.stopPropagation()}
           >
             <div className={styles.modalHeader}>
-              <div>
-                <div className={styles.modalEyebrow}>New Client</div>
-                <h2 id="finley-new-client-title" className={styles.modalTitle}>
-                  Create a new client or household in Finley
-                </h2>
-              </div>
+              <h2 id="finley-new-client-title" className={styles.modalTitle}>
+                Create a new client or household in Finley
+              </h2>
             </div>
 
             <div className={styles.modalBody}>
-              <div className={styles.modalSection}>
-                <div className={styles.modalSectionTitle}>Primary client entity</div>
+              <div className={styles.modalGrid}>
                 <label className={styles.modalField}>
                   <span className={styles.modalLabel}>Primary client name</span>
                   <input
                     className={styles.modalInput}
                     value={newClientName}
                     onChange={(event) => setNewClientName(event.target.value)}
-                    placeholder="Michael Weightman"
                   />
                 </label>
-              </div>
-
-              <div className={styles.modalSection}>
-                <div className={styles.modalSectionTitle}>Linked partner entity</div>
                 <label className={styles.modalField}>
                   <span className={styles.modalLabel}>Partner name</span>
                   <input
                     className={styles.modalInput}
                     value={newPartnerName}
                     onChange={(event) => setNewPartnerName(event.target.value)}
-                    placeholder="Kimberly Weightman"
                   />
                 </label>
-                <div className={styles.modalHint}>
-                  Leave this blank if you only want to create a single client record.
-                </div>
               </div>
 
               <label className={styles.modalField}>
@@ -2805,7 +2936,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   className={styles.modalInput}
                   value={newClientAdviserName}
                   onChange={(event) => setNewClientAdviserName(event.target.value)}
-                  placeholder="Jonathan Mannion"
                 />
               </label>
 
@@ -2815,7 +2945,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   className={styles.modalInput}
                   value={newClientPracticeName}
                   onChange={(event) => setNewClientPracticeName(event.target.value)}
-                  placeholder="Sandringham Wealth"
                 />
               </label>
 
@@ -2827,7 +2956,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 Cancel
               </button>
               <button type="button" className={styles.planApproveButton} onClick={handleCreateClient}>
-                {newPartnerName.trim() ? "Create and select household" : "Create and select client"}
+                Create and select
               </button>
             </div>
           </div>

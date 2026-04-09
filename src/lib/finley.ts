@@ -3619,6 +3619,7 @@ async function executeFileNotePlan(plan: StoredPlan, origin?: string | null, coo
       type: typeof payload.type === "string" ? payload.type : "Administration",
       subType: typeof payload.subType === "string" ? payload.subType : "Task Update",
       attachment: Array.isArray(payload.attachment) ? (payload.attachment as FileNoteRecord["attachment"]) : [],
+      files: Array.isArray(payload.files) ? (payload.files as File[]) : [],
     },
     {
       origin,

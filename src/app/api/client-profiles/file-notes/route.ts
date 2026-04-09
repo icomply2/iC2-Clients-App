@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { API_BASE_URL, readBearerToken, requireCurrentUser } from "../_shared";
 
+function readStringValue(value: FormDataEntryValue | null | undefined) {
+  return typeof value === "string" ? value : "";
+}
+
 export async function POST(request: NextRequest) {
   if (!API_BASE_URL) {
     return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
@@ -18,20 +22,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: currentUserResult.error.message }, { status: currentUserResult.error.status });
   }
 
-  const payload = await request.json().catch(() => null);
+  const incomingForm = await request.formData().catch(() => null);
 
   try {
-    const response = await fetch(new URL("/api/ClientProfiles/FileNote", API_BASE_URL), {
+    const upstreamForm = new FormData();
+
+    if (incomingForm) {
+      for (const [key, value] of incomingForm.entries()) {
+        if (key === "creator.id" || key === "creator.email" || key === "creator.name" || key === "modifier.id" || key === "modifier.email" || key === "modifier.name" || key === "createdDate" || key === "modifiedDate") {
+          continue;
+        }
+        upstreamForm.append(key, value);
+      }
+    }
+
+    const now = new Date().toISOString();
+    upstreamForm.set("creator.id", readStringValue(incomingForm?.get("creator.id")) || (currentUserResult.currentUser.id ?? ""));
+    upstreamForm.set("creator.email", readStringValue(incomingForm?.get("creator.email")) || (currentUserResult.currentUser.email ?? ""));
+    upstreamForm.set("creator.name", readStringValue(incomingForm?.get("creator.name")) || (currentUserResult.currentUser.name ?? ""));
+    upstreamForm.set("modifier.id", readStringValue(incomingForm?.get("modifier.id")) || (currentUserResult.currentUser.id ?? ""));
+    upstreamForm.set("modifier.email", readStringValue(incomingForm?.get("modifier.email")) || (currentUserResult.currentUser.email ?? ""));
+    upstreamForm.set("modifier.name", readStringValue(incomingForm?.get("modifier.name")) || (currentUserResult.currentUser.name ?? ""));
+    upstreamForm.set("createdDate", readStringValue(incomingForm?.get("createdDate")) || now);
+    upstreamForm.set("modifiedDate", readStringValue(incomingForm?.get("modifiedDate")) || now);
+
+    const response = await fetch(new URL("/api/ClientProfiles/FileNoteV2", API_BASE_URL), {
       method: "POST",
       headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
+        Accept: "application/json, text/plain",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        ...(payload && typeof payload === "object" ? payload : {}),
-        currentUser: currentUserResult.currentUser,
-      }),
+      body: upstreamForm,
       cache: "no-store",
     });
 

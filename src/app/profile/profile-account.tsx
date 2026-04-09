@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { AppTopbar } from "@/components/app-topbar";
 import { DesktopBrokerLogo } from "@/components/desktop-broker-logo";
 import { Hub24Logo } from "@/components/hub24-logo";
 import { ProductRexLogo } from "@/components/product-rex-logo";
-import { UserInitialsAvatar } from "@/components/user-initials-avatar";
 import styles from "./page.module.css";
 
 type AccountProfileProps = {
@@ -195,34 +195,7 @@ export function ProfileAccount({
 
   return (
     <div className={styles.page}>
-      <header className={styles.topbar}>
-        <div className={styles.topbarLeft}>
-          <button type="button" className={styles.gridButton} aria-label="App menu">
-            {Array.from({ length: 9 }).map((_, index) => (
-              <span key={index} className={styles.gridDot} />
-            ))}
-          </button>
-          <Link href="/admin" className={styles.inviteButton}>
-            + Invite New User
-          </Link>
-          <span className={styles.pageName}>My Account</span>
-        </div>
-
-        <div className={styles.topbarRight}>
-          <Link href="/finley" className={styles.topLink}>
-            <span className={styles.icon}>F</span>
-            <span>Finley</span>
-          </Link>
-          <Link href="/profile" className={styles.topLink}>
-            <UserInitialsAvatar className={styles.avatar} />
-            <span>Me</span>
-          </Link>
-          <Link href="/" className={styles.topLink}>
-            <span className={styles.icon}>→</span>
-            <span>Sign Out</span>
-          </Link>
-        </div>
-      </header>
+      <AppTopbar finleyHref="/finley" />
 
       <main className={styles.content}>
         <div className={styles.profileHero}>

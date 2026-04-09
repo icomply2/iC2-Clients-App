@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { API_BASE_URL, readBearerToken, requireCurrentUser } from "../../_shared";
 
+function readStringValue(value: FormDataEntryValue | null | undefined) {
+  return typeof value === "string" ? value : "";
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ fileNoteId: string }> },
@@ -21,23 +25,35 @@ export async function PUT(
     return NextResponse.json({ message: currentUserResult.error.message }, { status: currentUserResult.error.status });
   }
 
-  const payload = await request.json().catch(() => null);
+  const incomingForm = await request.formData().catch(() => null);
   const { fileNoteId } = await params;
 
   try {
+    const upstreamForm = new FormData();
+
+    if (incomingForm) {
+      for (const [key, value] of incomingForm.entries()) {
+        if (key === "modifier.id" || key === "modifier.email" || key === "modifier.name" || key === "modifiedDate") {
+          continue;
+        }
+        upstreamForm.append(key, value);
+      }
+    }
+
+    upstreamForm.set("modifier.id", readStringValue(incomingForm?.get("modifier.id")) || (currentUserResult.currentUser.id ?? ""));
+    upstreamForm.set("modifier.email", readStringValue(incomingForm?.get("modifier.email")) || (currentUserResult.currentUser.email ?? ""));
+    upstreamForm.set("modifier.name", readStringValue(incomingForm?.get("modifier.name")) || (currentUserResult.currentUser.name ?? ""));
+    upstreamForm.set("modifiedDate", readStringValue(incomingForm?.get("modifiedDate")) || new Date().toISOString());
+
     const response = await fetch(
-      new URL(`/api/ClientProfiles/FileNote/${encodeURIComponent(fileNoteId)}`, API_BASE_URL),
+      new URL(`/api/ClientProfiles/FileNoteV2/${encodeURIComponent(fileNoteId)}`, API_BASE_URL),
       {
         method: "PUT",
         headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
+          Accept: "application/json, text/plain",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          ...(payload && typeof payload === "object" ? payload : {}),
-          currentUser: currentUserResult.currentUser,
-        }),
+        body: upstreamForm,
         cache: "no-store",
       },
     );

@@ -1,4 +1,3 @@
-import type { FileNoteRecord } from "@/lib/api/types";
 import type { FileNoteInput, FileNotePayload } from "@/lib/api/contracts/file-notes";
 import {
   createFileNote as createFileNoteRequest,
@@ -14,29 +13,45 @@ type RequestContext = {
 
 export function buildFileNotePayload(input: FileNoteInput): FileNotePayload {
   return {
-    request: {
-      id: input.id ?? null,
-      clientId: input.clientId,
-      owner: {
-        id: input.ownerId,
-        name: input.ownerName,
-      },
-      joint: input.joint ?? false,
-      licensee: input.licensee ?? null,
-      practice: input.practice ?? null,
-      adviser: input.adviserName || input.adviserEmail
-        ? {
-            name: input.adviserName ?? null,
-            email: input.adviserEmail ?? null,
-          }
-        : null,
-      content: input.content,
-      serviceDate: input.serviceDate,
-      type: input.type,
-      subType: input.subType,
-      subject: input.subject,
-      attachment: input.attachment ?? [],
-    } satisfies FileNoteRecord,
+    id: input.id ?? null,
+    clientId: input.clientId,
+    owner: {
+      id: input.ownerId,
+      name: input.ownerName,
+    },
+    joint: input.joint ?? false,
+    licensee: input.licensee ?? null,
+    practice: input.practice ?? null,
+    adviser: input.adviserId || input.adviserName || input.adviserEmail
+      ? {
+          id: input.adviserId ?? null,
+          name: input.adviserName ?? null,
+          email: input.adviserEmail ?? null,
+        }
+      : null,
+    content: input.content,
+    serviceDate: input.serviceDate,
+    type: input.type,
+    subType: input.subType,
+    subject: input.subject,
+    creator: input.creatorId || input.creatorName || input.creatorEmail
+      ? {
+          id: input.creatorId ?? null,
+          name: input.creatorName ?? null,
+          email: input.creatorEmail ?? null,
+        }
+      : null,
+    modifier: input.modifierId || input.modifierName || input.modifierEmail
+      ? {
+          id: input.modifierId ?? null,
+          name: input.modifierName ?? null,
+          email: input.modifierEmail ?? null,
+        }
+      : null,
+    modifiedDate: input.modifiedDate ?? null,
+    createdDate: input.createdDate ?? null,
+    attachment: input.attachment ?? [],
+    files: input.files ?? [],
   };
 }
 

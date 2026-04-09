@@ -973,6 +973,30 @@
   color: #243b53;
 }
 
+.fileNoteAttachmentCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fileNoteAttachmentIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  border-radius: 999px;
+  background: #fff4c2;
+  color: #8a6700;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.fileNoteAttachmentEmpty {
+  color: #9aa5b1;
+  font-weight: 600;
+}
+
 .fileNoteEmpty {
   min-height: 18rem;
   padding: 1rem;
@@ -1016,13 +1040,56 @@
 
 .fileNoteUploadPlaceholder {
   display: flex;
-  align-items: start;
-  min-height: 8.5rem;
-  padding: 0.75rem;
+  align-items: center;
+  min-height: 0;
+  padding: 0;
   border: 1px solid #c7d7eb;
   border-radius: 0.3rem;
   background: #fff;
   color: #66788a;
+  overflow: hidden;
+}
+
+.fileNoteUploadPlaceholder input[type="file"] {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: #243b53;
+  font: inherit;
+}
+
+.attachmentList {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.attachmentSubLabel {
+  color: #6b7c93;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.attachmentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 0.35rem;
+  background: #fffdf3;
+  color: #243b53;
+  min-width: 0;
+}
+
+.attachmentItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fileNoteCloseButton {

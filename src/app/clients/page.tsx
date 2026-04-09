@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { UserInitialsAvatar } from "@/components/user-initials-avatar";
+import { AppTopbar } from "@/components/app-topbar";
 import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import styles from "./page.module.css";
@@ -16,14 +17,11 @@ type ClientRow = {
 };
 
 type CurrentUserScope = {
+  name?: string | null;
   userRole?: string | null;
   practice?: { id?: string | null; name?: string | null } | null;
   licensee?: { id?: string | null; name?: string | null } | null;
 };
-
-function normalizeRole(role?: string | null) {
-  return role?.trim().toLowerCase().replace(/\s+/g, "") ?? "";
-}
 
 function mapClientSummaryToRow(client: ClientSummary): ClientRow {
   return {
@@ -35,7 +33,20 @@ function mapClientSummaryToRow(client: ClientSummary): ClientRow {
   };
 }
 
+function filterRowsByPractice(rows: ClientRow[], practiceName?: string | null) {
+  const normalizedPractice = practiceName?.trim().toLowerCase();
+
+  if (!normalizedPractice) {
+    return rows;
+  }
+
+  return rows.filter((row) => row.practice.trim().toLowerCase() === normalizedPractice);
+}
+
 export default function ClientsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
   const [adviser, setAdviser] = useState("All advisers");
   const [adviserOptions, setAdviserOptions] = useState<string[]>(["All advisers"]);
@@ -50,6 +61,12 @@ export default function ClientsPage() {
   const [loadMessage, setLoadMessage] = useState<string | null>("Showing sample client data.");
   const [deleteCandidate, setDeleteCandidate] = useState<ClientRow | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState("");
+  const [newPartnerName, setNewPartnerName] = useState("");
+  const [newClientAdviserName, setNewClientAdviserName] = useState("");
+  const [newClientPracticeName, setNewClientPracticeName] = useState("");
+  const [newClientError, setNewClientError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -122,7 +139,7 @@ export default function ClientsPage() {
           .filter((client) => client.id);
 
         if (nextClients.length > 0) {
-          setClients(nextClients);
+          setClients(filterRowsByPractice(nextClients, currentUserScope?.practice?.name));
           setLoadMessage("Loaded live client data from the API via the local app server.");
         } else {
           setClients([]);
@@ -138,11 +155,16 @@ export default function ClientsPage() {
               ? `Live API failed: ${error.message}. Showing sample records.`
               : "Unable to load live client data yet. Showing sample records.";
 
-          setClients(mockClientSummaries.map(mapClientSummaryToRow).slice(0, pageSize));
+          const fallbackRows = filterRowsByPractice(
+            mockClientSummaries.map(mapClientSummaryToRow),
+            currentUserScope?.practice?.name,
+          );
+
+          setClients(fallbackRows.slice(0, pageSize));
           setCurrentPage(1);
           setContinuationTokens([null]);
           setNextContinuationToken(null);
-          setTotalPages(Math.max(Math.ceil(mockClientSummaries.length / pageSize), 1));
+          setTotalPages(Math.max(Math.ceil(fallbackRows.length / pageSize), 1));
           setLoadMessage(message);
         }
       } finally {
@@ -157,7 +179,7 @@ export default function ClientsPage() {
     return () => {
       isMounted = false;
     };
-  }, [adviser, continuationTokens, currentPage, pageSize, search]);
+  }, [adviser, continuationTokens, currentPage, currentUserScope?.practice?.name, pageSize, search]);
 
   useEffect(() => {
     let isMounted = true;
@@ -199,6 +221,19 @@ export default function ClientsPage() {
   }, []);
 
   useEffect(() => {
+    if (searchParams.get("createClient") !== "1") {
+      return;
+    }
+
+    setNewClientName("");
+    setNewPartnerName("");
+    setNewClientAdviserName(currentUserScope?.name ?? "");
+    setNewClientPracticeName(currentUserScope?.practice?.name ?? "");
+    setNewClientError(null);
+    setIsCreateClientOpen(true);
+  }, [currentUserScope?.name, currentUserScope?.practice?.name, searchParams]);
+
+  useEffect(() => {
     let isMounted = true;
 
     async function loadAdvisers() {
@@ -207,22 +242,11 @@ export default function ClientsPage() {
       }
 
       try {
-        const role = normalizeRole(currentUserScope?.userRole);
         const params = new URLSearchParams();
+        const practiceName = currentUserScope?.practice?.name?.trim();
 
-        if (role === "compliancemanager" && currentUserScope?.licensee?.name) {
-          params.set("licenseeName", currentUserScope.licensee.name);
-        }
-
-        if (
-          (role === "adviser" || role === "supportstaff" || role === "paraplanner") &&
-          currentUserScope?.practice?.name
-        ) {
-          params.set("practiceName", currentUserScope.practice.name);
-
-          if (currentUserScope.licensee?.name) {
-            params.set("licenseeName", currentUserScope.licensee.name);
-          }
+        if (practiceName) {
+          params.set("practiceName", practiceName);
         }
 
         const response = await fetch(`/api/advisers${params.size ? `?${params.toString()}` : ""}`, {
@@ -246,24 +270,10 @@ export default function ClientsPage() {
         }
 
         const scopedAdvisers = (body?.data ?? []).filter((item) => {
-          const practiceName = currentUserScope?.practice?.name?.trim().toLowerCase();
-          const licenseeName = currentUserScope?.licensee?.name?.trim().toLowerCase();
+          const normalizedPracticeName = currentUserScope?.practice?.name?.trim().toLowerCase();
           const itemPractice = item.practiceName?.trim().toLowerCase();
-          const itemLicensee = item.licenseeName?.trim().toLowerCase();
 
-          if (!role) {
-            return true;
-          }
-
-          if (role === "compliancemanager") {
-            return !licenseeName || !itemLicensee || itemLicensee === licenseeName;
-          }
-
-          if (role === "adviser" || role === "supportstaff" || role === "paraplanner") {
-            return !practiceName || !itemPractice || itemPractice === practiceName;
-          }
-
-          return true;
+          return !normalizedPracticeName || itemPractice === normalizedPracticeName;
         });
 
         const names = scopedAdvisers
@@ -313,36 +323,39 @@ export default function ClientsPage() {
     setDeleteCandidate(null);
   }
 
+  function closeCreateClientModal() {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("createClient");
+    router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname);
+    setIsCreateClientOpen(false);
+    setNewClientError(null);
+  }
+
+  function handleCreateClient() {
+    const primaryName = newClientName.trim();
+    const partnerName = newPartnerName.trim();
+
+    if (!primaryName) {
+      setNewClientError("Enter the primary client name to start a new client record.");
+      return;
+    }
+
+    const draftClient: ClientRow = {
+      id: `draft-${crypto.randomUUID()}`,
+      name: partnerName ? `${primaryName} & ${partnerName}` : primaryName,
+      adviser: newClientAdviserName.trim() || currentUserScope?.name || "Unassigned Adviser",
+      category: "Draft",
+      practice: newClientPracticeName.trim() || currentUserScope?.practice?.name || "New client intake",
+    };
+
+    setClients((current) => [draftClient, ...current]);
+    setLoadMessage("Draft client added locally from the Add New flow.");
+    closeCreateClientModal();
+  }
+
   return (
     <div className={styles.page}>
-      <header className={styles.topbar}>
-        <div className={styles.topbarLeft}>
-          <button type="button" className={styles.gridButton} aria-label="App menu">
-            {Array.from({ length: 9 }).map((_, index) => (
-              <span key={index} className={styles.gridDot} />
-            ))}
-          </button>
-          <Link href="/admin" className={styles.inviteButton}>
-            + Invite New User
-          </Link>
-          <span className={styles.pageName}>Clients</span>
-        </div>
-
-        <div className={styles.topbarRight}>
-          <Link href="/finley" className={styles.topLink}>
-            <span className={styles.icon}>F</span>
-            <span>Finley</span>
-          </Link>
-          <Link href="/profile" className={styles.topLink}>
-            <UserInitialsAvatar className={styles.avatar} />
-            <span>Me</span>
-          </Link>
-          <Link href="/" className={styles.topLink}>
-            <span className={styles.icon}>→</span>
-            <span>Sign Out</span>
-          </Link>
-        </div>
-      </header>
+      <AppTopbar finleyHref="/finley" />
 
       <main className={styles.content}>
         <section className={styles.searchCard}>
@@ -477,6 +490,70 @@ export default function ClientsPage() {
               </button>
               <button type="button" className={styles.confirmDeleteButton} onClick={confirmDelete}>
                 Confirm delete
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isCreateClientOpen ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={closeCreateClientModal}>
+          <div
+            className={styles.createClientModal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-client-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="create-client-title" className={styles.createClientTitle}>
+              Create a new client or household in Finley
+            </h2>
+
+            <div className={styles.createClientGrid}>
+              <label className={styles.createClientField}>
+                <span className={styles.createClientLabel}>Primary client name</span>
+                <input
+                  className={styles.createClientInput}
+                  value={newClientName}
+                  onChange={(event) => setNewClientName(event.target.value)}
+                />
+              </label>
+              <label className={styles.createClientField}>
+                <span className={styles.createClientLabel}>Partner name</span>
+                <input
+                  className={styles.createClientInput}
+                  value={newPartnerName}
+                  onChange={(event) => setNewPartnerName(event.target.value)}
+                />
+              </label>
+            </div>
+
+            <label className={styles.createClientField}>
+              <span className={styles.createClientLabel}>Adviser</span>
+              <input
+                className={styles.createClientInput}
+                value={newClientAdviserName}
+                onChange={(event) => setNewClientAdviserName(event.target.value)}
+              />
+            </label>
+
+            <label className={styles.createClientField}>
+              <span className={styles.createClientLabel}>Practice</span>
+              <input
+                className={styles.createClientInput}
+                value={newClientPracticeName}
+                onChange={(event) => setNewClientPracticeName(event.target.value)}
+              />
+            </label>
+
+            {newClientError ? <div className={styles.createClientError}>{newClientError}</div> : null}
+
+            <div className={styles.createClientActions}>
+              <button type="button" className={styles.createClientCancelButton} onClick={closeCreateClientModal}>
+                Cancel
+              </button>
+              <button type="button" className={styles.createClientApproveButton} onClick={handleCreateClient}>
+                Create and select
               </button>
             </div>
           </div>
