@@ -1,0 +1,3 @@
+{
+  "/api/wizards/engagement-letter/generate/route": "app/api/wizards/engagement-letter/generate/route.js"
+}

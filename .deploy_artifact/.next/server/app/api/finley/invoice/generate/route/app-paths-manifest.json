@@ -1,0 +1,3 @@
+{
+  "/api/finley/invoice/generate/route": "app/api/finley/invoice/generate/route.js"
+}

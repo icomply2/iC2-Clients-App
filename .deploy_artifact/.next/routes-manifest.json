@@ -352,6 +352,22 @@
         "nxtPclientId": "nxtPclientId"
       },
       "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/fact\\-find(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards/record-of-advice",
+      "regex": "^/clients/([^/]+?)/wizards/record\\-of\\-advice(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/record\\-of\\-advice(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards/statement-of-advice",
+      "regex": "^/clients/([^/]+?)/wizards/statement\\-of\\-advice(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/statement\\-of\\-advice(?:/)?$"
     }
   ],
   "staticRoutes": [
@@ -422,10 +438,40 @@
       "namedRegex": "^/api/clients(?:/)?$"
     },
     {
+      "page": "/api/finley/assist-field",
+      "regex": "^/api/finley/assist\\-field(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/assist\\-field(?:/)?$"
+    },
+    {
       "page": "/api/finley/chat",
       "regex": "^/api/finley/chat(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/finley/chat(?:/)?$"
+    },
+    {
+      "page": "/api/finley/fact-find",
+      "regex": "^/api/finley/fact\\-find(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/fact\\-find(?:/)?$"
+    },
+    {
+      "page": "/api/finley/fact-find/save-step",
+      "regex": "^/api/finley/fact\\-find/save\\-step(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/fact\\-find/save\\-step(?:/)?$"
+    },
+    {
+      "page": "/api/finley/invoice/generate",
+      "regex": "^/api/finley/invoice/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/invoice/generate(?:/)?$"
+    },
+    {
+      "page": "/api/finley/prepare-edit",
+      "regex": "^/api/finley/prepare\\-edit(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/prepare\\-edit(?:/)?$"
     },
     {
       "page": "/api/integrations/rex-token/callback",
@@ -468,6 +514,18 @@
       "regex": "^/api/users/me(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/api/users/me(?:/)?$"
+    },
+    {
+      "page": "/api/wizards/engagement-letter/generate",
+      "regex": "^/api/wizards/engagement\\-letter/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/wizards/engagement\\-letter/generate(?:/)?$"
+    },
+    {
+      "page": "/api/wizards/fact-find/generate",
+      "regex": "^/api/wizards/fact\\-find/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/wizards/fact\\-find/generate(?:/)?$"
     },
     {
       "page": "/apple-icon.png",
