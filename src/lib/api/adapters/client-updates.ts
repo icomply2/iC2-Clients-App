@@ -32,10 +32,18 @@ export async function updatePersonDetails(
     },
   );
 
-  const body = (await response.json().catch(() => null)) as { message?: string | null } | null;
+  const text = await response.text().catch(() => "");
+  const body = (() => {
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as { message?: string | null };
+    } catch {
+      return null;
+    }
+  })();
 
   if (!response.ok) {
-    throw new Error(body?.message ?? "Unable to save changes.");
+    throw new Error(body?.message ?? (text.trim() || "Unable to save changes."));
   }
 
   return body;

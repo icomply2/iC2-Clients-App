@@ -15,6 +15,8 @@ import { FactFindSection } from "./fact-find-section";
 import { IdentityCheckSection } from "./identity-check-section";
 import { InsuranceSection } from "./insurance-section";
 import { PortfolioSection } from "./portfolio-section";
+import { RecordOfAdviceSection } from "./record-of-advice-section";
+import { StatementOfAdviceSection } from "./statement-of-advice-section";
 import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WizardsSection } from "./wizards-section";
 import styles from "./page.module.css";
@@ -28,6 +30,8 @@ type SectionKey =
   | "wizards"
   | "wizards-fact-find"
   | "wizards-engagement-letter"
+  | "wizards-record-of-advice"
+  | "wizards-statement-of-advice"
   | "assets"
   | "liabilities"
   | "income"
@@ -164,11 +168,15 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
             ) : section === "file-notes" ? (
               <FileNotesSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "wizards" ? (
-              <WizardsSection profile={profile} useMockFallback={useMockFallback} />
+              <WizardsSection clientId={clientId} profile={profile} useMockFallback={useMockFallback} />
             ) : section === "wizards-fact-find" ? (
-              <FactFindSection />
+              <FactFindSection clientId={clientId} profile={profile} />
             ) : section === "wizards-engagement-letter" ? (
-              <EngagementLetterSection />
+              <EngagementLetterSection clientId={clientId} profile={profile} />
+            ) : section === "wizards-record-of-advice" ? (
+              <RecordOfAdviceSection clientId={clientId} />
+            ) : section === "wizards-statement-of-advice" ? (
+              <StatementOfAdviceSection clientId={clientId} />
             ) : section === "dependents" ? (
               <DependentSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "assets" ? (

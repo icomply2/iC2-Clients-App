@@ -266,7 +266,6 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
           <div>Sub Type</div>
           <div>Subject</div>
           <div>Date</div>
-          <div>Created Date</div>
           <div>Action</div>
         </div>
 
@@ -280,7 +279,6 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
                 <div>{note.subType ?? ""}</div>
                 <div>{note.subject ?? ""}</div>
                 <div>{formatDate(note.serviceDate)}</div>
-                <div>{formatDate(note.createdDate)}</div>
                 <div className={styles.entitiesActions}>
                   <button type="button" className={styles.rowActionButton} onClick={() => openEditModal(note)} disabled={useMockFallback}>
                     Edit

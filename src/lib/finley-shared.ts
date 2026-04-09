@@ -32,6 +32,11 @@ export type FinleyDisplayCard = {
   rows: Array<{
     id: string;
     cells: string[];
+    editAction?: {
+      kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
+      recordId: string;
+      label?: string;
+    } | null;
   }>;
   footer?: string | null;
 };
@@ -46,6 +51,22 @@ export type FinleyEditorCard = {
     input: "text" | "select" | "textarea";
     value: string;
     options?: FinleyCardOption[];
+  }>;
+};
+
+export type FinleyTableEditorCard = {
+  kind: "collection_table";
+  title: string;
+  toolName: string;
+  columns: Array<{
+    key: string;
+    label: string;
+    input: "text" | "select";
+    options?: FinleyCardOption[];
+  }>;
+  rows: Array<{
+    id: string;
+    values: Record<string, string>;
   }>;
 };
 
@@ -94,7 +115,7 @@ export type FinleyChatResponse = {
     retryable?: boolean;
   }>;
   displayCard?: FinleyDisplayCard | null;
-  editorCard?: FinleyEditorCard | null;
+  editorCard?: FinleyEditorCard | FinleyTableEditorCard | null;
   suggestedActions: Array<{
     label: string;
     action: FinleyPlanAction;
@@ -104,4 +125,19 @@ export type FinleyChatResponse = {
     requestId: string;
     workflowId: string;
   };
+};
+
+export type FinleyFactFindStep = {
+  id: string;
+  title: string;
+  description: string;
+  guidance?: string | null;
+  displayCard?: FinleyDisplayCard | null;
+  editorCard?: FinleyEditorCard | FinleyTableEditorCard | null;
+};
+
+export type FinleyFactFindWorkflow = {
+  clientId?: string;
+  clientName?: string;
+  steps: FinleyFactFindStep[];
 };

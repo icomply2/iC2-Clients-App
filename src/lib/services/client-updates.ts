@@ -29,14 +29,18 @@ export function buildClientPatchPayload(changes: ClientDetailChanges) {
     typeof changes.state === "string" ||
     typeof changes.postCode === "string"
   ) {
-    payload.address = {
-      ...(typeof changes.street === "string" && changes.street.trim() ? { street: changes.street } : {}),
-      ...(typeof changes.suburb === "string" && changes.suburb.trim() ? { suburb: changes.suburb } : {}),
-      ...(typeof changes.state === "string" && changes.state.trim() ? { state: changes.state } : {}),
-      ...(typeof changes.postCode === "string" && changes.postCode.trim()
-        ? { postCode: changes.postCode, postcode: changes.postCode }
-        : {}),
-    };
+    payload.address = [
+      typeof changes.street === "string" ? changes.street.trim() : "",
+      typeof changes.suburb === "string" ? changes.suburb.trim() : "",
+      [
+        typeof changes.state === "string" ? changes.state.trim() : "",
+        typeof changes.postCode === "string" ? changes.postCode.trim() : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    ]
+      .filter(Boolean)
+      .join(", ");
   }
 
   if (typeof changes.riskProfile === "string" && changes.riskProfile.trim()) {
@@ -56,7 +60,9 @@ export function buildClientPatchPayload(changes: ClientDetailChanges) {
     };
   }
 
-  return payload;
+  return {
+    requestBody: payload,
+  };
 }
 
 export async function updateClientDetails(input: UpdateClientDetailsInput, context?: RequestContext) {

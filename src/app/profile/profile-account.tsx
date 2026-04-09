@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { DesktopBrokerLogo } from "@/components/desktop-broker-logo";
+import { Hub24Logo } from "@/components/hub24-logo";
 import { ProductRexLogo } from "@/components/product-rex-logo";
 import { UserInitialsAvatar } from "@/components/user-initials-avatar";
 import styles from "./page.module.css";
@@ -402,6 +404,112 @@ export function ProfileAccount({
                     </span>
                   </div>
                   {rexMessage ? <p className={styles.success}>{rexMessage}</p> : null}
+                </div>
+              </div>
+
+              <div className={styles.integrationCard}>
+                <div className={styles.integrationBrand}>
+                  <DesktopBrokerLogo className={styles.integrationLogo} />
+                </div>
+                <div className={styles.integrationDetails}>
+                  <div className={styles.integrationHeader}>
+                    <div>
+                      <h3 className={styles.cardTitle}>Desktop Broker</h3>
+                      <p className={styles.cardText}>
+                        Mortgage and lending integration placeholder for adviser workflows, scenario support, and future document automation.
+                      </p>
+                    </div>
+                    <span className={styles.statusPillMuted}>Coming soon</span>
+                  </div>
+
+                  <div className={styles.integrationGrid}>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration type</span>
+                      <strong>Lending platform</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Gateway</span>
+                      <strong>To be configured</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Connection</span>
+                      <strong>Not connected</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Desktop Broker account</span>
+                      <strong>Not connected yet</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Broker email</span>
+                      <strong>Not available</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration status</span>
+                      <strong>Placeholder only</strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.integrationActions}>
+                    <button type="button" className={styles.primaryButton} disabled>
+                      Connect Desktop Broker
+                    </button>
+                    <span className={styles.statusPillMuted}>
+                      Placeholder card only for now. Authentication and API wiring will be added in a later build.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.integrationCard}>
+                <div className={styles.integrationBrand}>
+                  <Hub24Logo className={styles.integrationLogo} />
+                </div>
+                <div className={styles.integrationDetails}>
+                  <div className={styles.integrationHeader}>
+                    <div>
+                      <h3 className={styles.cardTitle}>HUB24</h3>
+                      <p className={styles.cardText}>
+                        Platform integration placeholder for adviser portfolio data, investment workflows, and future automation across client records.
+                      </p>
+                    </div>
+                    <span className={styles.statusPillMuted}>Coming soon</span>
+                  </div>
+
+                  <div className={styles.integrationGrid}>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration type</span>
+                      <strong>Investment platform</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Gateway</span>
+                      <strong>To be configured</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Connection</span>
+                      <strong>Not connected</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Platform account</span>
+                      <strong>Not connected yet</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Account email</span>
+                      <strong>Not available</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration status</span>
+                      <strong>Placeholder only</strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.integrationActions}>
+                    <button type="button" className={styles.primaryButton} disabled>
+                      Connect HUB24
+                    </button>
+                    <span className={styles.statusPillMuted}>
+                      Placeholder card only for now. Authentication and portfolio sync will be added in a later build.
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

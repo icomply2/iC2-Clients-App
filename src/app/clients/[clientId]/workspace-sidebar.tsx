@@ -13,6 +13,8 @@ type SectionKey =
   | "wizards"
   | "wizards-fact-find"
   | "wizards-engagement-letter"
+  | "wizards-record-of-advice"
+  | "wizards-statement-of-advice"
   | "assets"
   | "liabilities"
   | "income"
@@ -82,7 +84,11 @@ function resolveHref(clientId: string, key: string, href: string) {
 
 export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
   const [wizardsOpen, setWizardsOpen] = useState(
-    section === "wizards" || section === "wizards-fact-find" || section === "wizards-engagement-letter",
+    section === "wizards"
+      || section === "wizards-fact-find"
+      || section === "wizards-engagement-letter"
+      || section === "wizards-record-of-advice"
+      || section === "wizards-statement-of-advice",
   );
 
   return (
@@ -90,7 +96,11 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
       {navItems.map((item) => {
         if (item.key === "wizards") {
           const isActive =
-            section === "wizards" || section === "wizards-fact-find" || section === "wizards-engagement-letter";
+            section === "wizards"
+            || section === "wizards-fact-find"
+            || section === "wizards-engagement-letter"
+            || section === "wizards-record-of-advice"
+            || section === "wizards-statement-of-advice";
 
           return (
             <div key={item.label} className={styles.navGroup}>
@@ -118,6 +128,18 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
                     className={`${styles.subnavItem} ${section === "wizards-engagement-letter" ? styles.subnavItemActive : ""}`.trim()}
                   >
                     Engagement Letter
+                  </Link>
+                  <Link
+                    href={`/clients/${clientId}/wizards/record-of-advice`}
+                    className={`${styles.subnavItem} ${section === "wizards-record-of-advice" ? styles.subnavItemActive : ""}`.trim()}
+                  >
+                    Record of Advice
+                  </Link>
+                  <Link
+                    href={`/clients/${clientId}/wizards/statement-of-advice`}
+                    className={`${styles.subnavItem} ${section === "wizards-statement-of-advice" ? styles.subnavItemActive : ""}`.trim()}
+                  >
+                    Statement of Advice
                   </Link>
                 </div>
               ) : null}

@@ -349,7 +349,116 @@
   min-height: 100%;
   max-height: 100%;
   padding: 1.25rem;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.workflowCard {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(15, 46, 87, 0.1);
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #fffef6 0%, #fff9df 100%);
+}
+
+.workflowHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.workflowDescription {
+  margin-top: 0.35rem;
+  color: #486581;
+  line-height: 1.5;
+}
+
+.workflowGuidance {
+  margin-top: 0.45rem;
+  color: #7c5f00;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.workflowStepBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  background: #fff2b3;
+  color: #7c5f00;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.workflowStepper {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+
+.workflowStepPill {
+  min-height: 2rem;
+  padding: 0 0.85rem;
+  border: 1px solid #d7e0ea;
+  border-radius: 999px;
+  background: #fff;
+  color: #486581;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workflowStepPillActive {
+  border-color: #f2c500;
+  background: #fff3ba;
+  color: #0f2e57;
+}
+
+.workflowActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.workflowActionsRight {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.fieldHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.inlineAssistButton {
+  min-height: 1.9rem;
+  padding: 0 0.65rem;
+  border: 1px solid #c7d4e3;
+  border-radius: 999px;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.inlineAssistButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .messageGroup {
@@ -398,127 +507,72 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 10rem;
-  height: 13rem;
+  width: 12rem;
+  height: 15rem;
 }
 
 .emptyPortraitBackdrop {
   position: absolute;
-  inset: 0.75rem 1rem 0 1rem;
-  border-radius: 1.2rem;
-  background: linear-gradient(180deg, #f3e5db 0%, #f9f6f1 100%);
+  inset: 0.75rem 0.8rem 0 0.8rem;
+  border-radius: 1.5rem;
+  background: radial-gradient(circle at 50% 18%, rgba(255, 214, 188, 0.95) 0%, rgba(243, 229, 219, 0.9) 34%, rgba(17, 56, 100, 0.12) 72%, rgba(17, 56, 100, 0) 100%);
 }
 
-.emptyPortraitCard {
+.emptyPortraitImage {
   position: relative;
-  width: 7rem;
-  height: 11rem;
-}
-
-.emptyPortraitHead {
-  position: absolute;
-  top: 0.4rem;
-  left: 50%;
-  width: 3rem;
-  height: 3.35rem;
-  border-radius: 2.2rem 2.2rem 2rem 2rem;
-  background: radial-gradient(circle at 50% 35%, #f5cfb7 0%, #e9b897 72%);
-  transform: translateX(-50%);
-  box-shadow: inset 0 -0.35rem 0 rgba(0, 0, 0, 0.04);
-}
-
-.emptyPortraitHead::before {
-  position: absolute;
-  top: -0.25rem;
-  left: 0.15rem;
-  width: 2.75rem;
-  height: 1.35rem;
-  border-radius: 1.5rem 1.5rem 0.8rem 0.8rem;
-  background: linear-gradient(180deg, #7a4a2e 0%, #5d3623 100%);
-  content: "";
-}
-
-.emptyPortraitBody {
-  position: absolute;
-  left: 50%;
-  bottom: 0.4rem;
-  width: 5.35rem;
-  height: 8.15rem;
-  border-radius: 2.4rem 2.4rem 1.2rem 1.2rem;
-  background: linear-gradient(180deg, #2f3138 0%, #1f2228 100%);
-  transform: translateX(-50%);
-}
-
-.emptyPortraitBody::before {
-  position: absolute;
-  top: 1.4rem;
-  left: 50%;
-  width: 0.85rem;
-  height: 3rem;
-  background: linear-gradient(180deg, #ffffff 0%, #e8edf4 100%);
-  transform: translateX(-50%);
-  content: "";
-}
-
-.emptyPortraitBody::after {
-  position: absolute;
-  top: 1.5rem;
-  left: 50%;
-  width: 0.45rem;
-  height: 2.65rem;
-  background: linear-gradient(180deg, #20242b 0%, #16181d 100%);
-  transform: translateX(-50%);
-  content: "";
-}
-
-.emptyPortraitTablet {
-  position: absolute;
-  left: 50%;
-  top: 4.95rem;
-  width: 2.15rem;
-  height: 3.2rem;
-  border-radius: 0.45rem;
-  background: linear-gradient(180deg, #9da6b3 0%, #6f7885 100%);
-  box-shadow: 0 0.35rem 0.75rem rgba(15, 46, 87, 0.14);
-  transform: translateX(-50%) rotate(-5deg);
-}
-
-.emptyPortraitTablet::before {
-  position: absolute;
-  top: 0.25rem;
-  left: 0.25rem;
-  right: 0.25rem;
-  bottom: 0.35rem;
-  border-radius: 0.25rem;
-  background: linear-gradient(180deg, #20242a 0%, #2b3138 100%);
-  content: "";
-}
-
-.emptyPortraitTablet::after {
-  position: absolute;
-  left: 50%;
-  bottom: 0.18rem;
-  width: 0.48rem;
-  height: 0.48rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.35);
-  transform: translateX(-50%);
-  content: "";
-}
-
-.emptyPortraitMark {
-  position: absolute;
-  right: 0.65rem;
-  top: 6.4rem;
-  color: #1f8bc5;
-  font-size: 0.52rem;
-  font-weight: 800;
+  width: auto;
+  height: 13rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0.7rem 1.4rem rgba(17, 56, 100, 0.14));
 }
 
 .emptyStateCopy {
   display: grid;
   gap: 0.35rem;
   max-width: 28rem;
+}
+
+.starterActions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.8rem;
+}
+
+.starterActionCard {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 1rem;
+  background: #fff;
+  color: #113864;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+
+.starterActionCard:hover:not(:disabled) {
+  border-color: #f2c500;
+  background: #fff3ba;
+  box-shadow: 0 0.6rem 1.4rem rgba(242, 197, 0, 0.18);
+  transform: translateY(-1px);
+}
+
+.starterActionCard:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.starterActionTitle {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.starterActionText {
+  color: #66788a;
+  font-size: 0.85rem;
+  line-height: 1.5;
 }
 
 .emptyStateTitle {
@@ -590,6 +644,32 @@
 .dataTableCell {
   border-top: 1px solid #edf2f7;
   word-break: break-word;
+}
+
+.dataTableActionCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.dataTableEditButton {
+  border: 1px solid #c9d7e6;
+  background: #ffffff;
+  color: #113864;
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dataTableEditButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dataTableActionPlaceholder {
+  color: #9aa9bc;
 }
 
 .planLabel {
@@ -679,6 +759,22 @@
   gap: 0.55rem;
 }
 
+.batchTableWrap {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.batchTableHeader,
+.batchTableRow {
+  display: grid;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.batchTableCell {
+  min-width: 0;
+}
+
 .confirmationField {
   display: grid;
   gap: 0.28rem;
@@ -697,6 +793,82 @@
   background: #fff;
   color: #243b53;
   font: inherit;
+}
+
+.uploadPlaceholder {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  border: 1px dashed #c6d2e1;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+}
+
+.uploadPlaceholderTitle {
+  color: #163a61;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.uploadPlaceholderText {
+  color: #6b7c93;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.uploadPlaceholderButton {
+  justify-self: start;
+  min-height: 2.4rem;
+  padding: 0 0.85rem;
+  border: 1px solid #c6d2e1;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.attachmentList {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.attachmentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.85rem;
+  background: #fff;
+}
+
+.attachmentName {
+  color: #243b53;
+  font-size: 0.88rem;
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.attachmentRemoveButton {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.7rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .planPreviewItem {
@@ -723,6 +895,96 @@
   word-break: break-word;
 }
 
+.engagementLetterList {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+.engagementLetterListItem {
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.75rem;
+  background: rgba(15, 46, 87, 0.05);
+  color: #163a61;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.invoiceCardForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.invoiceCheckboxField {
+  margin-top: -0.1rem;
+}
+
+.invoiceCheckboxRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #243b53;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.invoiceLineItemsCard {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid #f1d372;
+  border-radius: 0.9rem;
+  background: #fff;
+  overflow: hidden;
+}
+
+.invoiceLineItemsHeader,
+.invoiceLineItemRow {
+  display: grid;
+  grid-template-columns: 2fr 0.8fr 1fr 1fr auto;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.8rem 0.9rem;
+}
+
+.invoiceLineItemsHeader {
+  background: #f2c500;
+  color: #102a56;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.invoiceLineItemRow {
+  border-top: 1px solid #edf2f7;
+}
+
+.invoiceAddItemRow {
+  display: flex;
+  justify-content: center;
+  padding: 0.9rem;
+  border-top: 1px solid #edf2f7;
+}
+
+.invoiceAddItemButton {
+  border: 0;
+  background: transparent;
+  color: #243b53;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.invoicePrintToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #243b53;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .suggestionTitle {
   color: #113864;
   font-size: 0.92rem;
@@ -746,6 +1008,9 @@
   gap: 0.7rem;
   margin-top: auto;
   padding: 0.7rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   border-radius: 1rem;
   background: #f8fafc;
 }
@@ -770,10 +1035,33 @@
   gap: 1rem;
 }
 
+.composerActions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .composerHint {
   color: #6b7c93;
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.refreshButton {
+  min-height: 2.7rem;
+  padding: 0 1rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.8rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.refreshButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .sendButton {
@@ -896,6 +1184,10 @@
   .suggestionGrid {
     grid-template-columns: 1fr;
   }
+
+  .starterActions {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -919,6 +1211,12 @@
   }
 
   .confirmationEditor {
+    grid-template-columns: 1fr;
+  }
+
+  .invoiceCardForm,
+  .invoiceLineItemsHeader,
+  .invoiceLineItemRow {
     grid-template-columns: 1fr;
   }
 }
