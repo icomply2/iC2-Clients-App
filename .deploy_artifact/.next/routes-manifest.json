@@ -468,6 +468,12 @@
       "namedRegex": "^/api/finley/invoice/generate(?:/)?$"
     },
     {
+      "page": "/api/finley/invoice/prefill",
+      "regex": "^/api/finley/invoice/prefill(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/invoice/prefill(?:/)?$"
+    },
+    {
       "page": "/api/finley/prepare-edit",
       "regex": "^/api/finley/prepare\\-edit(?:/)?$",
       "routeKeys": {},

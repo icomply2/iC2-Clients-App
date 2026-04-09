@@ -1,3 +1,0 @@
-{
-  "/api/client-profiles/[profileId]/income/[incomeId]/route": "app/api/client-profiles/[profileId]/income/[incomeId]/route.js"
-}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { AppTopbar } from "@/components/app-topbar";
 import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
@@ -43,7 +43,7 @@ function filterRowsByPractice(rows: ClientRow[], practiceName?: string | null) {
   return rows.filter((row) => row.practice.trim().toLowerCase() === normalizedPractice);
 }
 
-export default function ClientsPage() {
+function ClientsPageContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -560,5 +560,13 @@ export default function ClientsPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export default function ClientsPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClientsPageContent />
+    </Suspense>
   );
 }
