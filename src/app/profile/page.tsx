@@ -1,4 +1,5 @@
 import { getUsers } from "@/lib/api/users";
+import { isAppAdminValue } from "@/lib/app-admin";
 import { readAuthTokenFromCookies, readCurrentUserFromCookies } from "@/lib/auth";
 import { readRexConnectionStateFromCookies } from "@/lib/rex-token";
 import { ProfileAccount } from "./profile-account";
@@ -22,6 +23,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   let role = "Not available yet";
   let status = "Unknown";
   let appAccess = "Not available yet";
+  let appAdminValue = "";
+  let isAppAdmin = false;
 
   if (token) {
     try {
@@ -43,6 +46,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         role = matchedUser.userRole ?? role;
         status = matchedUser.userStatus ?? status;
         appAccess = matchedUser.appAccess ?? appAccess;
+        appAdminValue = matchedUser.appAdmin == null ? "" : String(matchedUser.appAdmin);
+        isAppAdmin = isAppAdminValue(matchedUser.appAdmin);
       }
     } catch {
       // Fall back to the signed-in session details if the user list call is unavailable.
@@ -56,6 +61,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       role={role}
       status={status}
       appAccess={appAccess}
+      appAdminValue={appAdminValue}
+      isAppAdmin={isAppAdmin}
       rexConnected={rexConnection.connected}
       rexExpiresAt={rexConnection.expiresAt}
       integrationStatus={resolvedSearchParams?.integration === "productrex" ? resolvedSearchParams.status ?? null : null}

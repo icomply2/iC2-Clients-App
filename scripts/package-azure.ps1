@@ -1,11 +1,13 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$standaloneDir = Join-Path $root ".next\\standalone"
-$staticDir = Join-Path $root ".next\\static"
+$buildOutputDirName = ".next-azure"
+$buildOutputDir = Join-Path $root $buildOutputDirName
+$standaloneDir = Join-Path $buildOutputDir "standalone"
+$staticDir = Join-Path $buildOutputDir "static"
 $publicDir = Join-Path $root "public"
-$artifactDir = Join-Path $root ".deploy_artifact"
-$zipPath = Join-Path $root "ic2-clients-app-deploy.zip"
+$artifactDir = Join-Path $root ".azure_deploy_artifact"
+$zipPath = Join-Path $root "ic2-clients-app-deploy.local.zip"
 
 function Copy-DirectoryContents {
   param(
@@ -23,8 +25,26 @@ function Copy-DirectoryContents {
   }
 }
 
+if (Test-Path $buildOutputDir) {
+  Remove-Item -LiteralPath $buildOutputDir -Recurse -Force
+}
+
+Push-Location $root
+try {
+  $env:BUILD_OUTPUT_DIR = $buildOutputDirName
+  & npx next build --webpack
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "next build --webpack failed (exit code $LASTEXITCODE)."
+  }
+}
+finally {
+  Remove-Item Env:BUILD_OUTPUT_DIR -ErrorAction SilentlyContinue
+  Pop-Location
+}
+
 if (!(Test-Path $standaloneDir)) {
-  throw "Standalone build output was not found. Run 'npm run build' first."
+  throw "Standalone build output was not found after the Azure build."
 }
 
 if (Test-Path $artifactDir) {

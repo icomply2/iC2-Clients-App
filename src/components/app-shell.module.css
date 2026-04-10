@@ -1,104 +1,112 @@
 .shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 10.8rem minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
-  position: sticky;
-  top: 0;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
-  height: 100vh;
-  padding: 2rem 1.5rem;
-  border-right: 1px solid var(--border);
-  background: rgba(250, 247, 241, 0.82);
-  backdrop-filter: blur(22px);
+  gap: 1rem;
+  min-height: 100vh;
+  padding: 1rem 0.35rem 1rem;
+  background: #040404;
+  color: #fff;
 }
 
 .brand {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  padding: 0 0.5rem;
 }
 
 .eyebrow {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: #b7d8d6;
 }
 
 .title {
   margin: 0;
-  font-size: 1.6rem;
-  line-height: 1.1;
+  font-size: 0.95rem;
+  line-height: 1.25;
+  color: #fff;
 }
 
 .subtitle {
   margin: 0;
-  color: var(--muted);
-  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.55;
+  font-size: 0.82rem;
 }
 
 .nav {
   display: grid;
-  gap: 0.65rem;
+  gap: 0.25rem;
 }
 
 .navLink {
   display: grid;
-  gap: 0.28rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  gap: 0.18rem;
+  min-height: 2.25rem;
+  padding: 0.55rem 0.55rem;
+  border: 0;
+  border-radius: 0.6rem;
+  transition: background 160ms ease;
+  color: #fff;
 }
 
 .navLink:hover {
-  transform: translateY(-1px);
-  border-color: var(--border);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .navLinkActive {
-  border-color: rgba(31, 95, 91, 0.28);
-  background: linear-gradient(180deg, rgba(31, 95, 91, 0.14), rgba(31, 95, 91, 0.06));
+  background: #f2c500;
+  color: #102a56;
 }
 
 .navLabel {
   font-weight: 700;
+  font-size: 0.95rem;
 }
 
 .navDescription {
-  color: var(--muted);
-  font-size: 0.92rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.82rem;
   line-height: 1.4;
+}
+
+.navLinkActive .navDescription {
+  color: #102a56;
 }
 
 .profileCard {
   margin-top: auto;
+  margin-inline: 0.35rem;
   padding: 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .profileName {
   margin: 0;
   font-weight: 700;
+  color: #fff;
 }
 
 .profileRole {
   margin: 0.35rem 0 0;
-  color: var(--muted);
+  color: rgba(255, 255, 255, 0.78);
   line-height: 1.4;
 }
 
 .content {
-  padding: 2rem;
+  padding: 1.5rem 1.6rem 2rem;
+  background: #f3f4f6;
 }
 
 @media (max-width: 980px) {
@@ -107,9 +115,6 @@
   }
 
   .sidebar {
-    position: static;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    min-height: 0;
   }
 }

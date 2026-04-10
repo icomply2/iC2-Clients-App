@@ -358,6 +358,17 @@
   margin-top: 0.7rem;
 }
 
+.profileNestedSection {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.profileNestedHeading {
+  color: #102a56;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
 .profileSectionHeading {
   padding: 0.7rem 0.75rem;
   background: #fff8de;
@@ -1587,7 +1598,7 @@
 }
 
 .modalCard {
-  width: min(100%, 48rem);
+  width: min(100%, 56rem);
   padding: 1.1rem;
   border-radius: 0.45rem;
   background: #fff;
@@ -1620,27 +1631,34 @@
   gap: 0.8rem;
 }
 
+.modalSectionStack {
+  display: grid;
+  gap: 0.85rem;
+}
+
 .modalStepTabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
   margin-bottom: 1rem;
 }
 
 .modalStepTab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
   min-height: 2.35rem;
-  padding: 0 0.8rem;
+  padding: 0 0.55rem;
   border: 1px solid #d5dee8;
   border-radius: 999px;
   background: #fff;
   color: #425466;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .modalStepTabActive {
@@ -1667,6 +1685,10 @@
   gap: 0.35rem;
 }
 
+.modalFieldFull {
+  grid-column: 1 / -1;
+}
+
 .modalField span {
   font-size: 0.82rem;
   font-weight: 700;
@@ -1674,7 +1696,8 @@
 }
 
 .modalField input,
-.modalField select {
+.modalField select,
+.modalTextarea {
   min-height: 2.65rem;
   padding: 0 0.75rem;
   border: 1px solid #d7dee7;
@@ -1682,6 +1705,34 @@
   background: #fff;
   color: #243b53;
   font: inherit;
+}
+
+.modalTextarea {
+  min-height: 7rem;
+  padding: 0.75rem;
+  resize: vertical;
+}
+
+.modalEmploymentCard {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.45rem;
+  background: #f8fafc;
+}
+
+.modalEmploymentHeader,
+.modalInlineActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.modalEmptyText {
+  margin: 0;
+  color: #66788a;
 }
 
 .modalActions {

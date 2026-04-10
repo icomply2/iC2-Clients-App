@@ -98,20 +98,21 @@
   gap: 1rem;
 }
 
-.profileHero {
+.headerBar {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid #f1d372;
-  border-radius: 0.35rem;
-  background: #fffbea;
+  min-height: 3.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.3rem;
+  background: #f2c500;
 }
 
-.title {
-  margin: 0 0 0.35rem;
-  font-size: 1.7rem;
+.headerTitle {
+  color: #fff;
+  font-size: 0.98rem;
+  font-weight: 800;
 }
 
 .description,
@@ -139,6 +140,9 @@
 }
 
 .subnavButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2.35rem;
   padding: 0 0.95rem;
   border: 1px solid #d8dee6;
@@ -381,7 +385,7 @@
   .topbarRight,
   .subnav,
   .panelFooter,
-  .profileHero {
+  .headerBar {
     flex-wrap: wrap;
   }
 

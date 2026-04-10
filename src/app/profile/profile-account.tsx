@@ -14,6 +14,8 @@ type AccountProfileProps = {
   role: string;
   status: string;
   appAccess: string;
+  appAdminValue: string;
+  isAppAdmin: boolean;
   rexConnected: boolean;
   rexExpiresAt: string | null;
   integrationStatus: string | null;
@@ -35,6 +37,8 @@ export function ProfileAccount({
   role,
   status,
   appAccess,
+  appAdminValue,
+  isAppAdmin,
   rexConnected,
   rexExpiresAt,
   integrationStatus,
@@ -53,6 +57,18 @@ export function ProfileAccount({
   const [rexBusy, setRexBusy] = useState(false);
   const [rexMessage, setRexMessage] = useState<string | null>(null);
   const [rexUser, setRexUser] = useState<ProductRexUserSummary | null>(null);
+
+  const roleOptions = [
+    "Adviser",
+    "Compliance Manager",
+    "Practice Admin",
+    "Paraplanner",
+    "Support Staff",
+    "Licensee Admin",
+  ];
+  const statusOptions = ["Active", "Pending", "Suspended", "Inactive"];
+  const appAccessOptions = ["Full Access", "Standard Access", "Read Only", "No Access"];
+  const appAdminOptions = ["No", "App Admin", "ic2 App Admin"];
 
   useEffect(() => {
     if (integrationStatus === "connected") {
@@ -198,11 +214,9 @@ export function ProfileAccount({
       <AppTopbar finleyHref="/finley" />
 
       <main className={styles.content}>
-        <div className={styles.profileHero}>
-          <div>
-            <h1 className={styles.title}>Manage your account</h1>
-          </div>
-        </div>
+        <section className={styles.headerBar}>
+          <span className={styles.headerTitle}>Manage your account</span>
+        </section>
 
         <div className={styles.subnav}>
           <button
@@ -233,6 +247,11 @@ export function ProfileAccount({
           >
             Integrations
           </button>
+          {isAppAdmin ? (
+            <Link href="/admin" className={styles.subnavButton}>
+              Administration
+            </Link>
+          ) : null}
         </div>
 
         <section className={styles.panel}>
@@ -252,15 +271,51 @@ export function ProfileAccount({
               </div>
               <div className={styles.field}>
                 <span>Role</span>
-                <input value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} />
+                <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
+                  {!roleOptions.includes(jobTitle) && jobTitle ? <option value={jobTitle}>{jobTitle}</option> : null}
+                  {roleOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className={styles.field}>
                 <span>Account status</span>
-                <input value={status} readOnly />
+                <select value={status} onChange={() => undefined}>
+                  {!statusOptions.includes(status) && status ? <option value={status}>{status}</option> : null}
+                  {statusOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className={styles.field}>
                 <span>App access</span>
-                <input value={appAccess} readOnly />
+                <select value={appAccess} onChange={() => undefined}>
+                  {!appAccessOptions.includes(appAccess) && appAccess ? (
+                    <option value={appAccess}>{appAccess}</option>
+                  ) : null}
+                  {appAccessOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className={styles.field}>
+                <span>App admin value</span>
+                <select value={appAdminValue} onChange={() => undefined}>
+                  {!appAdminOptions.includes(appAdminValue) && appAdminValue ? (
+                    <option value={appAdminValue}>{appAdminValue}</option>
+                  ) : null}
+                  {appAdminOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
           ) : null}

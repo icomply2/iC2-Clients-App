@@ -28,9 +28,6 @@ export function AppTopbar({ finleyHref = "/finley" }: AppTopbarProps) {
         <Link href="/clients" className={styles.homeButton} aria-label="Go to client search">
           <span className={styles.homeIcon}>⌂</span>
         </Link>
-        <Link href="/admin" className={styles.inviteButton}>
-          + Invite New User
-        </Link>
         <span className={styles.pageName}>Finley</span>
       </div>
 

@@ -15,6 +15,15 @@ export type UserSummary = {
   id?: string | null;
   email?: string | null;
   name?: string | null;
+  complianceManager?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+  } | null;
+  subscriptionTier?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
   practice?: {
     id?: string | null;
     name?: string | null;
@@ -28,6 +37,54 @@ export type UserSummary = {
   appAccess?: string | null;
   appAdmin?: string | null;
   entityId?: string | null;
+};
+
+export type LicenseeDto = {
+  id?: string | null;
+  abn?: string | null;
+  account?: string | null;
+  asicLicenseeNumber?: string | null;
+  b2bPay?: string | null;
+  bsb?: string | null;
+  customPrompt?: boolean | null;
+  hubDoc?: string | null;
+  licenseeAddress?: string | null;
+  licenseeLogo?: string | null;
+  licenseePostCode?: string | null;
+  licenseeState?: string | null;
+  name?: string | null;
+  suburb?: string | null;
+  xplanUrl?: string | null;
+};
+
+export type PracticeDto = {
+  id?: string | null;
+  asicCarNumber?: string | null;
+  bankAccount?: string | null;
+  crm?: string | null;
+  ezidebitDK?: string | null;
+  ezidebitECDK?: string | null;
+  ezidebitId?: string | null;
+  practiceType?: string | null;
+  revenueProvider?: string | null;
+  saraSelfApproval?: string | null;
+  xeroContactId?: string | null;
+  name?: string | null;
+  status?: string | null;
+  licensee?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+};
+
+export type UpdateUserRequest = {
+  subscriptionId?: string | null;
+  practiceId?: string | null;
+  licenseeId?: string | null;
+  complianceManagerId?: string | null;
+  appAccess?: string | null;
+  userRole?: string | null;
+  userStatus?: string | null;
 };
 
 export type ClientSummary = {
@@ -66,10 +123,21 @@ export type PersonRecord = {
   mobile?: string | null;
   mobilePhone?: string | null;
   street?: string | null;
+  addressStreet?: string | null;
   suburb?: string | null;
+  addressSuburb?: string | null;
   state?: string | null;
+  addressState?: string | null;
   postCode?: string | null;
   postcode?: string | null;
+  addressPostCode?: string | null;
+  health_status?: string | null;
+  healthStatus?: string | null;
+  health_history?: string | null;
+  healthHistory?: string | null;
+  smoker?: string | null;
+  health_insurance?: string | null;
+  healthInsurance?: string | null;
   fdsAnnualAgreementRequired?: string | null;
   annualAgreementRequired?: string | null;
   fdsRequired?: string | null;
@@ -106,6 +174,26 @@ export type PersonRecord = {
     resultDisplay?: string | null;
     resultGraph?: string | null;
   } | null;
+  employment?: {
+    id?: string | null;
+    job_title?: string | null;
+    jobTitle?: string | null;
+    status?: string | null;
+    employer?: string | null;
+    salary?: string | null;
+    primaryEmployment?: boolean | null;
+    owner?: {
+      id?: string | null;
+      name?: string | null;
+    } | null;
+    frequency?:
+      | {
+          type?: string | null;
+          value?: string | null;
+        }
+      | string
+      | null;
+  }[] | null;
 };
 
 export type ClientAdviserRecord = {

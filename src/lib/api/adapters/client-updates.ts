@@ -36,7 +36,7 @@ export async function updatePersonDetails(
   const body = (() => {
     if (!text) return null;
     try {
-      return JSON.parse(text) as { message?: string | null };
+      return JSON.parse(text) as { message?: string | null; status?: boolean | null; data?: boolean | null };
     } catch {
       return null;
     }
@@ -44,6 +44,10 @@ export async function updatePersonDetails(
 
   if (!response.ok) {
     throw new Error(body?.message ?? (text.trim() || "Unable to save changes."));
+  }
+
+  if (body && (body.status === false || body.data === false)) {
+    throw new Error(body.message ?? "Unable to save changes.");
   }
 
   return body;

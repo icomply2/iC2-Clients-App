@@ -8,6 +8,18 @@ export type ClientDetailChanges = {
   maritalStatus?: string;
   residentStatus?: string;
   dateOfBirth?: string;
+  healthStatus?: string;
+  healthHistory?: string;
+  smoker?: string;
+  healthInsurance?: string;
+  employment?: {
+    id?: string;
+    jobTitle?: string;
+    status?: string;
+    employer?: string;
+    salary?: string;
+    frequency?: string;
+  }[];
   street?: string;
   suburb?: string;
   state?: string;

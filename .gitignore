@@ -3,10 +3,13 @@
 
 # next.js
 /.next
+/.next-azure
 /out
 
 # production
 /build
+/.azure_deploy_artifact
+ic2-clients-app-deploy.local.zip
 
 # misc
 .DS_Store
