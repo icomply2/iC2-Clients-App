@@ -1056,6 +1056,7 @@
   color: #113864;
   font: inherit;
   font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
 }
 
