@@ -56,10 +56,13 @@ New-Item -ItemType Directory -Path $artifactDir | Out-Null
 Copy-DirectoryContents -Source $standaloneDir -Destination $artifactDir
 
 $artifactNextDir = Join-Path $artifactDir ".next"
+$artifactBuildDir = Join-Path $artifactDir $buildOutputDirName
 New-Item -ItemType Directory -Path $artifactNextDir -Force | Out-Null
+New-Item -ItemType Directory -Path $artifactBuildDir -Force | Out-Null
 
 if (Test-Path $staticDir) {
   Copy-DirectoryContents -Source $staticDir -Destination (Join-Path $artifactNextDir "static")
+  Copy-DirectoryContents -Source $staticDir -Destination (Join-Path $artifactBuildDir "static")
 }
 
 if (Test-Path $publicDir) {
