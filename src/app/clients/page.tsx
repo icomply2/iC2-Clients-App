@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AppTopbar } from "@/components/app-topbar";
-import type { AdviserSummary, ClientSummary, UserSummary } from "@/lib/api/types";
+import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import styles from "./page.module.css";
 
@@ -25,7 +25,32 @@ type CurrentUserScope = {
 
 type CreateClientAdviserOption = {
   id: string;
+  entityId: string;
   name: string;
+  email: string;
+};
+
+type CreatedClientResponse = {
+  id?: string | null;
+  client?: { id?: string | null; name?: string | null } | null;
+  partner?: { id?: string | null; name?: string | null } | null;
+  adviser?: {
+    id?: string | null;
+    entity?: string | null;
+    name?: string | null;
+    email?: string | null;
+  } | null;
+  name?: string | null;
+  clientAdviserName?: string | null;
+  clientAdviserPracticeName?: string | null;
+  clientAdviserLicenseeName?: string | null;
+};
+
+type CreateClientResult = {
+  status?: boolean | null;
+  message?: string | null;
+  modelErrors?: { propertyName?: string | null; errorMessage?: string | null }[] | null;
+  data?: CreatedClientResponse | null;
 };
 
 function mapClientSummaryToRow(client: ClientSummary): ClientRow {
@@ -33,7 +58,7 @@ function mapClientSummaryToRow(client: ClientSummary): ClientRow {
     id: client.id ?? "",
     name: client.name ?? "Unnamed Client",
     adviser: client.clientAdviserName ?? "",
-    category: client.category ?? "",
+    category: client.category ?? client.clientCategory ?? "",
     practice: client.clientAdviserPracticeName ?? "",
   };
 }
@@ -46,6 +71,14 @@ function filterRowsByPractice(rows: ClientRow[], practiceName?: string | null) {
   }
 
   return rows.filter((row) => row.practice.trim().toLowerCase() === normalizedPractice);
+}
+
+function normalizeText(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function getCreateClientAdviserOptionValue(option: CreateClientAdviserOption) {
+  return option.entityId || option.id || option.email || option.name;
 }
 
 function ClientsPageContent() {
@@ -64,14 +97,16 @@ function ClientsPageContent() {
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [deleteCandidate, setDeleteCandidate] = useState<ClientRow | null>(null);
-  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
   const [newPartnerName, setNewPartnerName] = useState("");
-  const [newClientAdviserName, setNewClientAdviserName] = useState("");
+  const [newClientAdviserValue, setNewClientAdviserValue] = useState("");
   const [createClientAdviserOptions, setCreateClientAdviserOptions] = useState<CreateClientAdviserOption[]>([]);
   const [newClientPracticeName, setNewClientPracticeName] = useState("");
   const [newClientError, setNewClientError] = useState<string | null>(null);
+  const [creatingClient, setCreatingClient] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -114,7 +149,10 @@ function ClientsPageContent() {
                   partner?: { name?: string | null } | null;
                   adviser?: { name?: string | null } | null;
                   practice?: string | null;
+                  clientAdviserName?: string | null;
+                  clientAdviserPracticeName?: string | null;
                   category?: string | null;
+                  clientCategory?: string | null;
                 }>;
               };
               message?: string;
@@ -138,9 +176,10 @@ function ClientsPageContent() {
             mapClientSummaryToRow({
               id: item.id,
               name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
-              clientAdviserName: item.adviser?.name,
-              clientAdviserPracticeName: item.practice,
-              category: item.category,
+              clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
+              clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
+              category: item.category ?? item.clientCategory,
+              clientCategory: item.clientCategory,
             }),
           )
           .filter((client) => client.id);
@@ -226,11 +265,11 @@ function ClientsPageContent() {
 
     setNewClientName("");
     setNewPartnerName("");
-    setNewClientAdviserName(currentUserScope?.name ?? "");
+    setNewClientAdviserValue("");
     setNewClientPracticeName(currentUserScope?.practice?.name ?? "");
     setNewClientError(null);
     setIsCreateClientOpen(true);
-  }, [currentUserScope?.name, currentUserScope?.practice?.name, searchParams]);
+  }, [currentUserScope?.practice?.name, searchParams]);
 
   useEffect(() => {
     let isMounted = true;
@@ -306,9 +345,11 @@ function ClientsPageContent() {
     let isMounted = true;
 
     async function loadCreateClientAdvisers() {
-      const practiceName = currentUserScope?.practice?.name?.trim().toLowerCase();
+      const practiceName = currentUserScope?.practice?.name?.trim();
+      const normalizedPracticeName = practiceName?.toLowerCase();
+      const licenseeName = currentUserScope?.licensee?.name?.trim();
 
-      if (!practiceName) {
+      if (!normalizedPracticeName) {
         if (isMounted) {
           setCreateClientAdviserOptions([]);
         }
@@ -316,49 +357,134 @@ function ClientsPageContent() {
       }
 
       try {
-        const response = await fetch("/api/users", {
+        const usersResponse = await fetch("/api/users", {
           method: "GET",
           cache: "no-store",
         });
 
-        const body = (await response.json().catch(() => null)) as
+        const usersBody = (await usersResponse.json().catch(() => null)) as
           | {
-              data?: UserSummary[] | null;
+              data?:
+                | Array<{
+                    id?: string | null;
+                    name?: string | null;
+                    email?: string | null;
+                    userRole?: string | null;
+                    practice?: { name?: string | null } | null;
+                  }>
+                | null;
               message?: string;
             }
           | null;
 
-        if (!response.ok) {
-          throw new Error(body?.message ?? `Request failed with status ${response.status}.`);
+        if (!usersResponse.ok) {
+          throw new Error(usersBody?.message ?? `Request failed with status ${usersResponse.status}.`);
+        }
+
+        const scopedUserAdvisers = (usersBody?.data ?? [])
+          .filter((user) => user.name)
+          .filter((user) => normalizeText(user.userRole) === "adviser")
+          .filter((user) => normalizeText(user.practice?.name) === normalizedPracticeName)
+          .map((user) => ({
+            id: "",
+            entityId: user.entityId?.trim() ?? "",
+            name: user.name?.trim() ?? "",
+            email: user.email?.trim() ?? "",
+          }))
+          .filter((user) => user.name);
+
+        const adviserParams = new URLSearchParams();
+
+        if (licenseeName) {
+          adviserParams.set("licenseeName", licenseeName);
+        } else {
+          adviserParams.set("practiceName", practiceName);
+        }
+
+        const advisersResponse = await fetch(`/api/advisers?${adviserParams.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const advisersBody = (await advisersResponse.json().catch(() => null)) as
+          | {
+              data?: AdviserSummary[] | null;
+              message?: string;
+            }
+          | null;
+
+        if (!advisersResponse.ok) {
+          throw new Error(advisersBody?.message ?? `Request failed with status ${advisersResponse.status}.`);
         }
 
         if (!isMounted) {
           return;
         }
 
-        const adviserUsers = (body?.data ?? [])
+        const adviserRecords = (advisersBody?.data ?? [])
           .filter((user) => user.id && user.name)
-          .filter((user) => user.userRole?.trim().toLowerCase() === "adviser")
-          .filter((user) => user.practice?.name?.trim().toLowerCase() === practiceName)
           .map((user) => ({
             id: user.id ?? "",
             name: user.name?.trim() ?? "",
+            email: user.email?.trim() ?? "",
+            practiceName: user.practiceName?.trim() ?? "",
           }))
           .filter((user) => user.id && user.name);
 
-        const deduped = Array.from(new Map(adviserUsers.map((user) => [user.id, user])).values()).sort((left, right) =>
-          left.name.localeCompare(right.name),
-        );
+        const matchedAdvisers =
+          scopedUserAdvisers
+            .map((userAdviser) => {
+              const matchedRecord =
+                adviserRecords.find(
+                  (adviserRecord) =>
+                    userAdviser.email &&
+                    normalizeText(adviserRecord.email) === normalizeText(userAdviser.email),
+                ) ??
+                adviserRecords.find((adviserRecord) => normalizeText(adviserRecord.name) === normalizeText(userAdviser.name)) ??
+                null;
+
+              return matchedRecord
+                ? {
+                    id: matchedRecord.id,
+                    entityId: userAdviser.entityId,
+                    name: matchedRecord.name,
+                    email: matchedRecord.email,
+                  }
+                : userAdviser;
+            })
+            .filter((user) => user.name) ?? [];
+
+        const practiceScopedAdvisers = adviserRecords
+          .filter((user) => !user.practiceName || normalizeText(user.practiceName) === normalizedPracticeName)
+          .map((user) => ({
+            id: user.id,
+            entityId: "",
+            name: user.name,
+            email: user.email,
+          }));
+
+        const sourceOptions =
+          matchedAdvisers.length > 0
+            ? matchedAdvisers
+            : practiceScopedAdvisers.length > 0
+              ? practiceScopedAdvisers
+              : scopedUserAdvisers;
+
+        const deduped = Array.from(
+          new Map(
+            sourceOptions.map((user) => [`${normalizeText(user.name)}|${normalizeText(user.email)}`, user]),
+          ).values(),
+        ).sort((left, right) => left.name.localeCompare(right.name));
 
         setCreateClientAdviserOptions(deduped);
 
-        setNewClientAdviserName((current) => {
-          if (current && deduped.some((user) => user.name === current)) {
+        setNewClientAdviserValue((current) => {
+          if (current && deduped.some((user) => getCreateClientAdviserOptionValue(user) === current)) {
             return current;
           }
 
           const currentUserOption = deduped.find((user) => user.name === currentUserScope?.name);
-          return currentUserOption?.name ?? deduped[0]?.name ?? "";
+          return currentUserOption ? getCreateClientAdviserOptionValue(currentUserOption) : deduped[0] ? getCreateClientAdviserOptionValue(deduped[0]) : "";
         });
       } catch {
         if (!isMounted) {
@@ -383,17 +509,62 @@ function ClientsPageContent() {
   }
 
   function openDeleteConfirmation(client: ClientRow) {
-    setDeleteMessage(null);
+    setDeleteError(null);
     setDeleteCandidate(client);
   }
 
   function closeDeleteConfirmation() {
+    if (isDeletingClient) {
+      return;
+    }
+
+    setDeleteError(null);
     setDeleteCandidate(null);
   }
 
-  function confirmDelete() {
-    setDeleteMessage("Client deletion will be connected once the API endpoint is ready.");
-    setDeleteCandidate(null);
+  async function confirmDelete() {
+    if (!deleteCandidate || isDeletingClient) {
+      return;
+    }
+
+    setIsDeletingClient(true);
+    setDeleteError(null);
+
+    try {
+      const response = await fetch(`/api/client-profiles/${encodeURIComponent(deleteCandidate.id)}`, {
+        method: "DELETE",
+      });
+
+      const text = await response.text();
+      const body = text
+        ? (() => {
+            try {
+              return JSON.parse(text);
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+      if (!response.ok) {
+        const message =
+          body?.message ||
+          body?.title ||
+          (body?.errors ? Object.values(body.errors).flat().join(" ") : null) ||
+          text ||
+          `Delete client failed (${response.status}).`;
+
+        setDeleteError(message);
+        return;
+      }
+
+      setClients((currentClients) => currentClients.filter((client) => client.id !== deleteCandidate.id));
+      setDeleteCandidate(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Delete client failed.");
+    } finally {
+      setIsDeletingClient(false);
+    }
   }
 
   function closeCreateClientModal() {
@@ -404,25 +575,76 @@ function ClientsPageContent() {
     setNewClientError(null);
   }
 
-  function handleCreateClient() {
+  async function handleCreateClient() {
     const primaryName = newClientName.trim();
-    const partnerName = newPartnerName.trim();
 
     if (!primaryName) {
       setNewClientError("Enter the primary client name to start a new client record.");
       return;
     }
 
-    const draftClient: ClientRow = {
-      id: `draft-${crypto.randomUUID()}`,
-      name: partnerName ? `${primaryName} & ${partnerName}` : primaryName,
-      adviser: newClientAdviserName.trim() || currentUserScope?.name || "Unassigned Adviser",
-      category: "Draft",
-      practice: newClientPracticeName.trim() || currentUserScope?.practice?.name || "New client intake",
-    };
+    setCreatingClient(true);
+    setNewClientError(null);
 
-    setClients((current) => [draftClient, ...current]);
-    closeCreateClientModal();
+    try {
+      const selectedAdviserOption =
+        createClientAdviserOptions.find((option) => getCreateClientAdviserOptionValue(option) === newClientAdviserValue) ??
+        createClientAdviserOptions[0] ??
+        null;
+
+      const response = await fetch("/api/client-profiles", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          practice: newClientPracticeName.trim() || currentUserScope?.practice?.name || "",
+          licensee: currentUserScope?.licensee?.name || "",
+          adviser: selectedAdviserOption
+            ? {
+                id: selectedAdviserOption.id || null,
+                entity: selectedAdviserOption.entityId || null,
+                name: selectedAdviserOption.name || null,
+                email: selectedAdviserOption.email || null,
+              }
+            : {},
+          client: {
+            name: primaryName,
+            status: "Client",
+            clientCategory: "Draft",
+          },
+          partner: newPartnerName.trim()
+            ? {
+                name: newPartnerName.trim(),
+                status: "Client",
+                clientCategory: "Draft",
+              }
+            : {},
+        }),
+        cache: "no-store",
+      });
+
+      const body = (await response.json().catch(() => null)) as CreateClientResult | null;
+
+      const createdProfileId = body?.data?.id?.trim() || "";
+      const modelErrorMessage = body?.modelErrors?.map((entry) => entry.errorMessage).filter(Boolean).join(", ");
+
+      if (!response.ok || body?.status === false || !createdProfileId) {
+        const fallbackMessage = body
+          ? `Create client failed (${response.status}): ${JSON.stringify(body)}`
+          : `Create client failed (${response.status}).`;
+
+        throw new Error(modelErrorMessage || body?.message || fallbackMessage);
+      }
+
+      closeCreateClientModal();
+      router.push(`/clients/${createdProfileId}`);
+      router.refresh();
+    } catch (error) {
+      setNewClientError(error instanceof Error ? error.message : "Unable to create the client profile.");
+    } finally {
+      setCreatingClient(false);
+    }
   }
 
   return (
@@ -459,7 +681,6 @@ function ClientsPageContent() {
         </section>
 
         <section className={styles.tableCard}>
-          {deleteMessage ? <p className={styles.dataNotice}>{deleteMessage}</p> : null}
           <div className={styles.tableHeader}>
             <div>Client Name</div>
             <div>Adviser Name</div>
@@ -554,13 +775,24 @@ function ClientsPageContent() {
             <p className={styles.confirmText}>
               Are you sure you want to delete <strong>{deleteCandidate.name}</strong>?
             </p>
-            <p className={styles.confirmSubtext}>This action will be enabled once the client delete API endpoint is ready.</p>
+            <p className={styles.confirmSubtext}>This will remove the client profile from Finley.</p>
+            {deleteError ? <p className={styles.confirmError}>{deleteError}</p> : null}
             <div className={styles.confirmActions}>
-              <button type="button" className={styles.confirmCancelButton} onClick={closeDeleteConfirmation}>
+              <button
+                type="button"
+                className={styles.confirmCancelButton}
+                onClick={closeDeleteConfirmation}
+                disabled={isDeletingClient}
+              >
                 Cancel
               </button>
-              <button type="button" className={styles.confirmDeleteButton} onClick={confirmDelete}>
-                Confirm delete
+              <button
+                type="button"
+                className={styles.confirmDeleteButton}
+                onClick={confirmDelete}
+                disabled={isDeletingClient}
+              >
+                {isDeletingClient ? "Deleting..." : "Confirm delete"}
               </button>
             </div>
           </div>
@@ -603,12 +835,15 @@ function ClientsPageContent() {
               <span className={styles.createClientLabel}>Adviser</span>
               <select
                 className={styles.createClientInput}
-                value={newClientAdviserName}
-                onChange={(event) => setNewClientAdviserName(event.target.value)}
+                value={newClientAdviserValue}
+                onChange={(event) => setNewClientAdviserValue(event.target.value)}
               >
                 {createClientAdviserOptions.length ? (
                   createClientAdviserOptions.map((adviserOption) => (
-                    <option key={adviserOption.id} value={adviserOption.name}>
+                    <option
+                      key={`${adviserOption.id}-${adviserOption.entityId}-${adviserOption.email}-${adviserOption.name}`}
+                      value={getCreateClientAdviserOptionValue(adviserOption)}
+                    >
                       {adviserOption.name}
                     </option>
                   ))
@@ -633,8 +868,13 @@ function ClientsPageContent() {
               <button type="button" className={styles.createClientCancelButton} onClick={closeCreateClientModal}>
                 Cancel
               </button>
-              <button type="button" className={styles.createClientApproveButton} onClick={handleCreateClient}>
-                Create and select
+              <button
+                type="button"
+                className={styles.createClientApproveButton}
+                onClick={() => void handleCreateClient()}
+                disabled={creatingClient}
+              >
+                {creatingClient ? "Creating..." : "Create and select"}
               </button>
             </div>
           </div>

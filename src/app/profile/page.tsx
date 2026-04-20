@@ -30,6 +30,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   let appAdminValue = "";
   let isAppAdmin = false;
   let userId = currentUser?.id ?? "";
+  let practiceName = "";
+  const practiceAbn = "";
+  let licenseeName = "";
+  let complianceManagerName = "";
 
   if (token) {
     try {
@@ -54,6 +58,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         appAccess = matchedUser.appAccess ?? appAccess;
         appAdminValue = matchedUser.appAdmin == null ? "" : String(matchedUser.appAdmin);
         isAppAdmin = isAppAdminValue(matchedUser.appAdmin);
+        practiceName = matchedUser.practice?.name ?? practiceName;
+        licenseeName = matchedUser.licensee?.name ?? licenseeName;
+        complianceManagerName = matchedUser.complianceManager?.name ?? complianceManagerName;
       }
     } catch {
       // Fall back to the signed-in session details if the user list call is unavailable.
@@ -70,6 +77,10 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       appAccess={appAccess}
       appAdminValue={appAdminValue}
       isAppAdmin={isAppAdmin}
+      practiceName={practiceName}
+      practiceAbn={practiceAbn}
+      licenseeName={licenseeName}
+      complianceManagerName={complianceManagerName}
       rexConnected={rexConnection.connected}
       rexExpiresAt={rexConnection.expiresAt}
       desktopBrokerConfigured={isDesktopBrokerConfigured()}

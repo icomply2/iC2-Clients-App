@@ -1937,6 +1937,268 @@
   color: #fff;
 }
 
+.portfolioList {
+  display: grid;
+  gap: 1rem;
+}
+
+.portfolioGroup {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem 0 0;
+  border-top: 1px solid #f2c656;
+}
+
+.portfolioGroup:first-of-type {
+  padding-top: 0.15rem;
+  border-top: 0;
+}
+
+.portfolioGroupHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.portfolioGroupHeaderRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.portfolioAccountTitle {
+  margin: 0;
+  color: #102a56;
+  font-size: 1.05rem;
+}
+
+.portfolioAccountMeta {
+  margin: 0.2rem 0 0;
+  color: #556987;
+  font-size: 0.88rem;
+}
+
+.portfolioDescription {
+  margin: -0.15rem 0 0;
+  color: #334e68;
+  line-height: 1.5;
+}
+
+.portfolioTableHeader,
+.portfolioRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 0.65fr) minmax(0, 0.85fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.65fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.portfolioTableHeader {
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.35rem;
+  background: #ffd746;
+  color: #102a56;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.portfolioRow {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #f2c656;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #243b53;
+  font-size: 0.9rem;
+}
+
+.portfolioRowActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.portfolioHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.portfolioActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #6b7280;
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.portfolioActionButton:hover {
+  border-color: #cbd5e1;
+  color: #374151;
+}
+
+.portfolioHeaderButton {
+  width: 1.85rem;
+  height: 1.85rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.portfolioActionSpacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.portfolioSummaryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 0.65fr) minmax(0, 0.85fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.65fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.65rem 0.9rem 0.15rem;
+  color: #102a56;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.portfolioSubtotalRow {
+  padding-top: 0.05rem;
+}
+
+.portfolioOverallTotalRow {
+  margin-top: 0.2rem;
+  padding-top: 0.8rem;
+  border-top: 2px solid #f2c656;
+}
+
+.portfolioSummaryLabel {
+  text-align: left;
+}
+
+.negativeValue {
+  color: #b42318;
+}
+
+.portfolioModalCard {
+  width: min(100%, 56rem);
+}
+
+.portfolioStepTabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.portfolioStepBody {
+  display: grid;
+  gap: 1rem;
+}
+
+.portfolioCheckboxField {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.65rem;
+  color: #334155;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.portfolioCheckboxField input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.portfolioDraftActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.portfolioDraftList {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.portfolioDraftHeader,
+.portfolioDraftRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.portfolioDraftHeader {
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.35rem;
+  background: #ffd746;
+  color: #102a56;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.portfolioDraftRow {
+  min-height: 3rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.45rem;
+  background: #f8fafc;
+  color: #243b53;
+  font-size: 0.9rem;
+}
+
+.portfolioDraftMeta {
+  margin-top: 0.25rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.portfolioRemoveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.95rem;
+  height: 1.95rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #6b7280;
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.portfolioRemoveButton:hover {
+  border-color: #cbd5e1;
+  color: #374151;
+}
+
+.portfolioDraftTotalRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.15rem 0.9rem 0;
+  color: #102a56;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.portfolioDraftTotalLabel {
+  text-align: left;
+}
+
+.portfolioDraftTotalValue {
+  text-align: left;
+}
+
 @media (max-width: 1100px) {
   .layout {
     grid-template-columns: 1fr;

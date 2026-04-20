@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { AppTopbar } from "@/components/app-topbar";
 import { DesktopBrokerLogo } from "@/components/desktop-broker-logo";
 import { Hub24Logo } from "@/components/hub24-logo";
@@ -18,6 +18,10 @@ type AccountProfileProps = {
   appAccess: string;
   appAdminValue: string;
   isAppAdmin: boolean;
+  practiceName: string;
+  practiceAbn: string;
+  licenseeName: string;
+  complianceManagerName: string;
   rexConnected: boolean;
   rexExpiresAt: string | null;
   desktopBrokerConfigured: boolean;
@@ -44,6 +48,10 @@ export function ProfileAccount({
   appAccess,
   appAdminValue,
   isAppAdmin,
+  practiceName,
+  practiceAbn,
+  licenseeName,
+  complianceManagerName,
   rexConnected,
   rexExpiresAt,
   desktopBrokerConfigured,
@@ -62,6 +70,7 @@ export function ProfileAccount({
   const [defaultLandingPage, setDefaultLandingPage] = useState("/clients");
   const [defaultPageSize, setDefaultPageSize] = useState("10");
   const [compactLists, setCompactLists] = useState(false);
+  const [practiceLogoName, setPracticeLogoName] = useState("");
   const [busy, setBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -80,6 +89,11 @@ export function ProfileAccount({
   const statusOptions = ["Active", "Pending", "Suspended", "Inactive"];
   const appAccessOptions = ["Full Access", "Standard Access", "Read Only", "No Access"];
   const appAdminOptions = ["No", "App Admin", "ic2 App Admin"];
+
+  function handlePracticeLogoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setPracticeLogoName(file?.name ?? "");
+  }
 
   useEffect(() => {
     if (integrationStatus === "connected") {
@@ -291,69 +305,104 @@ export function ProfileAccount({
 
         <section className={styles.panel}>
           {activeTab === "account" ? (
-            <div className={styles.panelGrid}>
-              <div className={styles.field}>
-                <span>Full name</span>
-                <input value={fullName} onChange={(event) => setFullName(event.target.value)} readOnly />
+            <div className={styles.accountSectionStack}>
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Account Details</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>Full name</span>
+                    <input value={fullName} onChange={(event) => setFullName(event.target.value)} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Email</span>
+                    <input value={emailAddress} onChange={(event) => setEmailAddress(event.target.value)} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Preferred phone</span>
+                    <input value={preferredPhone} onChange={(event) => setPreferredPhone(event.target.value)} placeholder="Preferred phone" readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Role</span>
+                    <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
+                      {!roleOptions.includes(jobTitle) && jobTitle ? <option value={jobTitle}>{jobTitle}</option> : null}
+                      {roleOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>Account status</span>
+                    <select value={accountStatus} onChange={(event) => setAccountStatus(event.target.value)}>
+                      {!statusOptions.includes(accountStatus) && accountStatus ? <option value={accountStatus}>{accountStatus}</option> : null}
+                      {statusOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>App access</span>
+                    <select value={accountAccess} onChange={(event) => setAccountAccess(event.target.value)}>
+                      {!appAccessOptions.includes(accountAccess) && accountAccess ? (
+                        <option value={accountAccess}>{accountAccess}</option>
+                      ) : null}
+                      {appAccessOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>App admin value</span>
+                    <select value={appAdminSelection} onChange={(event) => setAppAdminSelection(event.target.value)} disabled>
+                      {!appAdminOptions.includes(appAdminSelection) && appAdminSelection ? (
+                        <option value={appAdminSelection}>{appAdminSelection}</option>
+                      ) : null}
+                      {appAdminOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-              <div className={styles.field}>
-                <span>Email</span>
-                <input value={emailAddress} onChange={(event) => setEmailAddress(event.target.value)} readOnly />
+
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Practice Details</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>Practice name</span>
+                    <input value={practiceName} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Practice ABN</span>
+                    <input value={practiceAbn} placeholder="Practice ABN" readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Licensee name</span>
+                    <input value={licenseeName} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Compliance manager</span>
+                    <input value={complianceManagerName} readOnly />
+                  </div>
+                  <label className={`${styles.field} ${styles.logoUploadField}`}>
+                    <span>Practice logo</span>
+                    <input type="file" accept="image/*" onChange={handlePracticeLogoChange} />
+                    <span className={styles.uploadMeta}>
+                      {practiceLogoName || "Choose a logo file to upload"}
+                    </span>
+                  </label>
+                </div>
               </div>
-              <div className={styles.field}>
-                <span>Preferred phone</span>
-                <input value={preferredPhone} onChange={(event) => setPreferredPhone(event.target.value)} placeholder="Preferred phone" readOnly />
-              </div>
-              <div className={styles.field}>
-                <span>Role</span>
-                <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
-                  {!roleOptions.includes(jobTitle) && jobTitle ? <option value={jobTitle}>{jobTitle}</option> : null}
-                  {roleOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className={styles.field}>
-                <span>Account status</span>
-                <select value={accountStatus} onChange={(event) => setAccountStatus(event.target.value)}>
-                  {!statusOptions.includes(accountStatus) && accountStatus ? <option value={accountStatus}>{accountStatus}</option> : null}
-                  {statusOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className={styles.field}>
-                <span>App access</span>
-                <select value={accountAccess} onChange={(event) => setAccountAccess(event.target.value)}>
-                  {!appAccessOptions.includes(accountAccess) && accountAccess ? (
-                    <option value={accountAccess}>{accountAccess}</option>
-                  ) : null}
-                  {appAccessOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className={styles.field}>
-                <span>App admin value</span>
-                <select value={appAdminSelection} onChange={(event) => setAppAdminSelection(event.target.value)} disabled>
-                  {!appAdminOptions.includes(appAdminSelection) && appAdminSelection ? (
-                    <option value={appAdminSelection}>{appAdminSelection}</option>
-                  ) : null}
-                  {appAdminOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
+
               <p className={styles.cardText}>
-                The live user endpoint currently saves role, account status, and app access. Name, email, phone, and app admin remain backend-managed for now.
+                The live user endpoint currently saves role, account status, and app access. Name, email, phone, app admin, and practice details remain backend-managed for now. Practice logo upload is UI-ready but not connected to storage yet.
               </p>
             </div>
           ) : null}

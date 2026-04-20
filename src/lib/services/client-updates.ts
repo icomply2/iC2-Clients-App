@@ -1,5 +1,5 @@
 import type { UpdateClientDetailsInput } from "@/lib/api/contracts/client-updates";
-import type { PersonRecord } from "@/lib/api/types";
+import type { ClientAdviserRecord, PersonRecord } from "@/lib/api/types";
 import { updatePersonDetails } from "@/lib/api/adapters/client-updates";
 
 type RequestContext = {
@@ -186,6 +186,41 @@ export async function updateClientDetails(input: UpdateClientDetailsInput, conte
 
 export async function updatePartnerDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
   return updatePersonDetails({ ...input, target: "partner" }, buildClientPersonPayload(input), context);
+}
+
+export async function updateClientProfileAdviser(
+  profileId: string,
+  payload: {
+    adviser: ClientAdviserRecord | null;
+    practiceName?: string | null;
+    licenseeName?: string | null;
+  },
+  context?: RequestContext,
+) {
+  const response = await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(profileId)}`, context), {
+    method: "PATCH",
+    headers: buildHeaders(context),
+    body: JSON.stringify({
+      adviser: payload.adviser,
+    }),
+    cache: "no-store",
+  });
+
+  const text = await response.text().catch(() => "");
+  const body = (() => {
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as { message?: string | null; status?: boolean | null; data?: boolean | null };
+    } catch {
+      return null;
+    }
+  })();
+
+  if (!response.ok || (body && body.status === false)) {
+    throw new Error(body?.message ?? (text.trim() || "Unable to save adviser details."));
+  }
+
+  return body?.data ?? true;
 }
 
 function resolveUrl(path: string, context?: RequestContext) {

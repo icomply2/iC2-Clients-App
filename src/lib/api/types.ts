@@ -94,6 +94,7 @@ export type ClientSummary = {
   clientAdviserPracticeName?: string | null;
   clientAdviserLicenseeName?: string | null;
   category?: string | null;
+  clientCategory?: string | null;
 };
 
 export type AdviserSummary = {
@@ -357,6 +358,43 @@ export type ClientPensionRecord = {
     type?: string | null;
     value?: string | null;
   } | null;
+};
+
+export type ClientAccountRecord = {
+  id?: string | null;
+  accountName?: string | null;
+  accountDescription?: string | null;
+};
+
+export type ClientPortfolioAccountRecord = {
+  id?: string | null;
+  clientId?: string | null;
+  accountName?: string | null;
+  accountDescription?: string | null;
+  owner?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  jointAccount?: boolean | null;
+  licensee?: string | null;
+  practice?: string | null;
+};
+
+export type ClientPortfolioRecord = {
+  id?: string | null;
+  licenseeName?: string | null;
+  practiceName?: string | null;
+  account?: ClientAccountRecord | null;
+  positionExchange?: string | null;
+  positionDescription?: string | null;
+  positionCode?: string | null;
+  units?: number | null;
+  holdingPrice?: number | null;
+  holdingValue?: number | null;
+  valueCurrency?: string | null;
+  nativeValue?: number | null;
+  nativeMarketprice?: number | null;
+  nativeCurrency?: string | null;
 };
 
 export type ClientInsuranceRecord = {

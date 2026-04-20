@@ -284,7 +284,7 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
             ) : section === "insurance" ? (
               <InsuranceSection clientId={clientId} profile={profile} useMockFallback={useMockFallback} />
             ) : section === "portfolio" ? (
-              <PortfolioSection />
+              <PortfolioSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "liabilities" ||
               section === "income" ||
               section === "expenses" ||

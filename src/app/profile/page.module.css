@@ -166,6 +166,24 @@
   gap: 0.9rem 1rem;
 }
 
+.accountSectionStack {
+  display: grid;
+  gap: 1rem;
+}
+
+.sectionBlock {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.sectionBanner {
+  padding: 0.7rem 0.8rem;
+  background: #fff7d6;
+  color: #102a56;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
 .field {
   display: grid;
   gap: 0.35rem;
@@ -186,6 +204,19 @@
   background: #fff;
   color: #243b53;
   font: inherit;
+}
+
+.logoUploadField input[type="file"] {
+  min-height: auto;
+  padding: 0.6rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.uploadMeta {
+  color: #66788a;
+  font-size: 0.84rem;
 }
 
 .securityGrid {

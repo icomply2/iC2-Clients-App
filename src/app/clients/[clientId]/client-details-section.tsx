@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import {
   deleteEmploymentRecord,
   updateClientDetails,
+  updateClientProfileAdviser,
   updatePartnerDetails,
   updatePersonRiskProfile,
   upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
-import type { ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
+import type { ClientAdviserRecord, ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
 import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
@@ -501,7 +502,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
   const [saving, setSaving] = useState(false);
   const [removedEmploymentIds, setRemovedEmploymentIds] = useState<string[]>([]);
   const [adviserName, setAdviserName] = useState(profile.adviser?.name ?? "");
-  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const hasPartner = hasMeaningfulPerson(partner);
 
   const activePerson = selectedPerson === "partner" && hasPartner ? partner : client;
@@ -542,7 +543,10 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
               .filter((user) => user.userRole?.trim().toLowerCase() === "adviser")
               .filter((user) => user.practice?.name?.trim().toLowerCase() === practiceName)
               .filter((user) => typeof user.name === "string" && user.name.trim())
-              .map((user) => [user.id ?? user.name!, { id: user.id ?? user.name!, name: user.name!.trim() }]),
+              .map((user) => [
+                user.id ?? user.name!,
+                { id: user.id ?? user.name!, name: user.name!.trim(), email: user.email?.trim() ?? "" },
+              ]),
           ).values(),
         ).sort((left, right) => left.name.localeCompare(right.name));
 
@@ -616,6 +620,17 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     setSaveError(null);
 
     try {
+      const selectedAdviserOption = adviserOptions.find((option) => option.name === draft.adviser) ?? null;
+      const nextAdviser: ClientAdviserRecord | null =
+        draft.adviser.trim()
+          ? {
+              id: selectedAdviserOption?.id ?? profile.adviser?.id ?? null,
+              name: draft.adviser.trim(),
+              email: selectedAdviserOption?.email || profile.adviser?.email || null,
+              entity: profile.adviser?.entity ?? null,
+            }
+          : null;
+
       const changes = {
         title: draft.title,
         name: draft.name,
@@ -639,6 +654,17 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         agreementType: draft.agreementType,
         nextAnniversaryDate: draft.nextAnniversaryDate,
       };
+
+      if (draft.adviser.trim() !== adviserName.trim()) {
+        await updateClientProfileAdviser(
+          profile.id,
+          {
+            adviser: nextAdviser,
+            practiceName: currentUserScope?.practice?.name ?? profile.practice ?? null,
+            licenseeName: currentUserScope?.licensee?.name ?? profile.licensee ?? null,
+          },
+        );
+      }
 
       if (editing === "client") {
         await updateClientDetails({
