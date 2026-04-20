@@ -1,3 +1,5 @@
+import type { PersonRecord } from "@/lib/api/types";
+
 export type ClientDetailChanges = {
   title?: string;
   name?: string;
@@ -35,5 +37,6 @@ export type UpdateClientDetailsInput = {
   profileId: string;
   personId: string;
   changes: ClientDetailChanges;
+  person?: PersonRecord | null;
   target?: "client" | "partner";
 };

@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
         {
           profileId,
           personId,
+          person: profile.partner ?? null,
           changes,
         },
         context,
@@ -117,6 +118,7 @@ export async function POST(request: NextRequest) {
         {
           profileId,
           personId,
+          person: profile.client ?? null,
           changes,
         },
         context,

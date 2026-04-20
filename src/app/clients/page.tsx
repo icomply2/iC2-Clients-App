@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AppTopbar } from "@/components/app-topbar";
-import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
+import type { AdviserSummary, ClientSummary, UserSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import styles from "./page.module.css";
 
@@ -23,12 +23,17 @@ type CurrentUserScope = {
   licensee?: { id?: string | null; name?: string | null } | null;
 };
 
+type CreateClientAdviserOption = {
+  id: string;
+  name: string;
+};
+
 function mapClientSummaryToRow(client: ClientSummary): ClientRow {
   return {
     id: client.id ?? "",
     name: client.name ?? "Unnamed Client",
     adviser: client.clientAdviserName ?? "",
-    category: "",
+    category: client.category ?? "",
     practice: client.clientAdviserPracticeName ?? "",
   };
 }
@@ -51,20 +56,20 @@ function ClientsPageContent() {
   const [adviser, setAdviser] = useState("All advisers");
   const [adviserOptions, setAdviserOptions] = useState<string[]>(["All advisers"]);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
-  const [clients, setClients] = useState<ClientRow[]>(() => mockClientSummaries.map(mapClientSummaryToRow));
+  const [clients, setClients] = useState<ClientRow[]>([]);
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [continuationTokens, setContinuationTokens] = useState<(string | null)[]>([null]);
   const [nextContinuationToken, setNextContinuationToken] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadMessage, setLoadMessage] = useState<string | null>("Showing sample client data.");
   const [deleteCandidate, setDeleteCandidate] = useState<ClientRow | null>(null);
   const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [newClientName, setNewClientName] = useState("");
   const [newPartnerName, setNewPartnerName] = useState("");
   const [newClientAdviserName, setNewClientAdviserName] = useState("");
+  const [createClientAdviserOptions, setCreateClientAdviserOptions] = useState<CreateClientAdviserOption[]>([]);
   const [newClientPracticeName, setNewClientPracticeName] = useState("");
   const [newClientError, setNewClientError] = useState<string | null>(null);
 
@@ -109,6 +114,7 @@ function ClientsPageContent() {
                   partner?: { name?: string | null } | null;
                   adviser?: { name?: string | null } | null;
                   practice?: string | null;
+                  category?: string | null;
                 }>;
               };
               message?: string;
@@ -134,27 +140,21 @@ function ClientsPageContent() {
               name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
               clientAdviserName: item.adviser?.name,
               clientAdviserPracticeName: item.practice,
+              category: item.category,
             }),
           )
           .filter((client) => client.id);
 
         if (nextClients.length > 0) {
           setClients(filterRowsByPractice(nextClients, currentUserScope?.practice?.name));
-          setLoadMessage("Loaded live client data from the API via the local app server.");
         } else {
           setClients([]);
-          setLoadMessage("API connected, but no client rows were returned.");
         }
 
         setNextContinuationToken(body?.data?.continuationToken ?? null);
         setTotalPages(Math.max(body?.data?.totalPageCount ?? 1, 1));
-      } catch (error) {
+      } catch {
         if (isMounted) {
-          const message =
-            error instanceof Error
-              ? `Live API failed: ${error.message}. Showing sample records.`
-              : "Unable to load live client data yet. Showing sample records.";
-
           const fallbackRows = filterRowsByPractice(
             mockClientSummaries.map(mapClientSummaryToRow),
             currentUserScope?.practice?.name,
@@ -165,7 +165,6 @@ function ClientsPageContent() {
           setContinuationTokens([null]);
           setNextContinuationToken(null);
           setTotalPages(Math.max(Math.ceil(fallbackRows.length / pageSize), 1));
-          setLoadMessage(message);
         }
       } finally {
         if (isMounted) {
@@ -303,6 +302,80 @@ function ClientsPageContent() {
     };
   }, [clients, currentUserScope]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCreateClientAdvisers() {
+      const practiceName = currentUserScope?.practice?.name?.trim().toLowerCase();
+
+      if (!practiceName) {
+        if (isMounted) {
+          setCreateClientAdviserOptions([]);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/users", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const body = (await response.json().catch(() => null)) as
+          | {
+              data?: UserSummary[] | null;
+              message?: string;
+            }
+          | null;
+
+        if (!response.ok) {
+          throw new Error(body?.message ?? `Request failed with status ${response.status}.`);
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        const adviserUsers = (body?.data ?? [])
+          .filter((user) => user.id && user.name)
+          .filter((user) => user.userRole?.trim().toLowerCase() === "adviser")
+          .filter((user) => user.practice?.name?.trim().toLowerCase() === practiceName)
+          .map((user) => ({
+            id: user.id ?? "",
+            name: user.name?.trim() ?? "",
+          }))
+          .filter((user) => user.id && user.name);
+
+        const deduped = Array.from(new Map(adviserUsers.map((user) => [user.id, user])).values()).sort((left, right) =>
+          left.name.localeCompare(right.name),
+        );
+
+        setCreateClientAdviserOptions(deduped);
+
+        setNewClientAdviserName((current) => {
+          if (current && deduped.some((user) => user.name === current)) {
+            return current;
+          }
+
+          const currentUserOption = deduped.find((user) => user.name === currentUserScope?.name);
+          return currentUserOption?.name ?? deduped[0]?.name ?? "";
+        });
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setCreateClientAdviserOptions([]);
+      }
+    }
+
+    void loadCreateClientAdvisers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUserScope?.name, currentUserScope?.practice?.name]);
+
   function resetPagination() {
     setCurrentPage(1);
     setContinuationTokens([null]);
@@ -349,7 +422,6 @@ function ClientsPageContent() {
     };
 
     setClients((current) => [draftClient, ...current]);
-    setLoadMessage("Draft client added locally from the Add New flow.");
     closeCreateClientModal();
   }
 
@@ -387,7 +459,6 @@ function ClientsPageContent() {
         </section>
 
         <section className={styles.tableCard}>
-          {loadMessage ? <p className={styles.dataNotice}>{isLoading ? "Loading..." : loadMessage}</p> : null}
           {deleteMessage ? <p className={styles.dataNotice}>{deleteMessage}</p> : null}
           <div className={styles.tableHeader}>
             <div>Client Name</div>
@@ -530,11 +601,21 @@ function ClientsPageContent() {
 
             <label className={styles.createClientField}>
               <span className={styles.createClientLabel}>Adviser</span>
-              <input
+              <select
                 className={styles.createClientInput}
                 value={newClientAdviserName}
                 onChange={(event) => setNewClientAdviserName(event.target.value)}
-              />
+              >
+                {createClientAdviserOptions.length ? (
+                  createClientAdviserOptions.map((adviserOption) => (
+                    <option key={adviserOption.id} value={adviserOption.name}>
+                      {adviserOption.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">{currentUserScope?.practice?.name ? "No advisers available in this practice" : "No practice selected"}</option>
+                )}
+              </select>
             </label>
 
             <label className={styles.createClientField}>

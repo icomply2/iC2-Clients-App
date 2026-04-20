@@ -25,7 +25,7 @@ export async function updatePersonDetails(
   const response = await fetch(
     resolveUrl(`/api/client-profiles/${encodeURIComponent(input.profileId)}/${target}/${encodeURIComponent(input.personId)}`, context),
     {
-      method: "PATCH",
+      method: "PUT",
       headers: buildHeaders(context),
       body: JSON.stringify(payload),
       cache: "no-store",

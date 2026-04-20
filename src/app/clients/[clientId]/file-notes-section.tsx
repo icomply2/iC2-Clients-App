@@ -122,7 +122,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
   const subtypeOptions = useMemo(() => FILE_NOTE_SUBTYPE_OPTIONS[draft.type] ?? [], [draft.type]);
 
   async function loadNotes() {
-    const resolvedClientId = profile.client?.id;
+    const resolvedClientId = profile.id ?? profile.client?.id;
 
     if (useMockFallback || !resolvedClientId) {
       setNotes([]);
@@ -211,8 +211,10 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
       return;
     }
 
-    if (!profile.client?.id) {
-      setErrorMessage("This client record does not have a client id yet.");
+    const resolvedClientId = profile.id ?? profile.client?.id;
+
+    if (!resolvedClientId || !profile.client?.id) {
+      setErrorMessage("This client record does not have the ids needed for file notes yet.");
       return;
     }
 
@@ -222,7 +224,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     try {
       const input = {
         id: draft.id,
-        clientId: profile.client.id,
+        clientId: resolvedClientId,
         ownerId: profile.client.id,
         ownerName: profile.client.name ?? "",
         joint: false,
@@ -254,7 +256,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
       const nextNote: FileNoteRecord = {
         ...(savedNote ?? {}),
         id: savedNote?.id ?? draft.id ?? crypto.randomUUID(),
-        clientId: savedNote?.clientId ?? profile.client.id,
+        clientId: savedNote?.clientId ?? resolvedClientId,
         owner: savedNote?.owner ?? {
           id: profile.client.id,
           name: profile.client.name ?? "",

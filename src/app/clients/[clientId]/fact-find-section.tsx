@@ -376,20 +376,22 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
         : {}),
     };
 
-    if (target === "partner") {
-      await updatePartnerDetails({
+      if (target === "partner") {
+        await updatePartnerDetails({
+          profileId,
+          personId,
+          person: profile.partner ?? null,
+          changes,
+        });
+        return;
+      }
+
+      await updateClientDetails({
         profileId,
         personId,
+        person: profile.client ?? null,
         changes,
       });
-      return;
-    }
-
-    await updateClientDetails({
-      profileId,
-      personId,
-      changes,
-    });
   }
 
   async function handleNext() {

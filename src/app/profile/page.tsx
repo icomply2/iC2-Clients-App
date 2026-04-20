@@ -1,6 +1,10 @@
 import { getUsers } from "@/lib/api/users";
 import { isAppAdminValue } from "@/lib/app-admin";
 import { readAuthTokenFromCookies, readCurrentUserFromCookies } from "@/lib/auth";
+import {
+  getDesktopBrokerEnvironmentLabel,
+  isDesktopBrokerConfigured,
+} from "@/app/api/integrations/desktop-broker/_shared";
 import { readRexConnectionStateFromCookies } from "@/lib/rex-token";
 import { ProfileAccount } from "./profile-account";
 
@@ -25,6 +29,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   let appAccess = "Not available yet";
   let appAdminValue = "";
   let isAppAdmin = false;
+  let userId = currentUser?.id ?? "";
 
   if (token) {
     try {
@@ -41,6 +46,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         }) ?? null;
 
       if (matchedUser) {
+        userId = matchedUser.id ?? userId;
         name = matchedUser.name ?? name;
         email = matchedUser.email ?? email;
         role = matchedUser.userRole ?? role;
@@ -56,6 +62,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
   return (
     <ProfileAccount
+      userId={userId}
       name={name}
       email={email}
       role={role}
@@ -65,6 +72,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       isAppAdmin={isAppAdmin}
       rexConnected={rexConnection.connected}
       rexExpiresAt={rexConnection.expiresAt}
+      desktopBrokerConfigured={isDesktopBrokerConfigured()}
+      desktopBrokerEnvironment={getDesktopBrokerEnvironmentLabel()}
       integrationStatus={resolvedSearchParams?.integration === "productrex" ? resolvedSearchParams.status ?? null : null}
       integrationMessage={
         resolvedSearchParams?.integration === "productrex" ? resolvedSearchParams.message ?? null : null

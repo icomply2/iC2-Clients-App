@@ -93,6 +93,7 @@ export type ClientSummary = {
   clientAdviserName?: string | null;
   clientAdviserPracticeName?: string | null;
   clientAdviserLicenseeName?: string | null;
+  category?: string | null;
 };
 
 export type AdviserSummary = {
@@ -107,6 +108,8 @@ export type AdviserSummary = {
 export type PersonRecord = {
   id?: string | null;
   ic2AppId?: string | null;
+  declaration?: boolean | null;
+  picture?: string | null;
   title?: string | null;
   name?: string | null;
   email?: string | null;
@@ -139,10 +142,17 @@ export type PersonRecord = {
   health_insurance?: string | null;
   healthInsurance?: string | null;
   fdsAnnualAgreementRequired?: string | null;
+  annualAgreementStatus?: string | null;
   annualAgreementRequired?: string | null;
   fdsRequired?: string | null;
   agreementType?: string | null;
   nextAnniversaryDate?: string | null;
+  entityId?: string | null;
+  sharedWith?: string[] | null;
+  accountStatus?: string | null;
+  onboardingStatus?: unknown;
+  nationality?: string | null;
+  timeZone?: string | null;
   annualAgreement?: {
     type?: string | null;
     agreementType?: string | null;
@@ -369,6 +379,47 @@ export type ClientInsuranceRecord = {
     id?: string | null;
     name?: string | null;
   } | null;
+  policyDetails?: InsurancePolicyRecord[] | null;
+};
+
+export type InsurancePolicyRecord = {
+  id?: string | null;
+  coverType?: string | null;
+  sumInsured?: string | null;
+  insurerName?: string | null;
+  heldSuper?: string | null;
+  benefitPeriod?: string | null;
+  benefitType?: string | null;
+  occupationType?: string | null;
+  premiumType?: string | null;
+  premiumAmount?: string | null;
+  premiumFrequency?:
+    | {
+        type?: string | null;
+        value?: string | null;
+      }
+    | null;
+  subTotalPremium?: string | null;
+  waitingPeriod?: string | null;
+};
+
+export type PolicyCoverRecord = {
+  id?: string | null;
+  coverType?: string | null;
+  sumInsured?: number | null;
+  premiumAmount?: number | null;
+  premiumFrequency?: string | null;
+};
+
+export type ClientPolicyRecord = {
+  id?: string | null;
+  clientId?: string | null;
+  policyOwner?: string | null;
+  insurer?: string | null;
+  policyNumber?: string | null;
+  status?: string | null;
+  linkedSuperFund?: string | null;
+  covers?: PolicyCoverRecord[] | null;
 };
 
 export type FileNoteRecord = {

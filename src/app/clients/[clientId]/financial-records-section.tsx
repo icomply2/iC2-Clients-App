@@ -756,12 +756,6 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
 
       {useMockFallback ? <p className={styles.actionNotice}>{getFallbackMessage()}</p> : null}
 
-      {kind === "income" || kind === "expenses" ? (
-        <p className={styles.dataNotice}>
-          Some records on this page are created automatically from Assets, Liabilities, and Retirement Income to avoid double entry.
-        </p>
-      ) : null}
-
       <section className={styles.financialSection}>
         <div
           className={`${styles.financialHeader} ${

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   deleteEmploymentRecord,
   updateClientDetails,
@@ -9,7 +9,8 @@ import {
   updatePersonRiskProfile,
   upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
-import type { ClientProfile, PersonRecord } from "@/lib/api/types";
+import type { ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
+import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
 type EditablePerson = "client" | "partner";
@@ -26,7 +27,7 @@ type EditDraft = {
   status: string;
   clientCategory: string;
   riskProfile: string;
-  practice: string;
+  adviser: string;
   gender: string;
   maritalStatus: string;
   residentStatus: string;
@@ -155,7 +156,7 @@ function getFirstNonEmptyValue(...candidates: Array<string | null | undefined>) 
   return "";
 }
 
-function createDraft(person?: PersonRecord | null, profileId?: string | null): EditDraft {
+function createDraft(person?: PersonRecord | null, profileId?: string | null, adviserName?: string | null): EditDraft {
   const record = (person ?? {}) as PersonRecord & Record<string, unknown>;
   const employment = Array.isArray(record.employment) ? record.employment : [];
 
@@ -163,10 +164,10 @@ function createDraft(person?: PersonRecord | null, profileId?: string | null): E
     clientId: getFirstNonEmptyValue(profileId, person?.ic2AppId, person?.id),
     title: person?.title ?? "",
     name: person?.name ?? "",
-    status: getRecordValue(record, ["status", "clientStatus"]) || "Client",
+    status: getRecordValue(record, ["status", "clientStatus", "accountStatus"]) || "Client",
     clientCategory: getRecordValue(record, ["clientCategory", "category"]),
     riskProfile: person?.riskProfileResponse?.resultDisplay ?? "",
-    practice: "",
+    adviser: adviserName ?? "",
     gender: person?.gender ?? "",
     maritalStatus: getRecordValue(record, ["maritalStatus"]),
     residentStatus: getRecordValue(record, ["residentStatus"]),
@@ -202,7 +203,8 @@ function createDraft(person?: PersonRecord | null, profileId?: string | null): E
     email: person?.email ?? "",
     adviceAgreementRequired: getRecordValue(record, ["fdsAnnualAgreementRequired", "annualAgreementRequired", "fdsRequired"]),
     agreementType:
-      getRecordValue(record, ["agreementType"]) || getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
+      getRecordValue(record, ["agreementType", "annualAgreementStatus"]) ||
+      getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
     nextAnniversaryDate: toInputDate(
       getRecordValue(record, ["nextAnniversaryDate"]) || getNestedRecordValue(record, "annualAgreement", ["nextDueDate", "nextAnniversaryDate"]),
     ),
@@ -236,6 +238,9 @@ function getRecordValue(record: Record<string, unknown>, keys: string[]) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) {
       return value;
+    }
+    if (typeof value === "boolean") {
+      return value ? "Yes" : "No";
     }
   }
 
@@ -334,17 +339,18 @@ function EmploymentSection({ records }: { records: EmploymentDisplayRecord[] }) 
   );
 }
 
-function buildProfileSections(person: PersonRecord | null, profile: ClientProfile) {
+function buildProfileSections(person: PersonRecord | null, profile: ClientProfile, adviserName: string) {
   const record = (person ?? {}) as PersonRecord & Record<string, unknown>;
   const riskDisplay = person?.riskProfileResponse?.resultDisplay ?? "";
   const employment = Array.isArray(record.employment) ? record.employment : [];
 
   const overview: DisplayField[] = [
     { label: "Name", value: person?.name ?? "", placeholder: "Name" },
-    { label: "Status", value: getRecordValue(record, ["status", "clientStatus"]) || "Client", placeholder: "Status" },
+    { label: "Status", value: getRecordValue(record, ["status", "clientStatus", "accountStatus"]) || "Client", placeholder: "Status" },
     { label: "Client Category", value: getRecordValue(record, ["clientCategory", "category"]), placeholder: "Client Category" },
     { label: "Risk Profile", value: riskDisplay, placeholder: "Risk Profile" },
     { label: "Practice", value: profile.practice ?? "", placeholder: "Practice" },
+    { label: "Adviser", value: adviserName, placeholder: "Adviser" },
   ];
 
   const personal: DisplayField[] = [
@@ -397,7 +403,9 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
     },
     {
       label: "Agreement Type",
-      value: getRecordValue(record, ["agreementType"]) || getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
+      value:
+        getRecordValue(record, ["agreementType", "annualAgreementStatus"]) ||
+        getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
       placeholder: "Agreement Type",
     },
     {
@@ -482,19 +490,76 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
 
 export function ClientDetailsSection({ profile, useMockFallback }: ClientDetailsSectionProps) {
   const router = useRouter();
+  const { data: currentUserScope } = useCurrentUserScope();
   const [client, setClient] = useState<PersonRecord | null>(profile.client ?? null);
   const [partner, setPartner] = useState<PersonRecord | null>(profile.partner ?? null);
   const [selectedPerson, setSelectedPerson] = useState<EditablePerson>("client");
   const [editing, setEditing] = useState<EditablePerson | null>(null);
-  const [draft, setDraft] = useState<EditDraft>(createDraft(profile.client, profile.id));
+  const [draft, setDraft] = useState<EditDraft>(createDraft(profile.client, profile.id, profile.adviser?.name));
   const [editStep, setEditStep] = useState<EditStepKey>("overview");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [removedEmploymentIds, setRemovedEmploymentIds] = useState<string[]>([]);
+  const [adviserName, setAdviserName] = useState(profile.adviser?.name ?? "");
+  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; name: string }>>([]);
   const hasPartner = hasMeaningfulPerson(partner);
 
   const activePerson = selectedPerson === "partner" && hasPartner ? partner : client;
-  const activeSections = buildProfileSections(activePerson, profile);
+  const activeSections = buildProfileSections(activePerson, profile, adviserName);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadAdviserOptions() {
+      const practiceName = currentUserScope?.practice?.name?.trim().toLowerCase();
+
+      if (!practiceName) {
+        if (isMounted) {
+          setAdviserOptions([]);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/users", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const body = (await response.json().catch(() => null)) as
+          | {
+              data?: UserSummary[] | null;
+            }
+          | null;
+
+        if (!response.ok || !isMounted) {
+          return;
+        }
+
+        const nextOptions = Array.from(
+          new Map(
+            (body?.data ?? [])
+              .filter((user) => user.userRole?.trim().toLowerCase() === "adviser")
+              .filter((user) => user.practice?.name?.trim().toLowerCase() === practiceName)
+              .filter((user) => typeof user.name === "string" && user.name.trim())
+              .map((user) => [user.id ?? user.name!, { id: user.id ?? user.name!, name: user.name!.trim() }]),
+          ).values(),
+        ).sort((left, right) => left.name.localeCompare(right.name));
+
+        setAdviserOptions(nextOptions);
+      } catch {
+        if (isMounted) {
+          setAdviserOptions([]);
+        }
+      }
+    }
+
+    void loadAdviserOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUserScope?.practice?.name]);
 
   function updateEmploymentRow(id: string, field: keyof EmploymentDraft, value: string) {
     setDraft((current) => ({
@@ -528,7 +593,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
 
   function openEditor(target: EditablePerson) {
     const person = target === "client" ? client : partner;
-    setDraft({ ...createDraft(person, profile.id), practice: profile.practice ?? "" });
+    setDraft(createDraft(person, profile.id, adviserName || profile.adviser?.name));
     setEditStep("overview");
     setSaveError(null);
     setRemovedEmploymentIds([]);
@@ -554,6 +619,8 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
       const changes = {
         title: draft.title,
         name: draft.name,
+        status: draft.status,
+        clientCategory: draft.clientCategory,
         gender: draft.gender,
         maritalStatus: draft.maritalStatus,
         residentStatus: draft.residentStatus,
@@ -566,19 +633,25 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         suburb: draft.suburb,
         state: draft.state,
         postCode: draft.postCode,
+        preferredPhone: draft.preferredPhone,
         email: draft.email,
+        adviceAgreementRequired: draft.adviceAgreementRequired,
+        agreementType: draft.agreementType,
+        nextAnniversaryDate: draft.nextAnniversaryDate,
       };
 
       if (editing === "client") {
         await updateClientDetails({
           profileId: profile.id,
           personId: person.id,
+          person,
           changes,
         });
       } else {
         await updatePartnerDetails({
           profileId: profile.id,
           personId: person.id,
+          person,
           changes,
         });
       }
@@ -672,8 +745,11 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         preferredPhone: draft.preferredPhone,
         fdsAnnualAgreementRequired: draft.adviceAgreementRequired,
         annualAgreementRequired: draft.adviceAgreementRequired,
+        annualAgreementStatus: draft.agreementType,
         agreementType: draft.agreementType,
         nextAnniversaryDate: draft.nextAnniversaryDate,
+        accountStatus: draft.status,
+        category: draft.clientCategory,
         annualAgreement: {
           ...((person as PersonRecord & Record<string, unknown>).annualAgreement as Record<string, unknown> | null),
           agreementType: draft.agreementType,
@@ -697,6 +773,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         setPartner(updatedPerson);
       }
 
+      setAdviserName(draft.adviser);
       setRemovedEmploymentIds([]);
       setEditing(null);
       router.refresh();
@@ -835,8 +912,17 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
                   </select>
                 </label>
                 <label className={styles.modalField}>
-                  <span>Practice</span>
-                  <input value={draft.practice} readOnly />
+                  <span>Adviser</span>
+                  <select value={draft.adviser} onChange={(event) => setDraft({ ...draft, adviser: event.target.value })}>
+                    <option value="">
+                      {currentUserScope?.practice?.name ? "Select adviser" : "No practice selected"}
+                    </option>
+                    {adviserOptions.map((option) => (
+                      <option key={option.id} value={option.name}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
             ) : null}

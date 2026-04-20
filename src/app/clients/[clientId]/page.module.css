@@ -982,6 +982,7 @@
   border-radius: 0.25rem;
   background: #fff;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .fileNoteAttachmentCell {
@@ -1125,6 +1126,7 @@
   border: 1px solid #f1d372;
   border-radius: 0.35rem;
   background: #fffbea;
+  font-size: 0.9rem;
 }
 
 .policyHeader {
@@ -1163,6 +1165,7 @@
   border-radius: 0.25rem;
   background: #fffef4;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .policyEmptyState {
@@ -1194,6 +1197,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .recordActions {
@@ -1241,6 +1245,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .dependantsHeader,
@@ -1265,6 +1270,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .assetsHeader,
@@ -1289,6 +1295,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .assetSummaryRow {
@@ -1299,6 +1306,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialHeader,
@@ -1323,6 +1331,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .financialRowAnnualised {
@@ -1341,6 +1350,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialSummaryRowAnnualised {
@@ -1351,6 +1361,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialSummaryRowIncomeAnnualised {
@@ -1361,6 +1372,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialWideCell {

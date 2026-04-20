@@ -1,4 +1,5 @@
-import type { ClientDetailChanges, UpdateClientDetailsInput } from "@/lib/api/contracts/client-updates";
+import type { UpdateClientDetailsInput } from "@/lib/api/contracts/client-updates";
+import type { PersonRecord } from "@/lib/api/types";
 import { updatePersonDetails } from "@/lib/api/adapters/client-updates";
 
 type RequestContext = {
@@ -6,84 +7,7 @@ type RequestContext = {
   cookieHeader?: string | null;
 };
 
-export function buildClientPatchPayload(changes: ClientDetailChanges) {
-  const payload: Record<string, unknown> = {};
-
-  if (typeof changes.title === "string") {
-    payload.title = changes.title;
-  }
-
-  if (typeof changes.name === "string") {
-    payload.name = changes.name;
-  }
-
-  if (typeof changes.email === "string") {
-    payload.email = changes.email;
-  }
-
-  if (typeof changes.gender === "string") {
-    payload.gender = changes.gender;
-  }
-
-  if (typeof changes.dateOfBirth === "string") {
-    payload.dateOfBirth = changes.dateOfBirth;
-  }
-
-  if (typeof changes.maritalStatus === "string") {
-    payload.maritalStatus = changes.maritalStatus;
-  }
-
-  if (typeof changes.residentStatus === "string") {
-    payload.residentStatus = changes.residentStatus;
-  }
-
-  if (
-    typeof changes.street === "string" ||
-    typeof changes.suburb === "string" ||
-    typeof changes.state === "string" ||
-    typeof changes.postCode === "string"
-  ) {
-    payload.address = [
-      typeof changes.street === "string" ? changes.street.trim() : "",
-    ].filter(Boolean).join(", ");
-    payload.suburb = typeof changes.suburb === "string" ? changes.suburb.trim() : "";
-    payload.state = typeof changes.state === "string" ? changes.state.trim() : "";
-    payload.postcode = typeof changes.postCode === "string" ? changes.postCode.trim() : "";
-  }
-
-  if (
-    typeof changes.healthStatus === "string" ||
-    typeof changes.healthHistory === "string" ||
-    typeof changes.smoker === "string" ||
-    typeof changes.healthInsurance === "string"
-  ) {
-    if (typeof changes.healthStatus === "string") {
-      payload.healthStatus = changes.healthStatus;
-    }
-
-    if (typeof changes.healthHistory === "string") {
-      payload.healthHistory = changes.healthHistory;
-    }
-
-    if (typeof changes.smoker === "string") {
-      payload.smoker = changes.smoker;
-    }
-
-    if (typeof changes.healthInsurance === "string") {
-      payload.healthInsurance = changes.healthInsurance;
-    }
-  }
-
-  return payload;
-}
-
-export async function updateClientDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
-  return updatePersonDetails({ ...input, target: "client" }, buildClientPatchPayload(input.changes), context);
-}
-
-export async function updatePartnerDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
-  return updatePersonDetails({ ...input, target: "partner" }, buildClientPatchPayload(input.changes), context);
-}
+type MutablePersonRecord = PersonRecord & Record<string, unknown>;
 
 type EmploymentUpsertInput = {
   profileId: string;
@@ -100,6 +24,169 @@ type EmploymentUpsertInput = {
     frequency?: string;
   }[];
 };
+
+function getStringValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function parseBooleanValue(value: unknown) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "yes" || normalized === "true") {
+      return true;
+    }
+
+    if (normalized === "no" || normalized === "false") {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function buildClientPersonPayload(input: UpdateClientDetailsInput) {
+  const current = ((input.person ?? {}) as MutablePersonRecord) || {};
+  const { changes } = input;
+
+  const statusValue =
+    typeof changes.status === "string" && changes.status.trim()
+      ? changes.status.trim()
+      : getStringValue(current, ["accountStatus", "status", "clientStatus"]);
+
+  const categoryValue =
+    typeof changes.clientCategory === "string" && changes.clientCategory.trim()
+      ? changes.clientCategory.trim()
+      : getStringValue(current, ["category", "clientCategory"]);
+
+  const preferredPhoneValue =
+    typeof changes.preferredPhone === "string" && changes.preferredPhone.trim()
+      ? changes.preferredPhone.trim()
+      : getStringValue(current, ["preferredPhone", "phone", "mobile", "mobilePhone"]);
+
+  const adviceAgreementRaw =
+    typeof changes.adviceAgreementRequired === "string" && changes.adviceAgreementRequired.trim()
+      ? changes.adviceAgreementRequired
+      : current.fdsAnnualAgreementRequired ?? current.annualAgreementRequired ?? current.fdsRequired ?? null;
+
+  const payload: Record<string, unknown> = {
+    id: input.personId,
+    ic2AppId: current.ic2AppId ?? null,
+    declaration: typeof current.declaration === "boolean" ? current.declaration : null,
+    picture: typeof current.picture === "string" ? current.picture : null,
+    fdsAnnualAgreementRequired: parseBooleanValue(adviceAgreementRaw),
+    annualAgreementStatus:
+      typeof changes.agreementType === "string" && changes.agreementType.trim()
+        ? changes.agreementType.trim()
+        : getStringValue(current, ["annualAgreementStatus", "agreementType"]),
+    nextAnniversaryDate:
+      typeof changes.nextAnniversaryDate === "string" && changes.nextAnniversaryDate.trim()
+        ? changes.nextAnniversaryDate.trim()
+        : getStringValue(current, ["nextAnniversaryDate"]),
+    category: categoryValue || null,
+    preferredPhone: preferredPhoneValue || null,
+    entityId: typeof current.entityId === "string" ? current.entityId : null,
+    sharedWith: Array.isArray(current.sharedWith) ? current.sharedWith : [],
+    accountStatus: statusValue || null,
+    onboardingStatus: current.onboardingStatus ?? null,
+    title:
+      typeof changes.title === "string"
+        ? changes.title.trim() || null
+        : typeof current.title === "string"
+          ? current.title
+          : null,
+    name:
+      typeof changes.name === "string"
+        ? changes.name.trim() || null
+        : typeof current.name === "string"
+          ? current.name
+          : null,
+    email:
+      typeof changes.email === "string"
+        ? changes.email.trim() || null
+        : typeof current.email === "string"
+          ? current.email
+          : null,
+    dob:
+      typeof changes.dateOfBirth === "string"
+        ? changes.dateOfBirth.trim() || null
+        : typeof current.dob === "string"
+          ? current.dob
+          : null,
+    gender:
+      typeof changes.gender === "string"
+        ? changes.gender.trim() || null
+        : typeof current.gender === "string"
+          ? current.gender
+          : null,
+    maritalStatus:
+      typeof changes.maritalStatus === "string"
+        ? changes.maritalStatus.trim() || null
+        : getStringValue(current, ["maritalStatus"]) || null,
+    nationalId: current.nationalId ?? {},
+    nationalIds: current.nationalId ?? {},
+    nationality: typeof current.nationality === "string" ? current.nationality : null,
+    timeZone: typeof current.timeZone === "string" ? current.timeZone : null,
+    addressPostCode:
+      typeof changes.postCode === "string"
+        ? changes.postCode.trim() || null
+        : getStringValue(current, ["addressPostCode", "postCode", "postcode"]),
+    addressState:
+      typeof changes.state === "string"
+        ? changes.state.trim() || null
+        : getStringValue(current, ["addressState", "state"]),
+    addressStreet:
+      typeof changes.street === "string"
+        ? changes.street.trim() || null
+        : getStringValue(current, ["addressStreet", "street"]),
+    addressSuburb:
+      typeof changes.suburb === "string"
+        ? changes.suburb.trim() || null
+        : getStringValue(current, ["addressSuburb", "suburb"]),
+    residentStatus:
+      typeof changes.residentStatus === "string"
+        ? changes.residentStatus.trim() || null
+        : getStringValue(current, ["residentStatus"]) || null,
+    healthStatus:
+      typeof changes.healthStatus === "string"
+        ? changes.healthStatus.trim() || null
+        : getStringValue(current, ["healthStatus", "health_status"]) || null,
+    healthHistory:
+      typeof changes.healthHistory === "string"
+        ? changes.healthHistory.trim() || null
+        : getStringValue(current, ["healthHistory", "health_history"]) || null,
+    riskProfileStatus: getStringValue(current, ["riskProfileStatus"]) || null,
+    healthInsurance:
+      typeof changes.healthInsurance === "string"
+        ? changes.healthInsurance.trim() || null
+        : getStringValue(current, ["healthInsurance", "health_insurance"]) || null,
+    smoker:
+      typeof changes.smoker === "string"
+        ? changes.smoker.trim() || null
+        : getStringValue(current, ["smoker"]) || null,
+    riskProfileResponse: current.riskProfileResponse ?? null,
+  };
+
+  return payload;
+}
+
+export async function updateClientDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
+  return updatePersonDetails({ ...input, target: "client" }, buildClientPersonPayload(input), context);
+}
+
+export async function updatePartnerDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
+  return updatePersonDetails({ ...input, target: "partner" }, buildClientPersonPayload(input), context);
+}
 
 function resolveUrl(path: string, context?: RequestContext) {
   return context?.origin ? `${context.origin}${path}` : path;
