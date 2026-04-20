@@ -367,6 +367,7 @@ function ClientsPageContent() {
               data?:
                 | Array<{
                     id?: string | null;
+                    entityId?: string | null;
                     name?: string | null;
                     email?: string | null;
                     userRole?: string | null;
@@ -398,7 +399,7 @@ function ClientsPageContent() {
         if (licenseeName) {
           adviserParams.set("licenseeName", licenseeName);
         } else {
-          adviserParams.set("practiceName", practiceName);
+          adviserParams.set("practiceName", practiceName ?? "");
         }
 
         const advisersResponse = await fetch(`/api/advisers?${adviserParams.toString()}`, {
@@ -753,7 +754,6 @@ function ClientsPageContent() {
                 value={String(pageSize)}
                 onChange={(event) => {
                   setPageSize(Number(event.target.value));
-                  setDeleteMessage(null);
                   resetPagination();
                 }}
               >
