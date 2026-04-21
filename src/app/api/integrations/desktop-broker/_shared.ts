@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const DESKTOP_BROKER_API_BASE_URL = process.env.DESKTOP_BROKER_API_BASE_URL;
-const DESKTOP_BROKER_USERNAME = process.env.DESKTOP_BROKER_USERNAME;
-const DESKTOP_BROKER_PASSWORD = process.env.DESKTOP_BROKER_PASSWORD;
+function getDesktopBrokerConfig() {
+  return {
+    apiBaseUrl: process.env.DESKTOP_BROKER_API_BASE_URL,
+    username: process.env.DESKTOP_BROKER_USERNAME,
+    password: process.env.DESKTOP_BROKER_PASSWORD,
+  };
+}
 
 const DATE_PARAM_PAIRS: Array<[string, string]> = [
   ["fromDate", "toDate"],
@@ -13,7 +17,9 @@ const DATE_PARAM_PAIRS: Array<[string, string]> = [
 const MAX_DATE_RANGE_DAYS = 180;
 
 function getConfigError() {
-  if (!DESKTOP_BROKER_API_BASE_URL || !DESKTOP_BROKER_USERNAME || !DESKTOP_BROKER_PASSWORD) {
+  const { apiBaseUrl, username, password } = getDesktopBrokerConfig();
+
+  if (!apiBaseUrl || !username || !password) {
     return NextResponse.json(
       { message: "The Desktop Broker integration is not configured yet." },
       { status: 500 },
@@ -24,9 +30,8 @@ function getConfigError() {
 }
 
 function buildDesktopBrokerUrl(path: string, request: NextRequest) {
-  const normalizedBaseUrl = DESKTOP_BROKER_API_BASE_URL!.endsWith("/")
-    ? DESKTOP_BROKER_API_BASE_URL!
-    : `${DESKTOP_BROKER_API_BASE_URL!}/`;
+  const { apiBaseUrl } = getDesktopBrokerConfig();
+  const normalizedBaseUrl = apiBaseUrl!.endsWith("/") ? apiBaseUrl! : `${apiBaseUrl!}/`;
   const url = new URL(path.replace(/^\//, ""), normalizedBaseUrl);
 
   request.nextUrl.searchParams.forEach((value, key) => {
@@ -80,9 +85,8 @@ export async function proxyDesktopBrokerGet(path: string, request: NextRequest) 
   }
 
   try {
-    const basicAuthToken = Buffer.from(`${DESKTOP_BROKER_USERNAME!}:${DESKTOP_BROKER_PASSWORD!}`).toString(
-      "base64",
-    );
+    const { username, password } = getDesktopBrokerConfig();
+    const basicAuthToken = Buffer.from(`${username!}:${password!}`).toString("base64");
     const response = await fetch(buildDesktopBrokerUrl(path, request), {
       method: "GET",
       headers: {
@@ -94,6 +98,18 @@ export async function proxyDesktopBrokerGet(path: string, request: NextRequest) 
 
     const text = await response.text();
     const contentType = response.headers.get("content-type") ?? "application/json";
+
+    if (!response.ok) {
+      const normalizedMessage = text.trim() || `Desktop Broker request failed (${response.status}).`;
+
+      return NextResponse.json(
+        {
+          message: normalizedMessage,
+          upstreamStatus: response.status,
+        },
+        { status: response.status },
+      );
+    }
 
     return new NextResponse(text, {
       status: response.status,
@@ -112,17 +128,20 @@ export async function proxyDesktopBrokerGet(path: string, request: NextRequest) 
 }
 
 export function getDesktopBrokerEnvironmentLabel() {
-  if (!DESKTOP_BROKER_API_BASE_URL) {
+  const { apiBaseUrl } = getDesktopBrokerConfig();
+
+  if (!apiBaseUrl) {
     return "Not configured";
   }
 
-  return DESKTOP_BROKER_API_BASE_URL.includes("services-st1")
+  return apiBaseUrl.includes("services-st1")
     ? "Staging"
-    : DESKTOP_BROKER_API_BASE_URL.includes("services.thirdpartyplatform.com.au")
+    : apiBaseUrl.includes("services.thirdpartyplatform.com.au")
       ? "Production"
       : "Custom";
 }
 
 export function isDesktopBrokerConfigured() {
-  return Boolean(DESKTOP_BROKER_API_BASE_URL && DESKTOP_BROKER_USERNAME && DESKTOP_BROKER_PASSWORD);
+  const { apiBaseUrl, username, password } = getDesktopBrokerConfig();
+  return Boolean(apiBaseUrl && username && password);
 }

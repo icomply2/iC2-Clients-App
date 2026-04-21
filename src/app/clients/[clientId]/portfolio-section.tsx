@@ -36,8 +36,33 @@ type HoldingAddState = {
   account: ClientPortfolioAccountRecord;
 };
 
+type DesktopBrokerHoldingBalance = {
+  SecurityCode?: string | null;
+  SecurityName?: string | null;
+  HoldingQuantity?: number | null;
+  AvailableQuantity?: number | null;
+  AverageCostBase?: number | null;
+  EntryPrice?: number | null;
+  SecurityExchange?: string | null;
+  HoldingValue?: number | null;
+};
+
+type DesktopBrokerHoldingsPayload = {
+  ClientID?: number | null;
+  HoldingBalances?: DesktopBrokerHoldingBalance[] | null;
+};
+
 const portfolioStepLabels = ["Portfolio", "Account Details", "Underlying Holdings"];
 const exchangeOptions = ["ASX Listed", "International", "Managed Fund", "Cash", "Private Asset"];
+const JOINT_OWNER_ID = "__joint__";
+
+function getJointOwnerLabel(profile: ClientProfile) {
+  const names = [profile.client?.name?.trim(), profile.partner?.name?.trim()].filter(
+    (name): name is string => Boolean(name),
+  );
+
+  return names.length ? names.join(" and ") : "Joint";
+}
 
 function parseApiResult<T>(payload: unknown): { data: T | null; message: string | null } {
   if (!payload || typeof payload !== "object") {
@@ -156,6 +181,10 @@ function parseNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function toNumber(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function formatMoney(value?: number | null) {
   if (value == null || Number.isNaN(value)) {
     return "—";
@@ -202,16 +231,58 @@ function resolveGainLoss(holding: ClientPortfolioRecord) {
   return resolveMarketValue(holding) - resolveCostBase(holding);
 }
 
+function mapDesktopBrokerExchange(exchange?: string | null) {
+  if (!exchange?.trim()) {
+    return exchangeOptions[0];
+  }
+
+  const normalized = exchange.trim().toUpperCase();
+
+  if (normalized === "ASX") {
+    return "ASX Listed";
+  }
+
+  return exchange.trim();
+}
+
+function mapDesktopBrokerHoldingToDraft(holding: DesktopBrokerHoldingBalance): PortfolioDraftHolding | null {
+  const availableQuantity = toNumber(holding.AvailableQuantity);
+  const totalQuantity = toNumber(holding.HoldingQuantity);
+  const resolvedUnits = availableQuantity > 0 ? availableQuantity : totalQuantity;
+  const marketValueTotal = toNumber(holding.HoldingValue);
+
+  if (resolvedUnits <= 0 || marketValueTotal <= 0) {
+    return null;
+  }
+
+  const unitCost = toNumber(holding.AverageCostBase);
+  const fallbackUnitValue = toNumber(holding.EntryPrice);
+  const unitMarketValue = marketValueTotal > 0 ? marketValueTotal / resolvedUnits : fallbackUnitValue;
+
+  return {
+    id: `db-${holding.SecurityCode ?? "holding"}-${resolvedUnits}-${marketValueTotal}`,
+    positionExchange: mapDesktopBrokerExchange(holding.SecurityExchange),
+    positionDescription: holding.SecurityName?.trim() || holding.SecurityCode?.trim() || "Imported holding",
+    positionCode: holding.SecurityCode?.trim() || "",
+    units: String(resolvedUnits),
+    holdingPrice: unitCost > 0 ? unitCost.toFixed(4) : "",
+    holdingValue: unitMarketValue > 0 ? unitMarketValue.toFixed(4) : "",
+    nativeMarketprice: marketValueTotal.toFixed(2),
+    nativeValue: marketValueTotal.toFixed(2),
+    nativeCurrency: "AUD",
+  };
+}
+
 export function PortfolioSection({ profile, useMockFallback = false }: PortfolioSectionProps) {
   const [accounts, setAccounts] = useState<PortfolioAccountBundle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedOwnerId, setSelectedOwnerId] = useState("");
-  const [isJointAccount, setIsJointAccount] = useState(false);
   const [accountName, setAccountName] = useState("");
   const [accountDescription, setAccountDescription] = useState("");
   const [positionExchange, setPositionExchange] = useState(exchangeOptions[0]);
@@ -245,18 +316,51 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   const [deleteHoldingTarget, setDeleteHoldingTarget] = useState<HoldingEditState | null>(null);
   const [deleteHoldingError, setDeleteHoldingError] = useState<string | null>(null);
   const [isDeletingHolding, setIsDeletingHolding] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [desktopBrokerClientId, setDesktopBrokerClientId] = useState("");
+  const [desktopBrokerOwnerId, setDesktopBrokerOwnerId] = useState("");
+  const [desktopBrokerAccountName, setDesktopBrokerAccountName] = useState("");
+  const [desktopBrokerAccountDescription, setDesktopBrokerAccountDescription] = useState("");
+  const [desktopBrokerPreview, setDesktopBrokerPreview] = useState<PortfolioDraftHolding[]>([]);
+  const [desktopBrokerImportError, setDesktopBrokerImportError] = useState<string | null>(null);
+  const [isLoadingDesktopBrokerPreview, setIsLoadingDesktopBrokerPreview] = useState(false);
+  const [isImportingDesktopBroker, setIsImportingDesktopBroker] = useState(false);
 
   const ownerOptions = useMemo(
-    () =>
-      [profile.client, profile.partner]
+    () => {
+      const hasClientAndPartner = Boolean(profile.client?.id && profile.client?.name && profile.partner?.id && profile.partner?.name);
+      const peopleOwners = [profile.client, profile.partner]
         .filter((person): person is NonNullable<typeof person> => Boolean(person?.id && person?.name))
         .map((person) => ({
           id: person.id ?? "",
           name: person.name ?? "",
-        })),
-    [profile.client, profile.partner],
-  );
+        }));
 
+      const entityOwners = (profile.entities ?? [])
+        .filter((entity) => (entity.id || entity.entitiesId) && entity.name)
+        .map((entity) => ({
+          id: entity.id?.trim() || entity.entitiesId?.trim() || "",
+          name: entity.type?.trim()
+            ? `${entity.name?.trim() ?? ""} (${entity.type.trim()})`
+            : entity.name?.trim() ?? "",
+        }))
+        .filter((entity) => entity.id && entity.name);
+
+      return [
+        ...peopleOwners,
+        ...(hasClientAndPartner
+          ? [
+              {
+                id: JOINT_OWNER_ID,
+                name: "Joint",
+              },
+            ]
+          : []),
+        ...entityOwners,
+      ];
+    },
+    [profile.client, profile.entities, profile.partner],
+  );
   const calculatedMarketValue = useMemo(() => {
     const unitsValue = parseNumber(units);
     const holdingUnitValue = parseNumber(holdingValue);
@@ -287,28 +391,87 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     return computedValue > 0 ? computedValue.toFixed(2) : "";
   }, [addHoldingValue, addUnits]);
   const addCalculatedNativeValue = useMemo(() => addCalculatedMarketValue, [addCalculatedMarketValue]);
+  const groupedAccounts = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        ownerLabel: string;
+        bundles: PortfolioAccountBundle[];
+      }
+    >();
+
+    for (const bundle of accounts) {
+      const ownerLabel = bundle.account.jointAccount
+        ? getJointOwnerLabel(profile)
+        : bundle.account.owner?.name || "No owner selected";
+      const existing = groups.get(ownerLabel);
+
+      if (existing) {
+        existing.bundles.push(bundle);
+        continue;
+      }
+
+      groups.set(ownerLabel, {
+        ownerLabel,
+        bundles: [bundle],
+      });
+    }
+
+    return Array.from(groups.values());
+  }, [accounts, profile]);
+  const ownerFilterOptions = useMemo(
+    () => [
+      { value: "all", label: "All owners" },
+      ...groupedAccounts.map((group) => ({
+        value: group.ownerLabel,
+        label: group.ownerLabel,
+      })),
+    ],
+    [groupedAccounts],
+  );
+  const filteredGroupedAccounts = useMemo(
+    () =>
+      ownerFilter === "all"
+        ? groupedAccounts
+        : groupedAccounts.filter((group) => group.ownerLabel === ownerFilter),
+    [groupedAccounts, ownerFilter],
+  );
   const consolidatedTotals = useMemo(
     () =>
-      accounts.reduce(
-        (totals, { holdings }) => {
-          holdings.forEach((holding) => {
-            totals.marketValue += resolveMarketValue(holding);
-            totals.costBase += resolveCostBase(holding);
-            totals.gainLoss += resolveGainLoss(holding);
+      filteredGroupedAccounts.reduce(
+        (totals, group) => {
+          group.bundles.forEach(({ holdings }) => {
+            holdings.forEach((holding) => {
+              totals.marketValue += resolveMarketValue(holding);
+              totals.costBase += resolveCostBase(holding);
+              totals.gainLoss += resolveGainLoss(holding);
+            });
           });
 
           return totals;
         },
         { marketValue: 0, costBase: 0, gainLoss: 0 },
       ),
-    [accounts],
+    [filteredGroupedAccounts],
+  );
+  const desktopBrokerPreviewTotal = useMemo(
+    () => desktopBrokerPreview.reduce((total, holding) => total + parseNumber(holding.nativeMarketprice), 0),
+    [desktopBrokerPreview],
   );
 
   useEffect(() => {
     if (!selectedOwnerId && ownerOptions.length) {
-      setSelectedOwnerId(ownerOptions[0].id);
+      const defaultOwner = ownerOptions.find((option) => option.id !== JOINT_OWNER_ID) ?? ownerOptions[0];
+      setSelectedOwnerId(defaultOwner.id);
     }
   }, [ownerOptions, selectedOwnerId]);
+
+  useEffect(() => {
+    if (!desktopBrokerOwnerId && ownerOptions.length) {
+      const defaultOwner = ownerOptions.find((option) => option.id !== JOINT_OWNER_ID) ?? ownerOptions[0];
+      setDesktopBrokerOwnerId(defaultOwner.id);
+    }
+  }, [desktopBrokerOwnerId, ownerOptions]);
 
   async function loadPortfolioData() {
     if (useMockFallback || !profile.id) {
@@ -390,10 +553,21 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     setIsSaving(false);
     setAccountName("");
     setAccountDescription("");
-    setIsJointAccount(false);
     setDraftHoldings([]);
     setSelectedOwnerId(ownerOptions[0]?.id ?? "");
     resetHoldingDraft();
+  }
+
+  function openImportModal() {
+    setIsImportModalOpen(true);
+    setDesktopBrokerImportError(null);
+    setIsLoadingDesktopBrokerPreview(false);
+    setIsImportingDesktopBroker(false);
+    setDesktopBrokerClientId("");
+    setDesktopBrokerAccountName("");
+    setDesktopBrokerAccountDescription("");
+    setDesktopBrokerPreview([]);
+    setDesktopBrokerOwnerId((ownerOptions.find((option) => option.id !== JOINT_OWNER_ID) ?? ownerOptions[0])?.id ?? "");
   }
 
   function closeCreateModal() {
@@ -403,6 +577,115 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
 
     setIsCreateModalOpen(false);
     setSaveError(null);
+  }
+
+  function closeImportModal() {
+    if (isLoadingDesktopBrokerPreview || isImportingDesktopBroker) {
+      return;
+    }
+
+    setIsImportModalOpen(false);
+    setDesktopBrokerImportError(null);
+  }
+
+  function resolveOwnerSelection(ownerId: string) {
+    const jointSelected = ownerId === JOINT_OWNER_ID;
+
+    if (jointSelected && profile.client?.id && profile.client?.name) {
+      return {
+        owner: { id: profile.client.id, name: profile.client.name },
+        jointAccount: true,
+      };
+    }
+
+    const owner = ownerOptions.find((option) => option.id === ownerId);
+
+    return owner
+      ? {
+          owner: { id: owner.id, name: owner.name },
+          jointAccount: false,
+        }
+      : null;
+  }
+
+  async function createAccountWithHoldings(
+    ownerId: string,
+    nextAccountName: string,
+    nextAccountDescription: string,
+    holdings: PortfolioDraftHolding[],
+  ) {
+    if (!profile.id) {
+      throw new Error("A live client profile is required before creating a portfolio.");
+    }
+
+    const ownerSelection = resolveOwnerSelection(ownerId);
+
+    if (!ownerSelection) {
+      throw new Error("Select the portfolio owner before saving.");
+    }
+
+    const accountResponse = await fetch(`/api/client-profiles/${encodeURIComponent(profile.id)}/account`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request: {
+          accountName: nextAccountName.trim(),
+          accountDescription: nextAccountDescription.trim(),
+          owner: ownerSelection.owner,
+          jointAccount: ownerSelection.jointAccount,
+          practice: profile.practice ?? "",
+          licensee: profile.licensee ?? "",
+          clientId: profile.id,
+        },
+      }),
+    });
+
+    const accountPayload = await accountResponse.json().catch(() => null);
+    const accountResult = parseApiResult<ClientPortfolioAccountRecord>(accountPayload);
+
+    if (!accountResponse.ok || !accountResult.data?.id) {
+      throw new Error(accountResult.message || `Unable to create the portfolio account (${accountResponse.status}).`);
+    }
+
+    for (const draftHolding of holdings) {
+      const holdingResponse = await fetch(
+        `/api/client-profiles/account/${encodeURIComponent(accountResult.data.id)}/portfolio`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request: {
+              account: {
+                id: accountResult.data.id,
+                accountName: accountResult.data.accountName ?? nextAccountName.trim(),
+                accountDescription: accountResult.data.accountDescription ?? nextAccountDescription.trim(),
+              },
+              licenseeName: profile.licensee ?? "",
+              practiceName: profile.practice ?? "",
+              positionExchange: draftHolding.positionExchange,
+              positionDescription: draftHolding.positionDescription,
+              positionCode: draftHolding.positionCode,
+              units: Number(draftHolding.units || 0),
+              holdingPrice: Number(draftHolding.holdingPrice || 0),
+              holdingValue: Number(draftHolding.holdingValue || 0),
+              nativeMarketprice: Number(draftHolding.nativeMarketprice || 0),
+              nativeValue: Number(draftHolding.nativeValue || 0),
+              nativeCurrency: draftHolding.nativeCurrency,
+              valueCurrency: draftHolding.nativeCurrency,
+            },
+          }),
+        },
+      );
+
+      const holdingPayload = await holdingResponse.json().catch(() => null);
+      const holdingResult = parseApiResult<ClientPortfolioRecord>(holdingPayload);
+
+      if (!holdingResponse.ok) {
+        throw new Error(
+          holdingResult.message || `Account created, but a holding could not be saved (${holdingResponse.status}).`,
+        );
+      }
+    }
   }
 
   function addHoldingToDraft() {
@@ -649,18 +932,6 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   }
 
   async function savePortfolioWorkflow() {
-    if (!profile.id) {
-      setSaveError("A live client profile is required before creating a portfolio.");
-      return;
-    }
-
-    const owner = ownerOptions.find((option) => option.id === selectedOwnerId);
-
-    if (!owner) {
-      setSaveError("Select the portfolio owner before saving.");
-      return;
-    }
-
     if (!accountName.trim()) {
       setSaveError("Enter the account name before saving.");
       return;
@@ -675,72 +946,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     setSaveError(null);
 
     try {
-      const accountResponse = await fetch(`/api/client-profiles/${encodeURIComponent(profile.id)}/account`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          request: {
-            accountName: accountName.trim(),
-            accountDescription: accountDescription.trim(),
-            owner: {
-              id: owner.id,
-              name: owner.name,
-            },
-            jointAccount: isJointAccount,
-            practice: profile.practice ?? "",
-            licensee: profile.licensee ?? "",
-            clientId: profile.id,
-          },
-        }),
-      });
-
-      const accountPayload = await accountResponse.json().catch(() => null);
-      const accountResult = parseApiResult<ClientPortfolioAccountRecord>(accountPayload);
-
-      if (!accountResponse.ok || !accountResult.data?.id) {
-        throw new Error(accountResult.message || `Unable to create the portfolio account (${accountResponse.status}).`);
-      }
-
-      for (const draftHolding of draftHoldings) {
-        const holdingResponse = await fetch(
-          `/api/client-profiles/account/${encodeURIComponent(accountResult.data.id)}/portfolio`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              request: {
-                account: {
-                  id: accountResult.data.id,
-                  accountName: accountResult.data.accountName ?? accountName.trim(),
-                  accountDescription: accountResult.data.accountDescription ?? accountDescription.trim(),
-                },
-                licenseeName: profile.licensee ?? "",
-                practiceName: profile.practice ?? "",
-                positionExchange: draftHolding.positionExchange,
-                positionDescription: draftHolding.positionDescription,
-                positionCode: draftHolding.positionCode,
-                units: Number(draftHolding.units || 0),
-                holdingPrice: Number(draftHolding.holdingPrice || 0),
-                holdingValue: Number(draftHolding.holdingValue || 0),
-                nativeMarketprice: Number(draftHolding.nativeMarketprice || 0),
-                nativeValue: Number(draftHolding.nativeValue || 0),
-                nativeCurrency: draftHolding.nativeCurrency,
-                valueCurrency: draftHolding.nativeCurrency,
-              },
-            }),
-          },
-        );
-
-        const holdingPayload = await holdingResponse.json().catch(() => null);
-        const holdingResult = parseApiResult<ClientPortfolioRecord>(holdingPayload);
-
-        if (!holdingResponse.ok) {
-          throw new Error(
-            holdingResult.message || `Account created, but a holding could not be saved (${holdingResponse.status}).`,
-          );
-        }
-      }
-
+      await createAccountWithHoldings(selectedOwnerId, accountName, accountDescription, draftHoldings);
       await loadPortfolioData();
       setIsCreateModalOpen(false);
     } catch (error) {
@@ -750,13 +956,113 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     }
   }
 
+  async function loadDesktopBrokerPreview() {
+    if (!desktopBrokerClientId.trim()) {
+      setDesktopBrokerImportError("Enter the Desktop Broker client id before loading holdings.");
+      return;
+    }
+
+    setIsLoadingDesktopBrokerPreview(true);
+    setDesktopBrokerImportError(null);
+
+    try {
+      const response = await fetch(
+        `/api/integrations/desktop-broker/holdings?clientId=${encodeURIComponent(desktopBrokerClientId.trim())}`,
+        {
+          cache: "no-store",
+        },
+      );
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const result = parseApiResult<unknown>(payload);
+        throw new Error(result.message || `Unable to load Desktop Broker holdings (${response.status}).`);
+      }
+
+      const rawItems = Array.isArray(payload) ? (payload as DesktopBrokerHoldingsPayload[]) : [];
+      const mappedHoldings =
+        rawItems
+          .flatMap((item) => item.HoldingBalances ?? [])
+          .map(mapDesktopBrokerHoldingToDraft)
+          .filter((holding): holding is PortfolioDraftHolding => Boolean(holding)) ?? [];
+
+      if (!mappedHoldings.length) {
+        throw new Error("No live positive Desktop Broker holdings were found for that client id.");
+      }
+
+      setDesktopBrokerPreview(mappedHoldings);
+      if (!desktopBrokerAccountName.trim()) {
+        setDesktopBrokerAccountName("Desktop Broker Import");
+      }
+    } catch (error) {
+      setDesktopBrokerPreview([]);
+      setDesktopBrokerImportError(
+        error instanceof Error ? error.message : "Unable to load Desktop Broker holdings.",
+      );
+    } finally {
+      setIsLoadingDesktopBrokerPreview(false);
+    }
+  }
+
+  async function saveDesktopBrokerImport() {
+    if (!desktopBrokerAccountName.trim()) {
+      setDesktopBrokerImportError("Enter the account name before importing holdings.");
+      return;
+    }
+
+    if (!desktopBrokerPreview.length) {
+      setDesktopBrokerImportError("Load and preview the Desktop Broker holdings before importing.");
+      return;
+    }
+
+    setIsImportingDesktopBroker(true);
+    setDesktopBrokerImportError(null);
+
+    try {
+      await createAccountWithHoldings(
+        desktopBrokerOwnerId,
+        desktopBrokerAccountName,
+        desktopBrokerAccountDescription,
+        desktopBrokerPreview,
+      );
+      await loadPortfolioData();
+      setIsImportModalOpen(false);
+    } catch (error) {
+      setDesktopBrokerImportError(
+        error instanceof Error ? error.message : "Unable to import Desktop Broker holdings.",
+      );
+    } finally {
+      setIsImportingDesktopBroker(false);
+    }
+  }
+
   return (
     <>
       <div className={styles.sectionHeader}>
-        <h1 className={styles.title}>Portfolio</h1>
-        <button type="button" className={styles.plusButton} aria-label="Add portfolio item" onClick={openCreateModal}>
-          +
-        </button>
+        <div className={styles.portfolioHeaderLeft}>
+          <h1 className={styles.title}>Portfolio</h1>
+          {ownerFilterOptions.length > 1 ? (
+            <label className={styles.portfolioOwnerFilter}>
+              <span className={styles.srOnly}>Filter portfolio accounts by owner</span>
+              <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>
+                {ownerFilterOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+        </div>
+        <div className={styles.sectionHeaderActions}>
+          <button type="button" className={styles.modalSecondary} onClick={openImportModal}>
+            Import Desktop Broker
+          </button>
+          <button type="button" className={styles.plusButton} aria-label="Add portfolio item" onClick={openCreateModal}>
+            +
+          </button>
+        </div>
       </div>
 
       <section className={styles.entitiesSection}>
@@ -765,10 +1071,6 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
           <div className={styles.emptyStateCard}>Loading portfolio accounts...</div>
         ) : accounts.length ? (
           <div className={styles.portfolioList}>
-            <p className={styles.portfolioAccountMeta}>
-              {(accounts[0]?.account.owner?.name || "No owner selected") +
-                (accounts[0]?.account.jointAccount ? " • Joint account" : "")}
-            </p>
             <div className={styles.portfolioTableHeader}>
               <div>Exchange</div>
               <div>Code</div>
@@ -795,111 +1097,117 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
               </div>
             </div>
 
-            {accounts.map(({ account, holdings }) => {
-              const subtotal = holdings.reduce(
-                (totals, holding) => {
-                  totals.marketValue += resolveMarketValue(holding);
-                  totals.costBase += resolveCostBase(holding);
-                  totals.gainLoss += resolveGainLoss(holding);
-                  return totals;
-                },
-                { marketValue: 0, costBase: 0, gainLoss: 0 },
-              );
+            {filteredGroupedAccounts.map((group) => (
+              <section key={group.ownerLabel} className={styles.portfolioOwnerGroup}>
+                <h2 className={styles.portfolioOwnerTitle}>{group.ownerLabel}</h2>
 
-              return (
-                <article key={account.id ?? account.accountName} className={styles.portfolioGroup}>
-                  <div className={styles.portfolioGroupHeader}>
-                    <div>
-                      <h2 className={styles.portfolioAccountTitle}>{account.accountName || "Untitled account"}</h2>
-                    </div>
-                    <div className={styles.portfolioGroupHeaderRight}>
-                      <div className={styles.portfolioAccountMeta}>
-                        {holdings.length} holding{holdings.length === 1 ? "" : "s"}
-                      </div>
-                      <button
-                        type="button"
-                        className={`${styles.portfolioActionButton} ${styles.portfolioHeaderButton}`}
-                        onClick={() => openAddHolding(account)}
-                        aria-label={`Add holding to ${account.accountName || "portfolio"}`}
-                        title="Add holding"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
+                {group.bundles.map(({ account, holdings }) => {
+                  const subtotal = holdings.reduce(
+                    (totals, holding) => {
+                      totals.marketValue += resolveMarketValue(holding);
+                      totals.costBase += resolveCostBase(holding);
+                      totals.gainLoss += resolveGainLoss(holding);
+                      return totals;
+                    },
+                    { marketValue: 0, costBase: 0, gainLoss: 0 },
+                  );
 
-                  {holdings.length ? (
-                    <>
-                      {holdings.map((holding) => (
-                        <div key={holding.id ?? `${holding.positionCode}-${holding.positionDescription}`} className={styles.portfolioRow}>
-                          <div>{holding.positionExchange || "—"}</div>
-                        <div>{holding.positionCode || "—"}</div>
-                        <div>{holding.positionDescription || "—"}</div>
-                        <div>{formatHoldingNumber(holding.units ?? null)}</div>
-                        <div>{holding.nativeCurrency || holding.valueCurrency || "AUD"}</div>
-                        <div>{formatMoney(holding.holdingValue ?? null)}</div>
-                        <div>{formatMoney(resolveMarketValue(holding))}</div>
-                        <div>{formatMoney(resolveCostBase(holding))}</div>
-                        <div className={resolveGainLoss(holding) < 0 ? styles.negativeValue : undefined}>
-                          {formatMoney(resolveGainLoss(holding))}
+                  return (
+                    <article key={account.id ?? account.accountName} className={styles.portfolioGroup}>
+                      <div className={styles.portfolioGroupHeader}>
+                        <div>
+                          <h3 className={styles.portfolioAccountTitle}>{account.accountName || "Untitled account"}</h3>
                         </div>
-                        <div className={styles.portfolioRowActions}>
-                            <button
-                              type="button"
-                              className={styles.portfolioActionButton}
-                              onClick={() => openEditHolding(account, holding)}
-                              aria-label={`Edit ${holding.positionDescription || "holding"}`}
-                              title="Edit holding"
-                            >
-                              ✎
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.portfolioActionButton}
-                              onClick={() => openDeleteHolding(account, holding)}
-                              aria-label={`Delete ${holding.positionDescription || "holding"}`}
-                              title="Delete holding"
-                            >
-                              🗑
-                            </button>
+                        <div className={styles.portfolioGroupHeaderRight}>
+                          <div className={styles.portfolioAccountMeta}>
+                            {holdings.length} holding{holdings.length === 1 ? "" : "s"}
                           </div>
-                        </div>
-                      ))}
-
-                      <div className={`${styles.portfolioSummaryRow} ${styles.portfolioSubtotalRow}`}>
-                        <div />
-                        <div />
-                        <div className={styles.portfolioSummaryLabel}>Subtotal</div>
-                        <div />
-                        <div />
-                        <div />
-                        <div>{formatMoney(subtotal.marketValue)}</div>
-                        <div>{formatMoney(subtotal.costBase)}</div>
-                        <div className={subtotal.gainLoss < 0 ? styles.negativeValue : undefined}>
-                          {formatMoney(subtotal.gainLoss)}
-                        </div>
-                        <div className={styles.portfolioRowActions}>
-                          <span
-                            className={`${styles.portfolioActionButton} ${styles.portfolioActionSpacer}`}
-                            aria-hidden="true"
+                          <button
+                            type="button"
+                            className={`${styles.portfolioActionButton} ${styles.portfolioHeaderButton}`}
+                            onClick={() => openAddHolding(account)}
+                            aria-label={`Add holding to ${account.accountName || "portfolio"}`}
+                            title="Add holding"
                           >
-                            ✎
-                          </span>
-                          <span
-                            className={`${styles.portfolioActionButton} ${styles.portfolioActionSpacer}`}
-                            aria-hidden="true"
-                          >
-                            🗑
-                          </span>
+                            +
+                          </button>
                         </div>
                       </div>
-                    </>
-                  ) : (
-                    <div className={styles.emptyStateCard}>No underlying holdings added yet for this account.</div>
-                  )}
-                </article>
-              );
-            })}
+
+                      {holdings.length ? (
+                        <>
+                          {holdings.map((holding) => (
+                            <div key={holding.id ?? `${holding.positionCode}-${holding.positionDescription}`} className={styles.portfolioRow}>
+                              <div>{holding.positionExchange || "—"}</div>
+                              <div>{holding.positionCode || "—"}</div>
+                              <div>{holding.positionDescription || "—"}</div>
+                              <div>{formatHoldingNumber(holding.units ?? null)}</div>
+                              <div>{holding.nativeCurrency || holding.valueCurrency || "AUD"}</div>
+                              <div>{formatMoney(holding.holdingValue ?? null)}</div>
+                              <div>{formatMoney(resolveMarketValue(holding))}</div>
+                              <div>{formatMoney(resolveCostBase(holding))}</div>
+                              <div className={resolveGainLoss(holding) < 0 ? styles.negativeValue : undefined}>
+                                {formatMoney(resolveGainLoss(holding))}
+                              </div>
+                              <div className={styles.portfolioRowActions}>
+                                <button
+                                  type="button"
+                                  className={styles.portfolioActionButton}
+                                  onClick={() => openEditHolding(account, holding)}
+                                  aria-label={`Edit ${holding.positionDescription || "holding"}`}
+                                  title="Edit holding"
+                                >
+                                  ✎
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.portfolioActionButton}
+                                  onClick={() => openDeleteHolding(account, holding)}
+                                  aria-label={`Delete ${holding.positionDescription || "holding"}`}
+                                  title="Delete holding"
+                                >
+                                  🗑
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+
+                          <div className={`${styles.portfolioSummaryRow} ${styles.portfolioSubtotalRow}`}>
+                            <div />
+                            <div />
+                            <div className={styles.portfolioSummaryLabel}>Subtotal</div>
+                            <div />
+                            <div />
+                            <div />
+                            <div>{formatMoney(subtotal.marketValue)}</div>
+                            <div>{formatMoney(subtotal.costBase)}</div>
+                            <div className={subtotal.gainLoss < 0 ? styles.negativeValue : undefined}>
+                              {formatMoney(subtotal.gainLoss)}
+                            </div>
+                            <div className={styles.portfolioRowActions}>
+                              <span
+                                className={`${styles.portfolioActionButton} ${styles.portfolioActionSpacer}`}
+                                aria-hidden="true"
+                              >
+                                ✎
+                              </span>
+                              <span
+                                className={`${styles.portfolioActionButton} ${styles.portfolioActionSpacer}`}
+                                aria-hidden="true"
+                              >
+                                🗑
+                              </span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className={styles.emptyStateCard}>No underlying holdings added yet for this account.</div>
+                      )}
+                    </article>
+                  );
+                })}
+              </section>
+            ))}
 
             <div className={`${styles.portfolioSummaryRow} ${styles.portfolioOverallTotalRow}`}>
               <div />
@@ -976,7 +1284,9 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                     <span>Owner</span>
                     <select
                       value={selectedOwnerId}
-                      onChange={(event) => setSelectedOwnerId(event.target.value)}
+                      onChange={(event) => {
+                        setSelectedOwnerId(event.target.value);
+                      }}
                     >
                       {ownerOptions.map((option) => (
                         <option key={option.id} value={option.id}>
@@ -984,14 +1294,6 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                         </option>
                       ))}
                     </select>
-                  </label>
-                  <label className={styles.portfolioCheckboxField}>
-                    <input
-                      type="checkbox"
-                      checked={isJointAccount}
-                      onChange={(event) => setIsJointAccount(event.target.checked)}
-                    />
-                    <span>Joint account</span>
                   </label>
                 </div>
               ) : activeStep === 1 ? (
@@ -1162,6 +1464,139 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                   {isSaving ? "Saving..." : "Save portfolio"}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isImportModalOpen ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={closeImportModal}>
+          <div
+            className={`${styles.modalCard} ${styles.portfolioModalCard}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="desktop-broker-import-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <h2 id="desktop-broker-import-title" className={styles.modalTitle}>
+                Import Desktop Broker Holdings
+              </h2>
+              <button type="button" className={styles.modalClose} onClick={closeImportModal} aria-label="Close">
+                ×
+              </button>
+            </div>
+
+            <div className={styles.portfolioStepBody}>
+              <div className={styles.modalGrid}>
+                <label className={styles.modalField}>
+                  <span>Desktop Broker Client ID</span>
+                  <input
+                    value={desktopBrokerClientId}
+                    onChange={(event) => setDesktopBrokerClientId(event.target.value)}
+                    placeholder="e.g. 105143"
+                  />
+                </label>
+                <label className={styles.modalField}>
+                  <span>Owner</span>
+                  <select value={desktopBrokerOwnerId} onChange={(event) => setDesktopBrokerOwnerId(event.target.value)}>
+                    {ownerOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.modalField}>
+                  <span>Account Name</span>
+                  <input
+                    value={desktopBrokerAccountName}
+                    onChange={(event) => setDesktopBrokerAccountName(event.target.value)}
+                    placeholder="Desktop Broker Import"
+                  />
+                </label>
+                <label className={`${styles.modalField} ${styles.modalFieldFull}`}>
+                  <span>Account Description</span>
+                  <textarea
+                    className={styles.modalTextarea}
+                    value={desktopBrokerAccountDescription}
+                    onChange={(event) => setDesktopBrokerAccountDescription(event.target.value)}
+                    placeholder="Optional description for the imported portfolio account"
+                  />
+                </label>
+              </div>
+
+              <div className={styles.portfolioDraftActions}>
+                <button
+                  type="button"
+                  className={styles.modalSecondary}
+                  onClick={loadDesktopBrokerPreview}
+                  disabled={isLoadingDesktopBrokerPreview || isImportingDesktopBroker}
+                >
+                  {isLoadingDesktopBrokerPreview ? "Loading..." : "Load holdings"}
+                </button>
+              </div>
+
+              {desktopBrokerPreview.length ? (
+                <>
+                  <p className={styles.portfolioImportHint}>
+                    Previewing live positive holdings only before import.
+                  </p>
+                  <div className={`${styles.portfolioDraftList} ${styles.portfolioImportPreviewList}`}>
+                    <div className={styles.portfolioDraftHeader}>
+                      <div>Description</div>
+                      <div>Code</div>
+                      <div>Units</div>
+                      <div>Holding Value</div>
+                      <div>Market Value</div>
+                      <div />
+                    </div>
+                    {desktopBrokerPreview.map((holding) => (
+                      <div key={holding.id} className={styles.portfolioDraftRow}>
+                        <div>{holding.positionDescription || "—"}</div>
+                        <div>{holding.positionCode || "—"}</div>
+                        <div>{formatHoldingNumber(Number(holding.units || 0))}</div>
+                        <div>{formatFixedCurrencyInput(holding.holdingValue)}</div>
+                        <div>{formatFixedCurrencyInput(holding.nativeMarketprice)}</div>
+                        <div />
+                      </div>
+                    ))}
+                    <div className={styles.portfolioDraftTotalRow}>
+                      <div />
+                      <div />
+                      <div />
+                      <div className={styles.portfolioDraftTotalLabel}>Total</div>
+                      <div className={styles.portfolioDraftTotalValue}>{formatMoney(desktopBrokerPreviewTotal)}</div>
+                      <div />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className={styles.emptyStateCard}>
+                  Load Desktop Broker holdings to preview the import before creating the portfolio account.
+                </div>
+              )}
+            </div>
+
+            {desktopBrokerImportError ? <p className={styles.modalError}>{desktopBrokerImportError}</p> : null}
+
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.modalSecondary}
+                onClick={closeImportModal}
+                disabled={isLoadingDesktopBrokerPreview || isImportingDesktopBroker}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.modalPrimary}
+                onClick={saveDesktopBrokerImport}
+                disabled={isLoadingDesktopBrokerPreview || isImportingDesktopBroker}
+              >
+                {isImportingDesktopBroker ? "Importing..." : "Import holdings"}
+              </button>
             </div>
           </div>
         </div>

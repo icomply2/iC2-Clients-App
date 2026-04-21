@@ -350,6 +350,7 @@ export type ClientPensionRecord = {
   accountNumber?: string | null;
   annualReturn?: string | null;
   payment?: string | null;
+  joint?: boolean | null;
   owner?: {
     id?: string | null;
     name?: string | null;

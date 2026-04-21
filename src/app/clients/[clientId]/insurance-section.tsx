@@ -219,6 +219,10 @@ function toPolicyPayload(policy: InsurancePolicy, clientId: string): ClientPolic
   };
 }
 
+function calculatePolicyPremiumTotal(policy: InsurancePolicy) {
+  return policy.covers.reduce((total, cover) => total + (cover.premiumAmount ?? 0), 0);
+}
+
 function toCoverPayload(cover: InsuranceCover): PolicyCoverRecord {
   return {
     id: cover.id.startsWith("cover-") ? null : cover.id,
@@ -597,6 +601,11 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
         {policies.length ? (
           policies.map((policy) => (
             <article key={policy.id} className={styles.policyCard}>
+              {(() => {
+                const totalPremium = calculatePolicyPremiumTotal(policy);
+
+                return (
+                  <>
               <div className={styles.policyHeader}>
                 <div className={styles.policyMeta}>
                   <div><strong>Owner:</strong> {policy.ownerName || "-"}</div>
@@ -604,6 +613,7 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
                   <div><strong>Policy No:</strong> {policy.policyNumber || "-"}</div>
                   <div><strong>Status:</strong> {policy.status || "-"}</div>
                   <div><strong>Linked Super Fund:</strong> {policy.superFundName || "-"}</div>
+                  <div><strong>Total Premium:</strong> {formatCurrency(totalPremium)}</div>
                 </div>
                 <div className={styles.entitiesActions}>
                   <button type="button" className={styles.rowActionButton} onClick={() => openPolicyModal(policy.id)}>
@@ -631,29 +641,48 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
               </div>
 
               {policy.covers.length ? (
-                policy.covers.map((cover) => (
-                  <div key={cover.id} className={styles.policyCoverRow}>
-                    <div>{cover.coverType}</div>
-                    <div>{formatCurrency(cover.sumInsured)}</div>
-                    <div>{formatCurrency(cover.premiumAmount)}</div>
-                    <div>{cover.premiumFrequency}</div>
+                <>
+                  {policy.covers.map((cover) => (
+                    <div key={cover.id} className={styles.policyCoverRow}>
+                      <div>{cover.coverType}</div>
+                      <div>{formatCurrency(cover.sumInsured)}</div>
+                      <div>{formatCurrency(cover.premiumAmount)}</div>
+                      <div>{cover.premiumFrequency}</div>
+                      <div className={styles.entitiesActions}>
+                        <button type="button" className={styles.rowActionButton} onClick={() => openCoverModal(policy.id, cover.id)}>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className={`${styles.rowActionButton} ${styles.rowActionDanger}`.trim()}
+                          onClick={() => setCoverDeleteState({ policyId: policy.id, coverId: cover.id })}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className={styles.policyCoverSummaryRow}>
+                    <div />
+                    <div />
+                    <div className={styles.policyCoverSummaryLabel}>{formatCurrency(totalPremium)}</div>
+                    <div />
                     <div className={styles.entitiesActions}>
-                      <button type="button" className={styles.rowActionButton} onClick={() => openCoverModal(policy.id, cover.id)}>
+                      <span className={`${styles.rowActionButton} ${styles.policyActionSpacer}`} aria-hidden="true">
                         Edit
-                      </button>
-                      <button
-                        type="button"
-                        className={`${styles.rowActionButton} ${styles.rowActionDanger}`.trim()}
-                        onClick={() => setCoverDeleteState({ policyId: policy.id, coverId: cover.id })}
-                      >
+                      </span>
+                      <span className={`${styles.rowActionButton} ${styles.policyActionSpacer}`} aria-hidden="true">
                         Delete
-                      </button>
+                      </span>
                     </div>
                   </div>
-                ))
+                </>
               ) : (
                 <div className={styles.policyEmptyState}>No cover details added yet for this policy.</div>
               )}
+                  </>
+                );
+              })()}
             </article>
           ))
         ) : (

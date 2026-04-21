@@ -17,6 +17,7 @@ type AssetsSectionProps = {
 
 const assetCategoryOptions = ["Cash", "Investment", "Property", "Superannuation", "Business", "Personal"];
 const incomeFrequencyOptions = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"];
+const JOINT_OWNER_VALUE = "__joint__";
 const assetTypeOptionsByCategory: Record<string, string[]> = {
   Cash: ["Cash on Hand", "Current Savings", "Fixed Deposits"],
   Investment: ["Bonds", "Other Investments", "Stocks", "Unit Trusts", "Annuity"],
@@ -161,11 +162,12 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
       [
         profile.client?.name && profile.client?.id ? { value: profile.client.id, label: profile.client.name } : null,
         profile.partner?.name && profile.partner?.id ? { value: profile.partner.id, label: profile.partner.name } : null,
+        hasPartner ? { value: JOINT_OWNER_VALUE, label: "Joint" } : null,
         ...(profile.entities ?? [])
           .filter((entity) => entity.id && entity.name)
           .map((entity) => ({ value: entity.id ?? "", label: entity.name ?? "" })),
       ].filter((option): option is { value: string; label: string } => Boolean(option)),
-    [profile.client?.id, profile.client?.name, profile.entities, profile.partner?.id, profile.partner?.name],
+    [hasPartner, profile.client?.id, profile.client?.name, profile.entities, profile.partner?.id, profile.partner?.name],
   );
 
   const [ownerId, setOwnerId] = useState(ownerOptions[0]?.value ?? "");
@@ -177,7 +179,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
   const [incomeAmount, setIncomeAmount] = useState("");
   const [incomeFrequency, setIncomeFrequency] = useState("");
   const [acquisitionDate, setAcquisitionDate] = useState("");
-  const [joint, setJoint] = useState(false);
 
   const assetTypeOptions = useMemo(() => assetTypeOptionsByCategory[type] ?? [], [type]);
 
@@ -226,7 +227,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     setIncomeAmount("");
     setIncomeFrequency("");
     setAcquisitionDate("");
-    setJoint(false);
     setEditingAssetId(null);
     setErrorMessage("");
   }
@@ -242,7 +242,16 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
   }
 
   function buildAssetRecord() {
-    const owner = ownerOptions.find((option) => option.value === ownerId);
+    const owner =
+      ownerId === JOINT_OWNER_VALUE && hasPartner && profile.client?.id && profile.client?.name
+        ? {
+            value: profile.client.id,
+            label:
+              profile.client.name && profile.partner?.name
+                ? `${profile.client.name} and ${profile.partner.name}`
+                : profile.client.name,
+          }
+        : ownerOptions.find((option) => option.value === ownerId);
 
     if (!owner) {
       throw new Error("Please choose an owner.");
@@ -276,7 +285,7 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
           : null,
       ),
       acquisitionDate: acquisitionDate || null,
-      joint: hasPartner ? joint : false,
+      joint: hasPartner ? ownerId === JOINT_OWNER_VALUE : false,
       owner: {
         id: owner.value,
         name: owner.label,
@@ -325,7 +334,7 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     }
 
     setEditingAssetId(asset.id ?? null);
-    setOwnerId(asset.owner?.id ?? ownerOptions[0]?.value ?? "");
+    setOwnerId(hasPartner && asset.joint ? JOINT_OWNER_VALUE : asset.owner?.id ?? ownerOptions[0]?.value ?? "");
     setType(asset.type ?? "");
     setAssetType(asset.assetType ?? "");
     setDescription(asset.description ?? "");
@@ -334,7 +343,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     setIncomeAmount(formatCurrencyField(asset.incomeAmount ?? ""));
     setIncomeFrequency(asset.incomeFrequency?.value ?? asset.incomeFrequency?.type ?? "");
     setAcquisitionDate((asset.acquisitionDate ?? "").slice(0, 10));
-    setJoint(hasPartner ? Boolean(asset.joint) : false);
     setErrorMessage("");
     setIsOpen(true);
   }
@@ -538,12 +546,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
                 <span>Acquired</span>
                 <input type="date" value={acquisitionDate} onChange={(event) => setAcquisitionDate(event.target.value)} />
               </label>
-              {hasPartner ? (
-                <label className={styles.assetCheckboxRow}>
-                  <span>Joint Asset</span>
-                  <input type="checkbox" checked={joint} onChange={(event) => setJoint(event.target.checked)} />
-                </label>
-              ) : null}
             </div>
             <div className={styles.identityModalActions}>
               <button

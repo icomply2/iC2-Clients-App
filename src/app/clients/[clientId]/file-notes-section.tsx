@@ -36,6 +36,10 @@ type FileNoteDraft = {
   modifiedDate: string;
 };
 
+type AttachmentDeleteCandidate =
+  | { kind: "saved"; index: number; name: string }
+  | { kind: "file"; index: number; name: string };
+
 function formatDate(value?: string | null) {
   if (!value) {
     return "";
@@ -105,6 +109,31 @@ function fallbackAttachments(draft: FileNoteDraft): NonNullable<FileNoteRecord["
   ];
 }
 
+function downloadAttachmentUrl(url: string, fileName?: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName ?? "";
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function downloadDraftFile(file: File) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  downloadAttachmentUrl(objectUrl, file.name);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 export function FileNotesSection({ profile, useMockFallback = false }: FileNotesSectionProps) {
   const [notes, setNotes] = useState<FileNoteRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,6 +147,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
   const [errorMessage, setErrorMessage] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState<FileNoteRecord | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
+  const [attachmentDeleteCandidate, setAttachmentDeleteCandidate] = useState<AttachmentDeleteCandidate | null>(null);
 
   const subtypeOptions = useMemo(() => FILE_NOTE_SUBTYPE_OPTIONS[draft.type] ?? [], [draft.type]);
 
@@ -169,6 +199,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     }
 
     setDraft(emptyDraft());
+    setAttachmentDeleteCandidate(null);
     setErrorMessage("");
     setIsModalOpen(true);
   }
@@ -197,8 +228,31 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
       createdDate: note.createdDate ?? "",
       modifiedDate: note.modifiedDate ?? "",
     });
+    setAttachmentDeleteCandidate(null);
     setErrorMessage("");
     setIsModalOpen(true);
+  }
+
+  function confirmRemoveAttachment() {
+    if (!attachmentDeleteCandidate) {
+      return;
+    }
+
+    setDraft((current) => {
+      if (attachmentDeleteCandidate.kind === "saved") {
+        return {
+          ...current,
+          attachment: current.attachment.filter((_, currentIndex) => currentIndex !== attachmentDeleteCandidate.index),
+        };
+      }
+
+      return {
+        ...current,
+        files: current.files.filter((_, currentIndex) => currentIndex !== attachmentDeleteCandidate.index),
+      };
+    });
+
+    setAttachmentDeleteCandidate(null);
   }
 
   async function handleSave() {
@@ -497,35 +551,68 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
                     {draft.attachment.map((attachment, index) => (
                       <div key={`${attachment.name ?? "attachment"}-${index}`} className={styles.attachmentItem}>
                         <span>{attachment.name ?? "Existing attachment"}</span>
-                        <button
-                          type="button"
-                          className={styles.rowActionButton}
-                          onClick={() =>
-                            setDraft((current) => ({
-                              ...current,
-                              attachment: current.attachment.filter((_, currentIndex) => currentIndex !== index),
-                            }))
-                          }
-                        >
-                          Remove
-                        </button>
+                        <div className={styles.attachmentActions}>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() => {
+                              if (attachment.url) {
+                                downloadAttachmentUrl(attachment.url, attachment.name);
+                              }
+                            }}
+                            aria-label={`Download ${attachment.name ?? "attachment"}`}
+                            title={attachment.url ? "Download attachment" : "Download unavailable for this attachment"}
+                            disabled={!attachment.url}
+                          >
+                            ⬇
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() =>
+                              setAttachmentDeleteCandidate({
+                                kind: "saved",
+                                index,
+                                name: attachment.name ?? "attachment",
+                              })
+                            }
+                            aria-label={`Remove ${attachment.name ?? "attachment"}`}
+                            title="Remove attachment"
+                          >
+                            🗑
+                          </button>
+                        </div>
                       </div>
                     ))}
                     {draft.files.map((file, index) => (
                       <div key={`${file.name}-${index}`} className={styles.attachmentItem}>
                         <span>{file.name}</span>
-                        <button
-                          type="button"
-                          className={styles.rowActionButton}
-                          onClick={() =>
-                            setDraft((current) => ({
-                              ...current,
-                              files: current.files.filter((_, currentIndex) => currentIndex !== index),
-                            }))
-                          }
-                        >
-                          Remove
-                        </button>
+                        <div className={styles.attachmentActions}>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() => downloadDraftFile(file)}
+                            aria-label={`Download ${file.name}`}
+                            title="Download attachment"
+                          >
+                            ⬇
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() =>
+                              setAttachmentDeleteCandidate({
+                                kind: "file",
+                                index,
+                                name: file.name,
+                              })
+                            }
+                            aria-label={`Remove ${file.name}`}
+                            title="Remove attachment"
+                          >
+                            🗑
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -571,6 +658,33 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
               </button>
             </div>
             {deleteErrorMessage ? <p className={styles.modalError}>{deleteErrorMessage}</p> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {attachmentDeleteCandidate ? (
+        <div className={styles.modalOverlay}>
+          <div className={styles.confirmDialog}>
+            <h2 className={styles.confirmTitle}>Remove Attachment</h2>
+            <p className={styles.confirmText}>
+              Are you sure you want to remove <strong>{attachmentDeleteCandidate.name}</strong> from this file note?
+            </p>
+            <div className={styles.confirmActions}>
+              <button
+                type="button"
+                className={`${styles.modalPrimary} ${styles.confirmDanger}`.trim()}
+                onClick={confirmRemoveAttachment}
+              >
+                Remove
+              </button>
+              <button
+                type="button"
+                className={styles.modalSecondary}
+                onClick={() => setAttachmentDeleteCandidate(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
