@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
-  ApiResult,
   ClientExpenseRecord,
   ClientIncomeRecord,
   ClientInsuranceRecord,
@@ -12,6 +11,11 @@ import type {
   ClientProfile,
   ClientSuperannuationRecord,
 } from "@/lib/api/types";
+import {
+  deleteFinancialCollectionItem,
+  saveFinancialCollection,
+  upsertFinancialCollection,
+} from "@/lib/services/profile-collections";
 import styles from "./page.module.css";
 
 type SectionKind = "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance";
@@ -49,6 +53,7 @@ const superTypeOptions = ["Industry Fund", "Retail Fund", "SMSF", "Defined Benef
 const pensionTypeOptions = ["Account Based Pension", "Allocated Pension", "Annuity", "Other"];
 const insuranceCoverOptions = ["Life", "TPD", "Trauma", "Income Protection", "Health", "Other"];
 const insuranceStatusOptions = ["Active", "Pending", "Cancelled", "Claimed"];
+const JOINT_OWNER_VALUE = "__joint__";
 
 function normalizeCurrencyInput(value: string) {
   const digitsOnly = value.replace(/[^\d.]/g, "");
@@ -113,21 +118,11 @@ function annualiseAmount(amount: number, frequency?: string | null) {
   }
 }
 
-function parseResponseBody<T>(responseText: string) {
-  if (!responseText) return null;
-  try {
-    return JSON.parse(responseText) as
-      | ApiResult<T[]>
-      | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null };
-  } catch {
-    return null;
-  }
-}
-
-function ownerOptionsFromProfile(profile: ClientProfile) {
+function ownerOptionsFromProfile(profile: ClientProfile, hasPartner: boolean) {
   return [
     profile.client?.name && profile.client?.id ? { value: profile.client.id, label: profile.client.name } : null,
     profile.partner?.name && profile.partner?.id ? { value: profile.partner.id, label: profile.partner.name } : null,
+    hasPartner ? { value: JOINT_OWNER_VALUE, label: "Joint" } : null,
     ...(profile.entities ?? []).filter((entity) => entity.id && entity.name).map((entity) => ({ value: entity.id ?? "", label: entity.name ?? "" })),
   ].filter((option): option is { value: string; label: string } => Boolean(option));
 }
@@ -194,19 +189,6 @@ function defaultSecondaryText(kind: SectionKind) {
   }
 }
 
-function getErrorMessage(
-  result: ReturnType<typeof parseResponseBody<FinancialRecord>>,
-  responseText: string,
-  fallback: string,
-  status: number,
-) {
-  const modelError =
-    result && "modelErrors" in result && Array.isArray(result.modelErrors)
-      ? result.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-      : null;
-  return modelError ?? (result && "message" in result && result.message ? result.message : responseText || `${fallback} (status ${status}).`);
-}
-
 function getFallbackMessage() {
   return "Live client data is temporarily unavailable. Editing is disabled while sample data is shown.";
 }
@@ -214,7 +196,7 @@ function getFallbackMessage() {
 export function FinancialRecordsSection({ profile, kind, useMockFallback = false }: Props) {
   const router = useRouter();
   const hasPartner = Boolean(profile.partner?.id);
-  const ownerOptions = useMemo(() => ownerOptionsFromProfile(profile), [profile]);
+  const ownerOptions = useMemo(() => ownerOptionsFromProfile(profile, hasPartner), [hasPartner, profile]);
   const assetOptions = useMemo(
     () => (profile.assets ?? []).filter((asset) => asset.id).map((asset) => ({ value: asset.id ?? "", label: asset.description ?? asset.assetType ?? "Asset" })),
     [profile.assets],
@@ -504,7 +486,16 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
   }
 
   function buildRecord(): FinancialRecord {
-    const owner = ownerOptions.find((option) => option.value === ownerId);
+    const owner =
+      ownerId === JOINT_OWNER_VALUE && hasPartner && profile.client?.id && profile.client?.name
+        ? {
+            value: profile.client.id,
+            label:
+              profile.client.name && profile.partner?.name
+                ? `${profile.client.name} and ${profile.partner.name}`
+                : profile.client.name,
+          }
+        : ownerOptions.find((option) => option.value === ownerId);
     if (!owner) throw new Error("Please choose an owner.");
 
     switch (kind) {
@@ -519,7 +510,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           interestRate: textTwo.trim() || null,
           repaymentFrequency: optionFromValue(frequency),
           securityAssets: referenceId ? { id: referenceId, type: assetOptions.find((o) => o.value === referenceId)?.label ?? "Asset", description: assetOptions.find((o) => o.value === referenceId)?.label ?? null } : null,
-          joint: hasPartner ? joint : false,
+          joint: hasPartner ? ownerId === JOINT_OWNER_VALUE || joint : false,
           owner: { id: owner.value, name: owner.label },
         };
       case "income":
@@ -531,7 +522,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           taxType: secondaryText.trim() || null,
           frequency: optionFromValue(frequency),
           pension: normalizeLinkedRecord(null),
-          joint: hasPartner ? joint : false,
+          joint: hasPartner ? ownerId === JOINT_OWNER_VALUE || joint : false,
           owner: { id: owner.value, name: owner.label },
         };
       case "expenses":
@@ -550,7 +541,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
                 }
               : null,
           ),
-          joint: hasPartner ? joint : false,
+          joint: hasPartner ? ownerId === JOINT_OWNER_VALUE || joint : false,
           owner: { id: owner.value, name: owner.label },
         };
       case "superannuation":
@@ -562,7 +553,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           contributionAmount: toStoredCurrencyValue(amountTwo),
           accountNumber: textOne.trim() || null,
           frequency: optionFromValue(frequency),
-          joint: hasPartner ? joint : false,
+          joint: hasPartner ? ownerId === JOINT_OWNER_VALUE || joint : false,
           owner: { id: owner.value, name: owner.label },
         };
       case "retirement-income":
@@ -573,7 +564,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           balance: toStoredCurrencyValue(amountOne),
           payment: toStoredCurrencyValue(amountTwo),
           accountNumber: textOne.trim() || null,
-          annualReturn: textTwo.trim() || null,
+          annualReturn: null,
           frequency: optionFromValue(frequency),
           owner: { id: owner.value, name: owner.label },
         };
@@ -587,36 +578,16 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           frequency: optionFromValue(frequency),
           status: textOne.trim() || null,
           superFund: referenceId ? { id: referenceId, type: superOptions.find((o) => o.value === referenceId)?.label ?? "Super" } : null,
-          joint: hasPartner ? joint : false,
+          joint: hasPartner ? ownerId === JOINT_OWNER_VALUE || joint : false,
           owner: { id: owner.value, name: owner.label },
         };
     }
   }
 
-  function mergeReturnedRecords(returnedRecords: FinancialRecord[], submittedRecords: FinancialRecord[]) {
-    return returnedRecords.map((returnedRecord) => {
-      const matchedRecord =
-        submittedRecords.find((submittedRecord) => submittedRecord.id && returnedRecord.id && submittedRecord.id === returnedRecord.id) ??
-        submittedRecords.find((submittedRecord) => JSON.stringify(submittedRecord.owner) === JSON.stringify(returnedRecord.owner));
-      return { ...returnedRecord, ...matchedRecord };
-    });
-  }
-
-  async function saveRecords(nextRecords: FinancialRecord[], fallbackError: string) {
+  async function saveRecords(nextRecords: FinancialRecord[]) {
     if (!profile.id) throw new Error("This client profile does not have a profile id yet.");
-    const meta = getSectionMeta();
-    const response = await fetch(`/api/client-profiles/${encodeURIComponent(profile.id)}/${meta.savePath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentUser: null, request: nextRecords }),
-    });
-    const responseText = await response.text();
-    const result = parseResponseBody<FinancialRecord>(responseText);
-    if (!response.ok) {
-      throw new Error(`Save failed (${response.status}): ${getErrorMessage(result, responseText, fallbackError, response.status)}`);
-    }
-    const returnedRecords = result && "data" in result && Array.isArray(result.data) ? (result.data as FinancialRecord[]) : null;
-    setRecords(returnedRecords ? mergeReturnedRecords(returnedRecords, nextRecords) : nextRecords);
+    const savedRecords = await saveFinancialCollection(kind, profile.id, nextRecords as never);
+    setRecords(savedRecords as FinancialRecord[]);
     router.refresh();
   }
 
@@ -630,10 +601,8 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
     setErrorMessage("");
     try {
       const record = buildRecord();
-      const nextRecords = editingId
-        ? records.map((item) => (item.id === editingId ? { ...item, ...record } : item))
-        : [...records.map((item) => ({ ...item })), { id: null, ...record }];
-      await saveRecords(nextRecords, `Unable to save the ${getSectionMeta().emptyName} right now`);
+      const nextRecords = upsertFinancialCollection(kind, records as never, record as never, editingId) as FinancialRecord[];
+      await saveRecords(nextRecords);
       resetForm();
       setIsOpen(false);
     } catch (error) {
@@ -657,7 +626,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
     switch (kind) {
       case "liabilities": {
         const item = record as ClientLiabilityRecord;
-        setOwnerId(item.owner?.id ?? ownerOptions[0]?.value ?? "");
+        setOwnerId(hasPartner && item.joint ? JOINT_OWNER_VALUE : item.owner?.id ?? ownerOptions[0]?.value ?? "");
         setPrimaryType(item.loanType ?? "");
         setSecondaryText(item.bankName ?? "");
         setAmountOne(formatCurrencyField(item.outstandingBalance ?? ""));
@@ -671,7 +640,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       }
       case "income": {
         const item = record as ClientIncomeRecord;
-        setOwnerId(item.owner?.id ?? ownerOptions[0]?.value ?? "");
+        setOwnerId(hasPartner && item.joint ? JOINT_OWNER_VALUE : item.owner?.id ?? ownerOptions[0]?.value ?? "");
         setPrimaryType(item.type ?? "");
         setDescription(item.description ?? "");
         setAmountOne(formatCurrencyField(item.amount ?? ""));
@@ -682,7 +651,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       }
       case "expenses": {
         const item = record as ClientExpenseRecord;
-        setOwnerId(item.owner?.id ?? ownerOptions[0]?.value ?? "");
+        setOwnerId(hasPartner && item.joint ? JOINT_OWNER_VALUE : item.owner?.id ?? ownerOptions[0]?.value ?? "");
         setPrimaryType(item.type ?? "");
         setDescription(item.description ?? "");
         setAmountOne(formatCurrencyField(item.amount ?? ""));
@@ -694,7 +663,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       }
       case "superannuation": {
         const item = record as ClientSuperannuationRecord;
-        setOwnerId(item.owner?.id ?? ownerOptions[0]?.value ?? "");
+        setOwnerId(hasPartner && item.joint ? JOINT_OWNER_VALUE : item.owner?.id ?? ownerOptions[0]?.value ?? "");
         setPrimaryType(item.type ?? "");
         setSecondaryText(item.superFund ?? "");
         setAmountOne(formatCurrencyField(item.balance ?? ""));
@@ -706,13 +675,13 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       }
       case "retirement-income": {
         const item = record as ClientPensionRecord;
-        setOwnerId(item.owner?.id ?? ownerOptions[0]?.value ?? "");
+        setOwnerId(hasPartner && item.joint ? JOINT_OWNER_VALUE : item.owner?.id ?? ownerOptions[0]?.value ?? "");
         setPrimaryType(item.type ?? "");
         setSecondaryText(item.superFund ?? "");
         setAmountOne(formatCurrencyField(item.balance ?? ""));
         setAmountTwo(formatCurrencyField(item.payment ?? ""));
         setTextOne(item.accountNumber ?? "");
-        setTextTwo(item.annualReturn ?? "");
+        setTextTwo("");
         setFrequency(item.frequency?.value ?? "");
         break;
       }
@@ -741,16 +710,10 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
     }
 
     if (!profile.id || !deleteCandidateId) return;
-    const meta = getSectionMeta();
     setIsSaving(true);
     setDeleteErrorMessage("");
     try {
-      const response = await fetch(`/api/client-profiles/${encodeURIComponent(profile.id)}/${meta.deletePath}/${encodeURIComponent(deleteCandidateId)}`, { method: "DELETE" });
-      const responseText = await response.text();
-      const result = parseResponseBody<FinancialRecord>(responseText);
-      if (!response.ok) {
-        throw new Error(`Delete failed (${response.status}): ${getErrorMessage(result, responseText, `Unable to delete the ${meta.emptyName} right now`, response.status)}`);
-      }
+      await deleteFinancialCollectionItem(kind, profile.id, deleteCandidateId);
       setRecords((current) => current.filter((item) => item.id !== deleteCandidateId));
       router.refresh();
       setDeleteCandidateId(null);
@@ -803,12 +766,6 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       </div>
 
       {useMockFallback ? <p className={styles.actionNotice}>{getFallbackMessage()}</p> : null}
-
-      {kind === "income" || kind === "expenses" ? (
-        <p className={styles.dataNotice}>
-          Some records on this page are created automatically from Assets, Liabilities, and Retirement Income to avoid double entry.
-        </p>
-      ) : null}
 
       <section className={styles.financialSection}>
         <div
@@ -948,14 +905,15 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
               {kind === "retirement-income" ? <CurrencyRow label="Payment" value={amountTwo} onChange={setAmountTwo} /> : null}
               {kind === "insurance" ? <CurrencyRow label="Premium Amount" value={amountTwo} onChange={setAmountTwo} /> : null}
               {kind === "liabilities" ? <InputRow label="Interest Rate" value={textTwo} onChange={setTextTwo} /> : null}
-              {kind === "retirement-income" ? <InputRow label="Annual Return" value={textTwo} onChange={setTextTwo} /> : null}
               {kind === "insurance" ? <SelectRow label="Status" value={textOne} onChange={setTextOne} options={insuranceStatusOptions.map((value) => ({ value, label: value }))} /> : null}
               {kind === "liabilities" || kind === "income" || kind === "expenses" || kind === "superannuation" || kind === "retirement-income" || kind === "insurance" ? <SelectRow label="Frequency" value={frequency} onChange={setFrequency} options={[{ value: "", label: "" }, ...frequencyOptions.map((value) => ({ value, label: value }))]} /> : null}
               {kind === "expenses" ? <InputRow label="Indexation" value={secondaryText} onChange={setSecondaryText} /> : null}
               {kind === "liabilities" ? <SelectRow label="Security Asset" value={referenceId} onChange={setReferenceId} options={[{ value: "", label: "" }, ...assetOptions]} /> : null}
               {kind === "expenses" ? <SelectRow label="Linked Liability" value={referenceId} onChange={setReferenceId} options={[{ value: "", label: "" }, ...liabilityOptions]} /> : null}
               {kind === "insurance" ? <SelectRow label="Super Fund" value={referenceId} onChange={setReferenceId} options={[{ value: "", label: "" }, ...superOptions]} /> : null}
-              {kind !== "retirement-income" && hasPartner ? <CheckboxRow label="Joint Record" checked={joint} onChange={setJoint} /> : null}
+              {kind !== "retirement-income" && kind !== "liabilities" && hasPartner ? (
+                <CheckboxRow label="Joint Record" checked={joint} onChange={setJoint} />
+              ) : null}
             </div>
             <div className={styles.identityModalActions}>
               <button type="button" className={styles.identityCreateButton} onClick={() => void handleSave()} disabled={isSaving}>

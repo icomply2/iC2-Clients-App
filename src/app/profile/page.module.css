@@ -98,20 +98,21 @@
   gap: 1rem;
 }
 
-.profileHero {
+.headerBar {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid #f1d372;
-  border-radius: 0.35rem;
-  background: #fffbea;
+  min-height: 3.5rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.3rem;
+  background: #f2c500;
 }
 
-.title {
-  margin: 0 0 0.35rem;
-  font-size: 1.7rem;
+.headerTitle {
+  color: #fff;
+  font-size: 0.98rem;
+  font-weight: 800;
 }
 
 .description,
@@ -139,6 +140,9 @@
 }
 
 .subnavButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2.35rem;
   padding: 0 0.95rem;
   border: 1px solid #d8dee6;
@@ -162,6 +166,24 @@
   gap: 0.9rem 1rem;
 }
 
+.accountSectionStack {
+  display: grid;
+  gap: 1rem;
+}
+
+.sectionBlock {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.sectionBanner {
+  padding: 0.7rem 0.8rem;
+  background: #fff7d6;
+  color: #102a56;
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
 .field {
   display: grid;
   gap: 0.35rem;
@@ -182,6 +204,19 @@
   background: #fff;
   color: #243b53;
   font: inherit;
+}
+
+.logoUploadField input[type="file"] {
+  min-height: auto;
+  padding: 0.6rem 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.uploadMeta {
+  color: #66788a;
+  font-size: 0.84rem;
 }
 
 .securityGrid {
@@ -268,6 +303,24 @@
   align-items: center;
   gap: 0.8rem;
   flex-wrap: wrap;
+}
+
+.integrationListBlock {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.integrationListTitle {
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.integrationList {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #475569;
+  line-height: 1.55;
 }
 
 .cardTitle {
@@ -381,7 +434,7 @@
   .topbarRight,
   .subnav,
   .panelFooter,
-  .profileHero {
+  .headerBar {
     flex-wrap: wrap;
   }
 

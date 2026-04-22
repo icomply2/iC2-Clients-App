@@ -358,6 +358,17 @@
   margin-top: 0.7rem;
 }
 
+.profileNestedSection {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.profileNestedHeading {
+  color: #102a56;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
 .profileSectionHeading {
   padding: 0.7rem 0.75rem;
   background: #fff8de;
@@ -536,6 +547,228 @@
 .wizardsSection {
   display: grid;
   gap: 1.2rem;
+}
+
+.factFindWorkflowCard {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid #f1d372;
+  border-radius: 0.45rem;
+  background: linear-gradient(180deg, #fffef6 0%, #fff9df 100%);
+}
+
+.factFindWorkflowHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.factFindEyebrow {
+  color: #8a6700;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.factFindStepTitle {
+  margin: 0.7rem 0 0.35rem;
+  color: #102a56;
+  font-size: 1.2rem;
+}
+
+.factFindStepDescription {
+  margin: 0;
+  color: #486581;
+  line-height: 1.55;
+}
+
+.factFindGuidance {
+  margin-top: 0.6rem;
+  color: #8a6700;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.factFindStepBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  background: #fff2b3;
+  color: #7c5f00;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.factFindStepper {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.15rem;
+}
+
+.factFindStepPill {
+  min-height: 2rem;
+  padding: 0 0.85rem;
+  border: 1px solid #d7e0ea;
+  border-radius: 999px;
+  background: #fff;
+  color: #486581;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.factFindStepPillActive {
+  border-color: #f2c500;
+  background: #fff3ba;
+  color: #0f2e57;
+}
+
+.factFindEditorCard,
+.factFindDataCard {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #e0e6ed;
+  border-radius: 0.9rem;
+  background: #fff;
+}
+
+.factFindEditorTitle,
+.factFindDataTitle {
+  color: #163a61;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.factFindEditorGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.factFindField {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.factFindFieldFull {
+  grid-column: 1 / -1;
+}
+
+.factFindFieldLabel {
+  color: #6b7c93;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.factFindInput {
+  min-height: 2.7rem;
+  width: 100%;
+  padding: 0 0.8rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #243b53;
+  font: inherit;
+}
+
+.factFindTextarea {
+  min-height: 8rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  resize: vertical;
+}
+
+.factFindDataTableWrap,
+.factFindBatchTableWrap {
+  display: grid;
+  border: 1px solid #e3ebf3;
+  border-radius: 0.85rem;
+  overflow: hidden;
+}
+
+.factFindDataTableHeader,
+.factFindDataTableRow,
+.factFindBatchTableHeader,
+.factFindBatchTableRow {
+  display: grid;
+}
+
+.factFindDataTableHeader,
+.factFindBatchTableHeader {
+  background: #f8fafc;
+}
+
+.factFindDataTableRow:nth-child(even) {
+  background: #fcfdff;
+}
+
+.factFindDataTableHeaderCell,
+.factFindDataTableCell {
+  padding: 0.75rem 0.8rem;
+  color: #163a61;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.factFindDataTableHeaderCell {
+  color: #6b7c93;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.factFindDataTableCell {
+  border-top: 1px solid #edf2f7;
+  word-break: break-word;
+}
+
+.factFindDataTableActionCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.factFindDataTableActionPlaceholder {
+  color: #9aa9bc;
+}
+
+.factFindEditHint {
+  color: #6b7c93;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.factFindFooter {
+  color: #66788a;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.factFindWorkflowActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.factFindWorkflowActionsRight {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
 }
 
 .wizardHero {
@@ -749,6 +982,31 @@
   border-radius: 0.25rem;
   background: #fff;
   color: #243b53;
+  font-size: 0.9rem;
+}
+
+.fileNoteAttachmentCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fileNoteAttachmentIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  border-radius: 999px;
+  background: #fff4c2;
+  color: #8a6700;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.fileNoteAttachmentEmpty {
+  color: #9aa5b1;
+  font-weight: 600;
 }
 
 .fileNoteEmpty {
@@ -794,13 +1052,85 @@
 
 .fileNoteUploadPlaceholder {
   display: flex;
-  align-items: start;
-  min-height: 8.5rem;
-  padding: 0.75rem;
+  align-items: center;
+  min-height: 0;
+  padding: 0;
   border: 1px solid #c7d7eb;
   border-radius: 0.3rem;
   background: #fff;
   color: #66788a;
+  overflow: hidden;
+}
+
+.fileNoteUploadPlaceholder input[type="file"] {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: #243b53;
+  font: inherit;
+}
+
+.attachmentList {
+  display: grid;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+}
+
+.attachmentSubLabel {
+  color: #6b7c93;
+  font-size: 0.82rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.attachmentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 0.35rem;
+  background: #fffdf3;
+  color: #243b53;
+  min-width: 0;
+}
+
+.attachmentItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.attachmentIconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #d9e2ec;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #9aa5b1;
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.attachmentIconButton:hover {
+  border-color: #cbd5e1;
+  color: #52606d;
 }
 
 .fileNoteCloseButton {
@@ -825,6 +1155,7 @@
   border: 1px solid #f1d372;
   border-radius: 0.35rem;
   background: #fffbea;
+  font-size: 0.9rem;
 }
 
 .policyHeader {
@@ -863,6 +1194,27 @@
   border-radius: 0.25rem;
   background: #fffef4;
   color: #243b53;
+  font-size: 0.9rem;
+}
+
+.policyCoverSummaryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.95fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.25rem 0.65rem 0;
+  color: #102a56;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.policyCoverSummaryLabel {
+  text-align: left;
+}
+
+.policyActionSpacer {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .policyEmptyState {
@@ -894,6 +1246,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .recordActions {
@@ -941,6 +1294,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .dependantsHeader,
@@ -965,6 +1319,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .assetsHeader,
@@ -989,6 +1344,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .assetSummaryRow {
@@ -999,6 +1355,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialHeader,
@@ -1023,6 +1380,7 @@
   border-radius: 0.25rem;
   background: #fffbea;
   color: #243b53;
+  font-size: 0.9rem;
 }
 
 .financialRowAnnualised {
@@ -1041,6 +1399,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialSummaryRowAnnualised {
@@ -1051,6 +1410,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialSummaryRowIncomeAnnualised {
@@ -1061,6 +1421,7 @@
   padding: 0.8rem 0.65rem;
   border: 1px solid #f1d372;
   border-radius: 0.25rem;
+  font-size: 0.9rem;
 }
 
 .financialWideCell {
@@ -1298,7 +1659,7 @@
 }
 
 .modalCard {
-  width: min(100%, 48rem);
+  width: min(100%, 56rem);
   padding: 1.1rem;
   border-radius: 0.45rem;
   background: #fff;
@@ -1331,27 +1692,34 @@
   gap: 0.8rem;
 }
 
+.modalSectionStack {
+  display: grid;
+  gap: 0.85rem;
+}
+
 .modalStepTabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
   margin-bottom: 1rem;
 }
 
 .modalStepTab {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
   min-height: 2.35rem;
-  padding: 0 0.8rem;
+  padding: 0 0.55rem;
   border: 1px solid #d5dee8;
   border-radius: 999px;
   background: #fff;
   color: #425466;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .modalStepTabActive {
@@ -1378,6 +1746,10 @@
   gap: 0.35rem;
 }
 
+.modalFieldFull {
+  grid-column: 1 / -1;
+}
+
 .modalField span {
   font-size: 0.82rem;
   font-weight: 700;
@@ -1385,7 +1757,8 @@
 }
 
 .modalField input,
-.modalField select {
+.modalField select,
+.modalTextarea {
   min-height: 2.65rem;
   padding: 0 0.75rem;
   border: 1px solid #d7dee7;
@@ -1393,6 +1766,34 @@
   background: #fff;
   color: #243b53;
   font: inherit;
+}
+
+.modalTextarea {
+  min-height: 7rem;
+  padding: 0.75rem;
+  resize: vertical;
+}
+
+.modalEmploymentCard {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.45rem;
+  background: #f8fafc;
+}
+
+.modalEmploymentHeader,
+.modalInlineActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.modalEmptyText {
+  margin: 0;
+  color: #66788a;
 }
 
 .modalActions {
@@ -1585,6 +1986,333 @@
   color: #fff;
 }
 
+.portfolioList {
+  display: grid;
+  gap: 1rem;
+}
+
+.portfolioHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.sectionHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.portfolioOwnerFilter {
+  display: inline-flex;
+  align-items: center;
+}
+
+.portfolioOwnerFilter select {
+  min-width: 14rem;
+  height: 2.5rem;
+  border: 1px solid #c7d2e3;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #243b53;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0 0.85rem;
+}
+
+.portfolioOwnerGroup {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.portfolioOwnerTitle {
+  margin: 0;
+  color: #102a56;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.portfolioGroup {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0 0 0.1rem 0;
+  border-top: 1px solid #f2c656;
+}
+
+.portfolioGroup:first-of-type {
+  border-top: 0;
+}
+
+.portfolioGroupHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.portfolioGroupHeaderRight {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.portfolioAccountTitle {
+  margin: 0;
+  color: #102a56;
+  font-size: 0.95rem;
+}
+
+.portfolioAccountMeta {
+  margin: 0.1rem 0 0;
+  color: #556987;
+  font-size: 0.8rem;
+}
+
+.portfolioDescription {
+  margin: -0.15rem 0 0;
+  color: #334e68;
+  line-height: 1.5;
+}
+
+.portfolioTableHeader,
+.portfolioRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 0.65fr) minmax(0, 0.85fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.65fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.portfolioTableHeader {
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.35rem;
+  background: #ffd746;
+  color: #102a56;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.portfolioRow {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #f2c656;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #243b53;
+  font-size: 0.84rem;
+}
+
+.portfolioRowActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.portfolioHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.portfolioActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #6b7280;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.portfolioActionButton:hover {
+  border-color: #cbd5e1;
+  color: #374151;
+}
+
+.portfolioHeaderButton {
+  width: 1.7rem;
+  height: 1.7rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.portfolioActionSpacer {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.portfolioSummaryRow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 0.8fr) minmax(0, 1.3fr) minmax(0, 0.65fr) minmax(0, 0.85fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.95fr) minmax(0, 0.65fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.45rem 0.8rem 0.1rem;
+  color: #102a56;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.portfolioSubtotalRow {
+  padding-top: 0;
+}
+
+.portfolioOverallTotalRow {
+  margin-top: 0.1rem;
+  padding-top: 0.55rem;
+  border-top: 2px solid #f2c656;
+}
+
+.portfolioSummaryLabel {
+  text-align: left;
+}
+
+.negativeValue {
+  color: #b42318;
+}
+
+.portfolioModalCard {
+  width: min(100%, 56rem);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.portfolioStepTabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.portfolioStepBody {
+  display: grid;
+  gap: 1rem;
+}
+
+.portfolioCheckboxField {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.65rem;
+  color: #334155;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.portfolioCheckboxField input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.portfolioDraftActions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.portfolioDraftList {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.portfolioImportPreviewList {
+  max-height: min(24rem, 42vh);
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+
+.portfolioDraftHeader,
+.portfolioDraftRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.portfolioDraftHeader {
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.35rem;
+  background: #ffd746;
+  color: #102a56;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.portfolioDraftRow {
+  min-height: 3rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.45rem;
+  background: #f8fafc;
+  color: #243b53;
+  font-size: 0.9rem;
+}
+
+.portfolioDraftMeta {
+  margin-top: 0.25rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.portfolioRemoveButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.95rem;
+  height: 1.95rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #6b7280;
+  font: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.portfolioRemoveButton:hover {
+  border-color: #cbd5e1;
+  color: #374151;
+}
+
+.portfolioDraftTotalRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.15rem 0.9rem 0;
+  color: #102a56;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.portfolioDraftTotalLabel {
+  text-align: left;
+}
+
+.portfolioDraftTotalValue {
+  text-align: left;
+}
+
+.portfolioImportHint {
+  margin: -0.15rem 0 0;
+  color: #556987;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 1100px) {
   .layout {
     grid-template-columns: 1fr;
@@ -1597,6 +2325,7 @@
   .summaryGrid,
   .wizardHero,
   .wizardGrid,
+  .factFindEditorGrid,
   .riskGrid,
   .chartBox,
   .profileFieldGrid,
@@ -1619,6 +2348,7 @@
   .fileNotesHeader,
   .fileNotesRow,
   .fileNotesSplitRow,
+  .factFindWorkflowHeader,
   .policyCoverHeader,
   .policyCoverRow {
     grid-template-columns: 1fr;
@@ -1636,7 +2366,10 @@
 
   .clientProfileTopbar,
   .clientProfileActions,
-  .profilePanelHeader {
+  .profilePanelHeader,
+  .factFindWorkflowHeader,
+  .factFindWorkflowActions,
+  .factFindWorkflowActionsRight {
     flex-direction: column;
   }
 

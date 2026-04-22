@@ -1,8 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import type { ClientProfile, PersonRecord } from "@/lib/api/types";
+import { useEffect, useState } from "react";
+import {
+  deleteEmploymentRecord,
+  updateClientDetails,
+  updateClientProfileAdviser,
+  updatePartnerDetails,
+  updatePersonRiskProfile,
+  upsertEmploymentRecords,
+} from "@/lib/services/client-updates";
+import type { ClientAdviserRecord, ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
+import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
 type EditablePerson = "client" | "partner";
@@ -19,11 +28,16 @@ type EditDraft = {
   status: string;
   clientCategory: string;
   riskProfile: string;
-  practice: string;
+  adviser: string;
   gender: string;
   maritalStatus: string;
   residentStatus: string;
   dateOfBirth: string;
+  healthStatus: string;
+  healthHistory: string;
+  smoker: string;
+  healthInsurance: string;
+  employment: EmploymentDraft[];
   street: string;
   suburb: string;
   state: string;
@@ -41,12 +55,30 @@ type DisplayField = {
   placeholder?: string;
 };
 
-type EditStepKey = "overview" | "personal" | "contact" | "agreement";
+type EmploymentDisplayRecord = {
+  id: string;
+  title: string;
+  fields: DisplayField[];
+};
+
+type EmploymentDraft = {
+  id: string;
+  persistedId?: string;
+  jobTitle: string;
+  status: string;
+  employer: string;
+  salary: string;
+  frequency: string;
+};
+
+type EditStepKey = "overview" | "personal" | "contact" | "health" | "employment" | "agreement";
 
 const EDIT_STEPS: { key: EditStepKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "personal", label: "Client Details" },
   { key: "contact", label: "Contact Details" },
+  { key: "health", label: "Health Details" },
+  { key: "employment", label: "Employment" },
   { key: "agreement", label: "Advice Agreement" },
 ];
 
@@ -55,6 +87,10 @@ const STATUS_OPTIONS = ["Prospect", "Client", "Archived", "Deceased"];
 const CLIENT_CATEGORY_OPTIONS = ["Annual Agreement", "Fee For Service", "Ongoing", "Risk Only", "Whoesale"];
 const RISK_PROFILE_OPTIONS = ["Cash", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"];
 const AGREEMENT_TYPE_OPTIONS = ["Annual Agreement", "Ongoing Agreement"];
+const EMPLOYMENT_STATUS_OPTIONS = ["Full-time", "Part-time", "Casual", "Contract", "Self-employed", "Retired", "Unemployed"];
+const FREQUENCY_OPTIONS = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"];
+const HEALTH_STATUS_OPTIONS = ["Excellent", "Good", "Average", "Poor", "Pre-existing condition", "Under review"];
+const BOOLEAN_OPTIONS = ["Yes", "No"];
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -65,6 +101,39 @@ function formatDate(value?: string | null) {
     return value;
   }
   return parsed.toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function formatCurrency(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.replace(/[^0-9.-]/g, "");
+  const amount = Number(normalized);
+
+  if (Number.isNaN(amount)) {
+    return value;
+  }
+
+  return amount.toLocaleString("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function toCurrencyInput(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.replace(/[^0-9.-]/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  return formatCurrency(normalized);
 }
 
 function toInputDate(value?: string | null) {
@@ -88,33 +157,55 @@ function getFirstNonEmptyValue(...candidates: Array<string | null | undefined>) 
   return "";
 }
 
-function createDraft(person?: PersonRecord | null, profileId?: string | null): EditDraft {
+function createDraft(person?: PersonRecord | null, profileId?: string | null, adviserName?: string | null): EditDraft {
   const record = (person ?? {}) as PersonRecord & Record<string, unknown>;
+  const employment = Array.isArray(record.employment) ? record.employment : [];
 
   return {
     clientId: getFirstNonEmptyValue(profileId, person?.ic2AppId, person?.id),
     title: person?.title ?? "",
     name: person?.name ?? "",
-    status: getRecordValue(record, ["status", "clientStatus"]) || "Client",
+    status: getRecordValue(record, ["status", "clientStatus", "accountStatus"]) || "Client",
     clientCategory: getRecordValue(record, ["clientCategory", "category"]),
     riskProfile: person?.riskProfileResponse?.resultDisplay ?? "",
-    practice: "",
+    adviser: adviserName ?? "",
     gender: person?.gender ?? "",
     maritalStatus: getRecordValue(record, ["maritalStatus"]),
     residentStatus: getRecordValue(record, ["residentStatus"]),
     dateOfBirth: toInputDate(person?.dob),
-    street: getNestedRecordValue(record, "address", ["street", "line1"]) || getRecordValue(record, ["street"]),
-    suburb: getNestedRecordValue(record, "address", ["suburb", "city"]) || getRecordValue(record, ["suburb"]),
-    state: getNestedRecordValue(record, "address", ["state", "region"]) || getRecordValue(record, ["state"]),
+    healthStatus: getRecordValue(record, ["health_status", "healthStatus"]),
+    healthHistory: getRecordValue(record, ["health_history", "healthHistory"]),
+    smoker: getRecordValue(record, ["smoker"]),
+    healthInsurance: getRecordValue(record, ["health_insurance", "healthInsurance"]),
+    employment: employment.map((item, index) => ({
+      id: item?.id ?? `${person?.id ?? "employment"}-${index}`,
+      persistedId: item?.id ?? undefined,
+      jobTitle: getFirstNonEmptyValue(item?.job_title, item?.jobTitle),
+      status: item?.status ?? "",
+      employer: item?.employer ?? "",
+      salary: item?.salary ?? "",
+      frequency:
+        typeof item?.frequency === "string"
+          ? item.frequency
+          : item?.frequency?.value ?? item?.frequency?.type ?? "",
+    })),
+    street:
+      getNestedRecordValue(record, "address", ["street", "line1"]) || getRecordValue(record, ["street", "addressStreet"]),
+    suburb:
+      getNestedRecordValue(record, "address", ["suburb", "city"]) || getRecordValue(record, ["suburb", "addressSuburb"]),
+    state:
+      getNestedRecordValue(record, "address", ["state", "region"]) || getRecordValue(record, ["state", "addressState"]),
     postCode:
-      getNestedRecordValue(record, "address", ["postCode", "postcode", "zipCode"]) || getRecordValue(record, ["postCode", "postcode"]),
+      getNestedRecordValue(record, "address", ["postCode", "postcode", "zipCode"]) ||
+      getRecordValue(record, ["postCode", "postcode", "addressPostCode"]),
     preferredPhone:
       getRecordValue(record, ["preferredPhone", "phone", "mobile", "mobilePhone"]) ||
       getNestedRecordValue(record, "contact", ["preferredPhone", "phone"]),
     email: person?.email ?? "",
     adviceAgreementRequired: getRecordValue(record, ["fdsAnnualAgreementRequired", "annualAgreementRequired", "fdsRequired"]),
     agreementType:
-      getRecordValue(record, ["agreementType"]) || getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
+      getRecordValue(record, ["agreementType", "annualAgreementStatus"]) ||
+      getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
     nextAnniversaryDate: toInputDate(
       getRecordValue(record, ["nextAnniversaryDate"]) || getNestedRecordValue(record, "annualAgreement", ["nextDueDate", "nextAnniversaryDate"]),
     ),
@@ -148,6 +239,9 @@ function getRecordValue(record: Record<string, unknown>, keys: string[]) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) {
       return value;
+    }
+    if (typeof value === "boolean") {
+      return value ? "Yes" : "No";
     }
   }
 
@@ -212,16 +306,52 @@ function ProfileSection({
   );
 }
 
-function buildProfileSections(person: PersonRecord | null, profile: ClientProfile) {
+function createEmploymentDraft(): EmploymentDraft {
+  return {
+    id: `employment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    persistedId: undefined,
+    jobTitle: "",
+    status: "",
+    employer: "",
+    salary: "",
+    frequency: "",
+  };
+}
+
+function EmploymentSection({ records }: { records: EmploymentDisplayRecord[] }) {
+  if (!records.length) {
+    return null;
+  }
+
+  return (
+    <section className={styles.profileSection}>
+      <div className={styles.profileSectionHeading}>Employment Details</div>
+      {records.map((record) => (
+        <div key={record.id} className={styles.profileNestedSection}>
+          <div className={styles.profileNestedHeading}>{record.title}</div>
+          <div className={styles.profileFieldGrid}>
+            {record.fields.map((field) => (
+              <ReadOnlyField key={`${record.id}-${field.label}`} field={field} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function buildProfileSections(person: PersonRecord | null, profile: ClientProfile, adviserName: string) {
   const record = (person ?? {}) as PersonRecord & Record<string, unknown>;
   const riskDisplay = person?.riskProfileResponse?.resultDisplay ?? "";
+  const employment = Array.isArray(record.employment) ? record.employment : [];
 
   const overview: DisplayField[] = [
     { label: "Name", value: person?.name ?? "", placeholder: "Name" },
-    { label: "Status", value: getRecordValue(record, ["status", "clientStatus"]) || "Client", placeholder: "Status" },
+    { label: "Status", value: getRecordValue(record, ["status", "clientStatus", "accountStatus"]) || "Client", placeholder: "Status" },
     { label: "Client Category", value: getRecordValue(record, ["clientCategory", "category"]), placeholder: "Client Category" },
     { label: "Risk Profile", value: riskDisplay, placeholder: "Risk Profile" },
     { label: "Practice", value: profile.practice ?? "", placeholder: "Practice" },
+    { label: "Adviser", value: adviserName, placeholder: "Adviser" },
   ];
 
   const personal: DisplayField[] = [
@@ -236,22 +366,24 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
   const contact: DisplayField[] = [
     {
       label: "Street",
-      value: getNestedRecordValue(record, "address", ["street", "line1"]) || getRecordValue(record, ["street"]),
+      value: getNestedRecordValue(record, "address", ["street", "line1"]) || getRecordValue(record, ["street", "addressStreet"]),
       placeholder: "Street",
     },
     {
       label: "Suburb",
-      value: getNestedRecordValue(record, "address", ["suburb", "city"]) || getRecordValue(record, ["suburb"]),
+      value: getNestedRecordValue(record, "address", ["suburb", "city"]) || getRecordValue(record, ["suburb", "addressSuburb"]),
       placeholder: "Suburb",
     },
     {
       label: "State",
-      value: getNestedRecordValue(record, "address", ["state", "region"]) || getRecordValue(record, ["state"]),
+      value: getNestedRecordValue(record, "address", ["state", "region"]) || getRecordValue(record, ["state", "addressState"]),
       placeholder: "State",
     },
     {
       label: "Post Code",
-      value: getNestedRecordValue(record, "address", ["postCode", "postcode", "zipCode"]) || getRecordValue(record, ["postCode", "postcode"]),
+      value:
+        getNestedRecordValue(record, "address", ["postCode", "postcode", "zipCode"]) ||
+        getRecordValue(record, ["postCode", "postcode", "addressPostCode"]),
       placeholder: "Post Code",
     },
     { label: "Email", value: person?.email ?? "", placeholder: "Email" },
@@ -272,7 +404,9 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
     },
     {
       label: "Agreement Type",
-      value: getRecordValue(record, ["agreementType"]) || getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
+      value:
+        getRecordValue(record, ["agreementType", "annualAgreementStatus"]) ||
+        getNestedRecordValue(record, "annualAgreement", ["type", "agreementType"]),
       placeholder: "Agreement Type",
     },
     {
@@ -283,29 +417,190 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
     },
   ];
 
-  return { overview, personal, contact, annualAgreement };
+  const health: DisplayField[] = [
+    {
+      label: "Health Status",
+      value: getRecordValue(record, ["health_status", "healthStatus"]),
+      placeholder: "Health Status",
+    },
+    {
+      label: "Health History",
+      value: getRecordValue(record, ["health_history", "healthHistory"]),
+      placeholder: "Health History",
+    },
+    {
+      label: "Smoker",
+      value: getRecordValue(record, ["smoker"]),
+      placeholder: "Smoker",
+    },
+    {
+      label: "Health Insurance",
+      value: getRecordValue(record, ["health_insurance", "healthInsurance"]),
+      placeholder: "Health Insurance",
+    },
+  ];
+
+  const employmentRecords: EmploymentDisplayRecord[] = employment
+    .map((item, index) => {
+      const frequency =
+        typeof item?.frequency === "string"
+          ? item.frequency
+          : item?.frequency?.value ?? item?.frequency?.type ?? "";
+      const fields: DisplayField[] = [
+        {
+          label: "Job Title",
+          value: getFirstNonEmptyValue(item?.job_title, item?.jobTitle),
+          placeholder: "Job Title",
+        },
+        {
+          label: "Employment Status",
+          value: item?.status ?? "",
+          placeholder: "Employment Status",
+        },
+        {
+          label: "Employer",
+          value: item?.employer ?? "",
+          placeholder: "Employer",
+        },
+        {
+          label: "Salary",
+          value: formatCurrency(item?.salary),
+          placeholder: "Salary",
+        },
+        {
+          label: "Frequency",
+          value: frequency,
+          placeholder: "Frequency",
+        },
+      ].filter((field) => field.value.trim().length > 0);
+
+      if (!fields.length) {
+        return null;
+      }
+
+      return {
+        id: `employment-${index}`,
+        title: fields.find((field) => field.label === "Job Title")?.value || `Employment ${index + 1}`,
+        fields,
+      };
+    })
+    .filter((value): value is EmploymentDisplayRecord => Boolean(value));
+
+  return { overview, personal, contact, annualAgreement, health, employmentRecords };
 }
 
 export function ClientDetailsSection({ profile, useMockFallback }: ClientDetailsSectionProps) {
   const router = useRouter();
+  const { data: currentUserScope } = useCurrentUserScope();
   const [client, setClient] = useState<PersonRecord | null>(profile.client ?? null);
   const [partner, setPartner] = useState<PersonRecord | null>(profile.partner ?? null);
   const [selectedPerson, setSelectedPerson] = useState<EditablePerson>("client");
   const [editing, setEditing] = useState<EditablePerson | null>(null);
-  const [draft, setDraft] = useState<EditDraft>(createDraft(profile.client, profile.id));
+  const [draft, setDraft] = useState<EditDraft>(createDraft(profile.client, profile.id, profile.adviser?.name));
   const [editStep, setEditStep] = useState<EditStepKey>("overview");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [removedEmploymentIds, setRemovedEmploymentIds] = useState<string[]>([]);
+  const [adviserName, setAdviserName] = useState(profile.adviser?.name ?? "");
+  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const hasPartner = hasMeaningfulPerson(partner);
 
   const activePerson = selectedPerson === "partner" && hasPartner ? partner : client;
-  const activeSections = buildProfileSections(activePerson, profile);
+  const activeSections = buildProfileSections(activePerson, profile, adviserName);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadAdviserOptions() {
+      const practiceName = currentUserScope?.practice?.name?.trim().toLowerCase();
+
+      if (!practiceName) {
+        if (isMounted) {
+          setAdviserOptions([]);
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/users", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const body = (await response.json().catch(() => null)) as
+          | {
+              data?: UserSummary[] | null;
+            }
+          | null;
+
+        if (!response.ok || !isMounted) {
+          return;
+        }
+
+        const nextOptions = Array.from(
+          new Map(
+            (body?.data ?? [])
+              .filter((user) => user.userRole?.trim().toLowerCase() === "adviser")
+              .filter((user) => user.practice?.name?.trim().toLowerCase() === practiceName)
+              .filter((user) => typeof user.name === "string" && user.name.trim())
+              .map((user) => [
+                user.id ?? user.name!,
+                { id: user.id ?? user.name!, name: user.name!.trim(), email: user.email?.trim() ?? "" },
+              ]),
+          ).values(),
+        ).sort((left, right) => left.name.localeCompare(right.name));
+
+        setAdviserOptions(nextOptions);
+      } catch {
+        if (isMounted) {
+          setAdviserOptions([]);
+        }
+      }
+    }
+
+    void loadAdviserOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUserScope?.practice?.name]);
+
+  function updateEmploymentRow(id: string, field: keyof EmploymentDraft, value: string) {
+    setDraft((current) => ({
+      ...current,
+      employment: current.employment.map((item) => (item.id === id ? { ...item, [field]: value } : item)),
+    }));
+  }
+
+  function addEmploymentRow() {
+    setDraft((current) => ({
+      ...current,
+      employment: [...current.employment, createEmploymentDraft()],
+    }));
+  }
+
+  function removeEmploymentRow(id: string) {
+    setDraft((current) => {
+      const match = current.employment.find((item) => item.id === id);
+      if (match?.persistedId) {
+        setRemovedEmploymentIds((existing) =>
+          existing.includes(match.persistedId!) ? existing : [...existing, match.persistedId!],
+        );
+      }
+
+      return {
+        ...current,
+        employment: current.employment.filter((item) => item.id !== id),
+      };
+    });
+  }
 
   function openEditor(target: EditablePerson) {
     const person = target === "client" ? client : partner;
-    setDraft({ ...createDraft(person, profile.id), practice: profile.practice ?? "" });
+    setDraft(createDraft(person, profile.id, adviserName || profile.adviser?.name));
     setEditStep("overview");
     setSaveError(null);
+    setRemovedEmploymentIds([]);
     setEditing(target);
   }
 
@@ -325,27 +620,102 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     setSaveError(null);
 
     try {
-      const payload = {
-        ...draft,
-        riskProfileResponse: {
-          ...(person.riskProfileResponse ?? {}),
-          resultDisplay: draft.riskProfile,
-        },
+      const selectedAdviserOption = adviserOptions.find((option) => option.name === draft.adviser) ?? null;
+      const nextAdviser: ClientAdviserRecord | null =
+        draft.adviser.trim()
+          ? {
+              id: selectedAdviserOption?.id ?? profile.adviser?.id ?? null,
+              name: draft.adviser.trim(),
+              email: selectedAdviserOption?.email || profile.adviser?.email || null,
+              entity: profile.adviser?.entity ?? null,
+            }
+          : null;
+
+      const changes = {
+        title: draft.title,
+        name: draft.name,
+        status: draft.status,
+        clientCategory: draft.clientCategory,
+        gender: draft.gender,
+        maritalStatus: draft.maritalStatus,
+        residentStatus: draft.residentStatus,
+        dateOfBirth: draft.dateOfBirth,
+        healthStatus: draft.healthStatus,
+        healthHistory: draft.healthHistory,
+        smoker: draft.smoker,
+        healthInsurance: draft.healthInsurance,
+        street: draft.street,
+        suburb: draft.suburb,
+        state: draft.state,
+        postCode: draft.postCode,
+        preferredPhone: draft.preferredPhone,
+        email: draft.email,
+        adviceAgreementRequired: draft.adviceAgreementRequired,
+        agreementType: draft.agreementType,
+        nextAnniversaryDate: draft.nextAnniversaryDate,
       };
 
-      const response = await fetch(`/api/client-profiles/${profile.id}/${editing}/${person.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const body = (await response.json().catch(() => null)) as { message?: string } | null;
-
-      if (!response.ok) {
-        throw new Error(body?.message ?? "Unable to save changes.");
+      if (draft.adviser.trim() !== adviserName.trim()) {
+        await updateClientProfileAdviser(
+          profile.id,
+          {
+            adviser: nextAdviser,
+            practiceName: currentUserScope?.practice?.name ?? profile.practice ?? null,
+            licenseeName: currentUserScope?.licensee?.name ?? profile.licensee ?? null,
+          },
+        );
       }
+
+      if (editing === "client") {
+        await updateClientDetails({
+          profileId: profile.id,
+          personId: person.id,
+          person,
+          changes,
+        });
+      } else {
+        await updatePartnerDetails({
+          profileId: profile.id,
+          personId: person.id,
+          person,
+          changes,
+        });
+      }
+
+      const savedRiskProfile = await updatePersonRiskProfile(
+        {
+          profileId: profile.id,
+          personId: person.id,
+          target: editing,
+          changes: {},
+        },
+        draft.riskProfile,
+      );
+
+      for (const employmentId of removedEmploymentIds) {
+        await deleteEmploymentRecord(profile.id, employmentId);
+      }
+
+      const employmentRequest = draft.employment.map((item) => ({
+        id: item.persistedId,
+        jobTitle: item.jobTitle,
+        status: item.status,
+        employer: item.employer,
+        salary: item.salary.replace(/[^0-9.-]/g, ""),
+        frequency: item.frequency,
+      }));
+
+      const savedEmployment =
+        employmentRequest.length > 0
+          ? await upsertEmploymentRecords({
+              profileId: profile.id,
+              owner: {
+                id: person.id,
+                name: draft.name || person.name || "",
+              },
+              request: employmentRequest,
+            })
+          : [];
 
       const updatedPerson: PersonRecord = {
         ...person,
@@ -355,17 +725,57 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         clientCategory: draft.clientCategory,
         riskProfileResponse: {
           ...(person.riskProfileResponse ?? {}),
-          resultDisplay: draft.riskProfile,
+          resultDisplay:
+            typeof savedRiskProfile?.resultDisplay === "string" ? savedRiskProfile.resultDisplay : draft.riskProfile,
+          agreeOutcome:
+            typeof savedRiskProfile?.agreeOutcome === "string"
+              ? savedRiskProfile.agreeOutcome
+              : person.riskProfileResponse?.agreeOutcome,
+          score:
+            typeof savedRiskProfile?.score === "string" ? savedRiskProfile.score : person.riskProfileResponse?.score,
+          resultGraph:
+            typeof savedRiskProfile?.resultGraph === "string"
+              ? savedRiskProfile.resultGraph
+              : person.riskProfileResponse?.resultGraph,
         },
         gender: draft.gender,
         maritalStatus: draft.maritalStatus,
         residentStatus: draft.residentStatus,
         dob: draft.dateOfBirth || person.dob,
+        health_status: draft.healthStatus,
+        healthStatus: draft.healthStatus,
+        health_history: draft.healthHistory,
+        healthHistory: draft.healthHistory,
+        smoker: draft.smoker,
+        health_insurance: draft.healthInsurance,
+        healthInsurance: draft.healthInsurance,
+        employment: savedEmployment.map((item) => ({
+          id: typeof item === "object" && item && "id" in item ? ((item as { id?: string | null }).id ?? null) : null,
+          job_title:
+            typeof item === "object" && item && "jobTitle" in item ? ((item as { jobTitle?: string | null }).jobTitle ?? "") : "",
+          jobTitle:
+            typeof item === "object" && item && "jobTitle" in item ? ((item as { jobTitle?: string | null }).jobTitle ?? "") : "",
+          status:
+            typeof item === "object" && item && "status" in item ? ((item as { status?: string | null }).status ?? "") : "",
+          employer:
+            typeof item === "object" && item && "employer" in item ? ((item as { employer?: string | null }).employer ?? "") : "",
+          salary:
+            typeof item === "object" && item && "salary" in item ? ((item as { salary?: string | null }).salary ?? "") : "",
+          frequency:
+            typeof item === "object" && item && "frequency" in item ? ((item as { frequency?: string | null }).frequency ?? "") : "",
+          owner:
+            typeof item === "object" && item && "owner" in item
+              ? ((item as { owner?: { id?: string | null; name?: string | null } | null }).owner ?? null)
+              : null,
+        })),
         preferredPhone: draft.preferredPhone,
         fdsAnnualAgreementRequired: draft.adviceAgreementRequired,
         annualAgreementRequired: draft.adviceAgreementRequired,
+        annualAgreementStatus: draft.agreementType,
         agreementType: draft.agreementType,
         nextAnniversaryDate: draft.nextAnniversaryDate,
+        accountStatus: draft.status,
+        category: draft.clientCategory,
         annualAgreement: {
           ...((person as PersonRecord & Record<string, unknown>).annualAgreement as Record<string, unknown> | null),
           agreementType: draft.agreementType,
@@ -389,6 +799,8 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         setPartner(updatedPerson);
       }
 
+      setAdviserName(draft.adviser);
+      setRemovedEmploymentIds([]);
       setEditing(null);
       router.refresh();
     } catch (error) {
@@ -442,6 +854,8 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
 
           <ProfileSection title={selectedPerson === "partner" && hasPartner ? "Partner Details" : "Client Details"} fields={activeSections.personal} />
           <ProfileSection title="Contact Details" fields={activeSections.contact} />
+          <ProfileSection title="Health Details" fields={activeSections.health} />
+          <EmploymentSection records={activeSections.employmentRecords} />
           <ProfileSection title="Advice Agreement Details" fields={activeSections.annualAgreement} />
         </section>
       </section>
@@ -524,8 +938,17 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
                   </select>
                 </label>
                 <label className={styles.modalField}>
-                  <span>Practice</span>
-                  <input value={draft.practice} readOnly />
+                  <span>Adviser</span>
+                  <select value={draft.adviser} onChange={(event) => setDraft({ ...draft, adviser: event.target.value })}>
+                    <option value="">
+                      {currentUserScope?.practice?.name ? "Select adviser" : "No practice selected"}
+                    </option>
+                    {adviserOptions.map((option) => (
+                      <option key={option.id} value={option.name}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
             ) : null}
@@ -608,6 +1031,129 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
                   <span>Preferred Phone</span>
                   <input value={draft.preferredPhone} onChange={(event) => setDraft({ ...draft, preferredPhone: event.target.value })} />
                 </label>
+              </div>
+            ) : null}
+
+            {editStep === "health" ? (
+              <div className={styles.modalGrid}>
+                <label className={styles.modalField}>
+                  <span>Health Status</span>
+                  <select
+                    value={draft.healthStatus}
+                    onChange={(event) => setDraft({ ...draft, healthStatus: event.target.value })}
+                  >
+                    <option value="">Select health status</option>
+                    {HEALTH_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.modalField}>
+                  <span>Smoker</span>
+                  <select value={draft.smoker} onChange={(event) => setDraft({ ...draft, smoker: event.target.value })}>
+                    <option value="">Select an option</option>
+                    {BOOLEAN_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                    <option value="Former smoker">Former smoker</option>
+                  </select>
+                </label>
+                <label className={styles.modalField}>
+                  <span>Health Insurance</span>
+                  <select
+                    value={draft.healthInsurance}
+                    onChange={(event) => setDraft({ ...draft, healthInsurance: event.target.value })}
+                  >
+                    <option value="">Select an option</option>
+                    {BOOLEAN_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={`${styles.modalField} ${styles.modalFieldFull}`.trim()}>
+                  <span>Health History</span>
+                  <textarea
+                    className={styles.modalTextarea}
+                    value={draft.healthHistory}
+                    onChange={(event) => setDraft({ ...draft, healthHistory: event.target.value })}
+                  />
+                </label>
+              </div>
+            ) : null}
+
+            {editStep === "employment" ? (
+              <div className={styles.modalSectionStack}>
+                {draft.employment.length ? (
+                  draft.employment.map((item, index) => (
+                    <div key={item.id} className={styles.modalEmploymentCard}>
+                      <div className={styles.modalEmploymentHeader}>
+                        <strong>{item.jobTitle || `Employment ${index + 1}`}</strong>
+                        <button
+                          type="button"
+                          className={styles.modalSecondary}
+                          onClick={() => removeEmploymentRow(item.id)}
+                          disabled={saving}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className={styles.modalGrid}>
+                        <label className={styles.modalField}>
+                          <span>Job Title</span>
+                          <input value={item.jobTitle} onChange={(event) => updateEmploymentRow(item.id, "jobTitle", event.target.value)} />
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>Employment Status</span>
+                          <select value={item.status} onChange={(event) => updateEmploymentRow(item.id, "status", event.target.value)}>
+                            <option value="">Select employment status</option>
+                            {EMPLOYMENT_STATUS_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>Employer</span>
+                          <input value={item.employer} onChange={(event) => updateEmploymentRow(item.id, "employer", event.target.value)} />
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>Salary</span>
+                          <input
+                            inputMode="decimal"
+                            value={toCurrencyInput(item.salary)}
+                            onChange={(event) => updateEmploymentRow(item.id, "salary", event.target.value.replace(/[^0-9.-]/g, ""))}
+                          />
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>Frequency</span>
+                          <select value={item.frequency} onChange={(event) => updateEmploymentRow(item.id, "frequency", event.target.value)}>
+                            <option value="">Select frequency</option>
+                            {FREQUENCY_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className={styles.modalEmptyText}>No employment records yet.</p>
+                )}
+
+                <div className={styles.modalInlineActions}>
+                  <button type="button" className={styles.modalSecondary} onClick={addEmploymentRow} disabled={saving}>
+                    Add employment
+                  </button>
+                </div>
               </div>
             ) : null}
 

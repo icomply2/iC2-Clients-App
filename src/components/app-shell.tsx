@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { appNavItems } from "@/lib/navigation";
+import { useMemo } from "react";
+import { adminNavItems, appNavItems } from "@/lib/navigation";
+import { isAppAdminValue } from "@/lib/app-admin";
+import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./app-shell.module.css";
 
 type AppShellProps = {
@@ -11,20 +14,33 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const { data } = useCurrentUserScope();
+  const appAdmin = isAppAdminValue(data?.appAdmin);
+  const inAdminCentre = pathname?.startsWith("/admin") ?? false;
+
+  const visibleNavItems = useMemo(
+    () =>
+      inAdminCentre
+        ? adminNavItems
+        : appNavItems.filter((item) => item.href !== "/admin" || appAdmin),
+    [appAdmin, inAdminCentre],
+  );
 
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
-        <div className={styles.brand}>
-          <p className={styles.eyebrow}>iC2 Clients</p>
-          <h1 className={styles.title}>Advice CRM Workspace</h1>
-          <p className={styles.subtitle}>
-            A focused home for client records, letters, file notes, and adviser administration.
-          </p>
-        </div>
+        {!inAdminCentre ? (
+          <div className={styles.brand}>
+            <p className={styles.eyebrow}>iC2 Clients</p>
+            <h1 className={styles.title}>Advice CRM Workspace</h1>
+            <p className={styles.subtitle}>
+              A focused home for client records, letters, file notes, and adviser administration.
+            </p>
+          </div>
+        ) : null}
 
         <nav className={styles.nav} aria-label="Primary">
-          {appNavItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive = pathname === item.href;
 
             return (
@@ -34,18 +50,11 @@ export function AppShell({ children }: AppShellProps) {
                 className={`${styles.navLink} ${isActive ? styles.navLinkActive : ""}`.trim()}
               >
                 <span className={styles.navLabel}>{item.label}</span>
-                <span className={styles.navDescription}>{item.description}</span>
+                {!inAdminCentre ? <span className={styles.navDescription}>{item.description}</span> : null}
               </Link>
             );
           })}
         </nav>
-
-        <section className={styles.profileCard} aria-label="Current user">
-          <p className={styles.profileName}>Adviser Workspace</p>
-          <p className={styles.profileRole}>
-            Initial shell for advisers, paraplanners, and support staff with role-aware access to follow.
-          </p>
-        </section>
       </aside>
 
       <main className={styles.content}>{children}</main>

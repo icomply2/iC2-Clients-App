@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       nextResponse.cookies.set(AUTH_COOKIE_NAME, token, {
         httpOnly: true,
         sameSite: "lax",
-        secure: false,
+        secure: process.env.NODE_ENV === "production",
         path: "/",
       });
     }

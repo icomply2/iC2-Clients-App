@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ApiResult, ClientAssetRecord, ClientProfile } from "@/lib/api/types";
+import type { ClientAssetRecord, ClientProfile } from "@/lib/api/types";
+import {
+  deleteAssetCollectionItem,
+  saveAssetCollection,
+  upsertAssetCollection,
+} from "@/lib/services/profile-collections";
 import styles from "./page.module.css";
 
 type AssetsSectionProps = {
@@ -12,6 +17,7 @@ type AssetsSectionProps = {
 
 const assetCategoryOptions = ["Cash", "Investment", "Property", "Superannuation", "Business", "Personal"];
 const incomeFrequencyOptions = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"];
+const JOINT_OWNER_VALUE = "__joint__";
 const assetTypeOptionsByCategory: Record<string, string[]> = {
   Cash: ["Cash on Hand", "Current Savings", "Fixed Deposits"],
   Investment: ["Bonds", "Other Investments", "Stocks", "Unit Trusts", "Annuity"],
@@ -156,11 +162,12 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
       [
         profile.client?.name && profile.client?.id ? { value: profile.client.id, label: profile.client.name } : null,
         profile.partner?.name && profile.partner?.id ? { value: profile.partner.id, label: profile.partner.name } : null,
+        hasPartner ? { value: JOINT_OWNER_VALUE, label: "Joint" } : null,
         ...(profile.entities ?? [])
           .filter((entity) => entity.id && entity.name)
           .map((entity) => ({ value: entity.id ?? "", label: entity.name ?? "" })),
       ].filter((option): option is { value: string; label: string } => Boolean(option)),
-    [profile.client?.id, profile.client?.name, profile.entities, profile.partner?.id, profile.partner?.name],
+    [hasPartner, profile.client?.id, profile.client?.name, profile.entities, profile.partner?.id, profile.partner?.name],
   );
 
   const [ownerId, setOwnerId] = useState(ownerOptions[0]?.value ?? "");
@@ -172,7 +179,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
   const [incomeAmount, setIncomeAmount] = useState("");
   const [incomeFrequency, setIncomeFrequency] = useState("");
   const [acquisitionDate, setAcquisitionDate] = useState("");
-  const [joint, setJoint] = useState(false);
 
   const assetTypeOptions = useMemo(() => assetTypeOptionsByCategory[type] ?? [], [type]);
 
@@ -221,99 +227,31 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     setIncomeAmount("");
     setIncomeFrequency("");
     setAcquisitionDate("");
-    setJoint(false);
     setEditingAssetId(null);
     setErrorMessage("");
   }
 
-  function parseResponseBody(responseText: string) {
-    if (!responseText) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(responseText) as
-        | ApiResult<ClientAssetRecord[]>
-        | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null };
-    } catch {
-      return null;
-    }
-  }
-
-  function mergeReturnedAssets(returnedAssets: ClientAssetRecord[], submittedAssets: ClientAssetRecord[]) {
-    return returnedAssets.map((returnedAsset) => {
-      const matchedAsset =
-        submittedAssets.find((submittedAsset) => submittedAsset.id && returnedAsset.id && submittedAsset.id === returnedAsset.id) ??
-        submittedAssets.find(
-          (submittedAsset) =>
-            (submittedAsset.description ?? "").trim().toLowerCase() === (returnedAsset.description ?? "").trim().toLowerCase() &&
-            (submittedAsset.owner?.id ?? "") === (returnedAsset.owner?.id ?? "") &&
-            (submittedAsset.assetType ?? "") === (returnedAsset.assetType ?? ""),
-        );
-
-      return {
-        ...returnedAsset,
-        type: matchedAsset?.type ?? returnedAsset.type ?? null,
-      };
-    });
-  }
-
-  async function saveAssets(nextAssets: ClientAssetRecord[], fallbackError: string) {
+  async function saveAssets(nextAssets: ClientAssetRecord[]) {
     if (!profile.id) {
       throw new Error("This client profile does not have a profile id yet.");
     }
 
-    const response = await fetch(`/api/client-profiles/${profile.id}/assets`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        currentUser: null,
-        request: nextAssets.map((asset) => ({
-          id: asset.id ?? null,
-          type: asset.type ?? null,
-          assetType: asset.assetType ?? null,
-          currentValue: asset.currentValue ?? null,
-          cost: asset.cost ?? null,
-          incomeAmount: asset.incomeAmount ?? null,
-          incomeFrequency: normalizeIncomeFrequency(asset.incomeFrequency),
-          acquisitionDate: asset.acquisitionDate ?? null,
-          joint: Boolean(asset.joint),
-          description: asset.description ?? null,
-          owner: asset.owner
-            ? {
-                id: asset.owner.id ?? null,
-                name: asset.owner.name ?? null,
-              }
-            : null,
-        })),
-      }),
-    });
-
-    const responseText = await response.text();
-    const result = parseResponseBody(responseText);
-
-    if (!response.ok) {
-      const modelError =
-        result && "modelErrors" in result && Array.isArray(result.modelErrors)
-          ? result.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-          : null;
-      const message =
-        modelError ??
-        (result && "message" in result && result.message
-          ? result.message
-          : responseText || `${fallbackError} (status ${response.status}).`);
-      throw new Error(`Save failed (${response.status}): ${message}`);
-    }
-
-    const returnedAssets = result && "data" in result && Array.isArray(result.data) ? result.data : null;
-    setAssets(returnedAssets ? mergeReturnedAssets(returnedAssets, nextAssets) : nextAssets);
+    const savedAssets = await saveAssetCollection(profile.id, nextAssets);
+    setAssets(savedAssets);
     router.refresh();
   }
 
   function buildAssetRecord() {
-    const owner = ownerOptions.find((option) => option.value === ownerId);
+    const owner =
+      ownerId === JOINT_OWNER_VALUE && hasPartner && profile.client?.id && profile.client?.name
+        ? {
+            value: profile.client.id,
+            label:
+              profile.client.name && profile.partner?.name
+                ? `${profile.client.name} and ${profile.partner.name}`
+                : profile.client.name,
+          }
+        : ownerOptions.find((option) => option.value === ownerId);
 
     if (!owner) {
       throw new Error("Please choose an owner.");
@@ -347,7 +285,7 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
           : null,
       ),
       acquisitionDate: acquisitionDate || null,
-      joint: hasPartner ? joint : false,
+      joint: hasPartner ? ownerId === JOINT_OWNER_VALUE : false,
       owner: {
         id: owner.value,
         name: owner.label,
@@ -371,11 +309,9 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
 
     try {
       const assetRecord = buildAssetRecord();
-      const nextAssets = editingAssetId
-        ? assets.map((asset) => (asset.id === editingAssetId ? { ...asset, ...assetRecord } : asset))
-        : [...assets.map((asset) => ({ ...asset })), { id: null, ...assetRecord }];
+      const nextAssets = upsertAssetCollection(assets, assetRecord, editingAssetId);
 
-      await saveAssets(nextAssets, "Unable to save the asset right now");
+      await saveAssets(nextAssets);
       resetForm();
       setIsOpen(false);
     } catch (error) {
@@ -398,7 +334,7 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     }
 
     setEditingAssetId(asset.id ?? null);
-    setOwnerId(asset.owner?.id ?? ownerOptions[0]?.value ?? "");
+    setOwnerId(hasPartner && asset.joint ? JOINT_OWNER_VALUE : asset.owner?.id ?? ownerOptions[0]?.value ?? "");
     setType(asset.type ?? "");
     setAssetType(asset.assetType ?? "");
     setDescription(asset.description ?? "");
@@ -407,7 +343,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     setIncomeAmount(formatCurrencyField(asset.incomeAmount ?? ""));
     setIncomeFrequency(asset.incomeFrequency?.value ?? asset.incomeFrequency?.type ?? "");
     setAcquisitionDate((asset.acquisitionDate ?? "").slice(0, 10));
-    setJoint(hasPartner ? Boolean(asset.joint) : false);
     setErrorMessage("");
     setIsOpen(true);
   }
@@ -426,27 +361,7 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
     setDeleteErrorMessage("");
 
     try {
-      const response = await fetch(
-        `/api/client-profiles/${encodeURIComponent(profile.id)}/assets/${encodeURIComponent(deleteCandidateId)}`,
-        {
-          method: "DELETE",
-        },
-      );
-      const responseText = await response.text();
-      const result = parseResponseBody(responseText);
-
-      if (!response.ok) {
-        const modelError =
-          result && "modelErrors" in result && Array.isArray(result.modelErrors)
-            ? result.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-            : null;
-        const message =
-          modelError ??
-          (result && "message" in result && result.message
-            ? result.message
-            : responseText || `Unable to delete the asset right now (status ${response.status}).`);
-        throw new Error(`Delete failed (${response.status}): ${message}`);
-      }
+      await deleteAssetCollectionItem(profile.id, deleteCandidateId);
 
       setAssets((current) => current.filter((asset) => asset.id !== deleteCandidateId));
       router.refresh();
@@ -631,12 +546,6 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
                 <span>Acquired</span>
                 <input type="date" value={acquisitionDate} onChange={(event) => setAcquisitionDate(event.target.value)} />
               </label>
-              {hasPartner ? (
-                <label className={styles.assetCheckboxRow}>
-                  <span>Joint Asset</span>
-                  <input type="checkbox" checked={joint} onChange={(event) => setJoint(event.target.checked)} />
-                </label>
-              ) : null}
             </div>
             <div className={styles.identityModalActions}>
               <button

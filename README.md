@@ -27,6 +27,35 @@ The initial build is centered on the core v1 workflows:
 3. Install dependencies with `npm install`
 4. Run the development server with `npm run dev`
 
+## Azure App Service deployment
+
+This app is configured for standalone Next.js output so Azure App Service can run a cleaner production artifact.
+
+Build and package for Azure:
+
+1. `npm install`
+2. `npm run build`
+3. `npm run package:azure`
+
+That produces:
+
+- `.deploy_artifact/`
+- `ic2-clients-app-deploy.zip`
+
+Deploy `ic2-clients-app-deploy.zip` to Azure App Service using zip deploy / OneDeploy.
+
+Recommended App Service startup command:
+
+- `node server.js`
+
+The deployment package is built from:
+
+- `.next/standalone`
+- `.next/static`
+- `public`
+
+Do not zip the full project root or `node_modules` manually for App Service deployment.
+
 ## Local testing options
 
 - Real API mode: set `NEXT_PUBLIC_API_BASE_URL` to your backend and leave `NEXT_PUBLIC_ENABLE_MOCK_AUTH=false`
@@ -47,6 +76,9 @@ Current integration env vars:
 - `REX_TOKEN_CLIENT_SECRET`
 - `REX_TOKEN_REDIRECT_URI`
 - `REX_TOKEN_SCOPE`
+- `DESKTOP_BROKER_API_BASE_URL`
+- `DESKTOP_BROKER_USERNAME`
+- `DESKTOP_BROKER_PASSWORD`
 
 Current proxy route:
 
@@ -56,6 +88,15 @@ Current proxy route:
 - `GET /api/integrations/rex-token/connect`
 - `GET /api/integrations/rex-token/callback`
 - `POST /api/integrations/rex-token/disconnect`
+- `GET /api/integrations/desktop-broker/contractnotes`
+- `GET /api/integrations/desktop-broker/holdings`
+- `GET /api/integrations/desktop-broker/holdingtransactions`
+
+Desktop Broker notes:
+
+- authentication is handled server-side with basic auth
+- query params are forwarded to the upstream service
+- date filters are validated in 180 day blocks before the request is proxied
 
 ## Structure
 

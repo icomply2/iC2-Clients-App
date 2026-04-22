@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ApiResult, ClientProfile, FileNoteRecord } from "@/lib/api/types";
+import type { ClientProfile, FileNoteRecord } from "@/lib/api/types";
+import { FILE_NOTE_SUBTYPE_OPTIONS, FILE_NOTE_TYPE_OPTIONS } from "@/lib/api/contracts/file-notes";
+import {
+  createFileNote as createFileNoteAction,
+  deleteFileNote as deleteFileNoteAction,
+  listFileNotes as listFileNotesAction,
+  updateFileNote as updateFileNoteAction,
+} from "@/lib/services/file-notes";
+import { cacheFileNoteAttachments, mergeCachedFileNoteAttachments } from "@/lib/file-note-attachment-cache";
 import styles from "./page.module.css";
 
 type FileNotesSectionProps = {
@@ -16,18 +24,21 @@ type FileNoteDraft = {
   subject: string;
   serviceDate: string;
   content: string;
+  attachment: NonNullable<FileNoteRecord["attachment"]>;
+  files: File[];
+  creatorId: string;
+  creatorEmail: string;
+  creatorName: string;
+  modifierId: string;
+  modifierEmail: string;
+  modifierName: string;
+  createdDate: string;
+  modifiedDate: string;
 };
 
-const noteTypeOptions = ["Client Meeting", "Phone Call", "Email", "Review", "Advice", "Administration", "Other"];
-const subTypeOptionsByType: Record<string, string[]> = {
-  "Client Meeting": ["Initial Meeting", "Review Meeting", "Strategy Meeting", "Implementation Meeting"],
-  "Phone Call": ["Inbound", "Outbound", "Follow Up"],
-  Email: ["Client Email", "Adviser Email", "Provider Email"],
-  Review: ["Annual Review", "Portfolio Review", "FDS Review"],
-  Advice: ["SOA", "ROA", "Strategy Note"],
-  Administration: ["Task Update", "Document Request", "Compliance"],
-  Other: ["General"],
-};
+type AttachmentDeleteCandidate =
+  | { kind: "saved"; index: number; name: string }
+  | { kind: "file"; index: number; name: string };
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -67,39 +78,60 @@ function emptyDraft(): FileNoteDraft {
     subject: "",
     serviceDate: new Date().toISOString().slice(0, 10),
     content: "",
+    attachment: [],
+    files: [],
+    creatorId: "",
+    creatorEmail: "",
+    creatorName: "",
+    modifierId: "",
+    modifierEmail: "",
+    modifierName: "",
+    createdDate: "",
+    modifiedDate: "",
   };
-}
-
-function parseResponseBody<T>(responseText: string) {
-  if (!responseText) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(responseText) as
-      | ApiResult<T>
-      | { message?: string | null; modelErrors?: { errorMessage?: string | null }[] | null };
-  } catch {
-    return null;
-  }
-}
-
-function getErrorMessage(
-  result: ReturnType<typeof parseResponseBody<FileNoteRecord[] | FileNoteRecord>>,
-  responseText: string,
-  fallback: string,
-  status: number,
-) {
-  const modelError =
-    result && "modelErrors" in result && Array.isArray(result.modelErrors)
-      ? result.modelErrors.find((entry) => entry?.errorMessage)?.errorMessage
-      : null;
-
-  return modelError ?? (result && "message" in result && result.message ? result.message : responseText || `${fallback} (status ${status}).`);
 }
 
 function getFallbackMessage() {
   return "Live client data is temporarily unavailable. Editing is disabled while sample data is shown.";
+}
+
+function hasAttachments(note: FileNoteRecord) {
+  return Array.isArray(note.attachment) && note.attachment.some((item) => item?.name || item?.url);
+}
+
+function fallbackAttachments(draft: FileNoteDraft): NonNullable<FileNoteRecord["attachment"]> {
+  return [
+    ...draft.attachment,
+    ...draft.files.map((file) => ({
+      name: file.name,
+      url: null,
+    })),
+  ];
+}
+
+function downloadAttachmentUrl(url: string, fileName?: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName ?? "";
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function downloadDraftFile(file: File) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  downloadAttachmentUrl(objectUrl, file.name);
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }
 
 export function FileNotesSection({ profile, useMockFallback = false }: FileNotesSectionProps) {
@@ -115,11 +147,12 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
   const [errorMessage, setErrorMessage] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState<FileNoteRecord | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState("");
+  const [attachmentDeleteCandidate, setAttachmentDeleteCandidate] = useState<AttachmentDeleteCandidate | null>(null);
 
-  const subtypeOptions = useMemo(() => subTypeOptionsByType[draft.type] ?? [], [draft.type]);
+  const subtypeOptions = useMemo(() => FILE_NOTE_SUBTYPE_OPTIONS[draft.type] ?? [], [draft.type]);
 
   async function loadNotes() {
-    const resolvedClientId = profile.client?.id;
+    const resolvedClientId = profile.id ?? profile.client?.id;
 
     if (useMockFallback || !resolvedClientId) {
       setNotes([]);
@@ -132,24 +165,14 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     setApiForbidden(false);
 
     try {
-      const response = await fetch(`/api/client-profiles/file-notes/client/${encodeURIComponent(resolvedClientId)}`, {
-        method: "GET",
-        cache: "no-store",
-      });
-      const responseText = await response.text();
-      const result = parseResponseBody<FileNoteRecord[]>(responseText);
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          setApiForbidden(true);
-        }
-        throw new Error(getErrorMessage(result, responseText, "Unable to load file notes right now", response.status));
-      }
-
-      const data = result && "data" in result && Array.isArray(result.data) ? result.data : [];
-      setNotes(data ?? []);
+      const data = await listFileNotesAction(resolvedClientId);
+      setNotes(mergeCachedFileNoteAttachments(resolvedClientId, data));
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load file notes right now.");
+      const message = error instanceof Error ? error.message : "Unable to load file notes right now.";
+      if (message.includes("403")) {
+        setApiForbidden(true);
+      }
+      setLoadError(message);
     } finally {
       setLoading(false);
     }
@@ -176,6 +199,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     }
 
     setDraft(emptyDraft());
+    setAttachmentDeleteCandidate(null);
     setErrorMessage("");
     setIsModalOpen(true);
   }
@@ -193,9 +217,42 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
       subject: note.subject ?? "",
       serviceDate: toInputDate(note.serviceDate),
       content: note.content ?? "",
+      attachment: note.attachment ?? [],
+      files: [],
+      creatorId: note.creator?.id ?? "",
+      creatorEmail: note.creator?.email ?? "",
+      creatorName: note.creator?.name ?? "",
+      modifierId: note.modifier?.id ?? "",
+      modifierEmail: note.modifier?.email ?? "",
+      modifierName: note.modifier?.name ?? "",
+      createdDate: note.createdDate ?? "",
+      modifiedDate: note.modifiedDate ?? "",
     });
+    setAttachmentDeleteCandidate(null);
     setErrorMessage("");
     setIsModalOpen(true);
+  }
+
+  function confirmRemoveAttachment() {
+    if (!attachmentDeleteCandidate) {
+      return;
+    }
+
+    setDraft((current) => {
+      if (attachmentDeleteCandidate.kind === "saved") {
+        return {
+          ...current,
+          attachment: current.attachment.filter((_, currentIndex) => currentIndex !== attachmentDeleteCandidate.index),
+        };
+      }
+
+      return {
+        ...current,
+        files: current.files.filter((_, currentIndex) => currentIndex !== attachmentDeleteCandidate.index),
+      };
+    });
+
+    setAttachmentDeleteCandidate(null);
   }
 
   async function handleSave() {
@@ -208,69 +265,97 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
       return;
     }
 
-    if (!profile.client?.id) {
-      setErrorMessage("This client record does not have a client id yet.");
+    const resolvedClientId = profile.id ?? profile.client?.id;
+
+    if (!resolvedClientId || !profile.client?.id) {
+      setErrorMessage("This client record does not have the ids needed for file notes yet.");
       return;
     }
 
     setSaving(true);
     setErrorMessage("");
 
-    const requestBody: FileNoteRecord = {
-      id: draft.id,
-      clientId: profile.client.id,
-      owner: profile.client?.id
-        ? {
-            id: profile.client.id,
-            name: profile.client.name ?? "",
-          }
-        : null,
-      joint: false,
-      licensee: profile.licensee ?? null,
-      practice: profile.practice ?? null,
-      adviser: profile.adviser
-        ? {
-            name: profile.adviser.name ?? null,
-            email: profile.adviser.email ?? null,
-          }
-        : null,
-      content: draft.content,
-      serviceDate: draft.serviceDate,
-      type: draft.type,
-      subType: draft.subType,
-      subject: draft.subject,
-      attachment: [],
-    };
-
     try {
-      const response = await fetch(
-        draft.id
-          ? `/api/client-profiles/file-notes/${encodeURIComponent(draft.id)}`
-          : "/api/client-profiles/file-notes",
-        {
-          method: draft.id ? "PUT" : "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            request: requestBody,
-          }),
+      const input = {
+        id: draft.id,
+        clientId: resolvedClientId,
+        ownerId: profile.client.id,
+        ownerName: profile.client.name ?? "",
+        joint: false,
+        licensee: profile.licensee ?? null,
+        practice: profile.practice ?? null,
+        adviserName: profile.adviser?.name ?? null,
+        adviserEmail: profile.adviser?.email ?? null,
+        adviserId: profile.adviser?.id ?? null,
+        content: draft.content,
+        serviceDate: draft.serviceDate,
+        type: draft.type,
+        subType: draft.subType,
+        subject: draft.subject,
+        attachment: draft.attachment,
+        files: draft.files,
+        creatorId: draft.creatorId || null,
+        creatorEmail: draft.creatorEmail || null,
+        creatorName: draft.creatorName || null,
+        modifierId: draft.modifierId || null,
+        modifierEmail: draft.modifierEmail || null,
+        modifierName: draft.modifierName || null,
+        createdDate: draft.createdDate || null,
+        modifiedDate: draft.modifiedDate || null,
+      };
+
+      const savedNote = (draft.id
+        ? await updateFileNoteAction(draft.id, input)
+        : await createFileNoteAction(input)) as FileNoteRecord | null;
+      const nextNote: FileNoteRecord = {
+        ...(savedNote ?? {}),
+        id: savedNote?.id ?? draft.id ?? crypto.randomUUID(),
+        clientId: savedNote?.clientId ?? resolvedClientId,
+        owner: savedNote?.owner ?? {
+          id: profile.client.id,
+          name: profile.client.name ?? "",
         },
+        joint: savedNote?.joint ?? false,
+        licensee: savedNote?.licensee ?? profile.licensee ?? null,
+        practice: savedNote?.practice ?? profile.practice ?? null,
+        adviser: savedNote?.adviser ?? {
+          id: profile.adviser?.id ?? null,
+          email: profile.adviser?.email ?? null,
+          name: profile.adviser?.name ?? null,
+        },
+        content: savedNote?.content ?? draft.content,
+        serviceDate: savedNote?.serviceDate ?? draft.serviceDate,
+        type: savedNote?.type ?? draft.type,
+        subType: savedNote?.subType ?? draft.subType,
+        subject: savedNote?.subject ?? draft.subject,
+        creator: savedNote?.creator ?? {
+          id: draft.creatorId || null,
+          email: draft.creatorEmail || null,
+          name: draft.creatorName || null,
+        },
+        modifier: savedNote?.modifier ?? {
+          id: draft.modifierId || null,
+          email: draft.modifierEmail || null,
+          name: draft.modifierName || null,
+        },
+        createdDate: savedNote?.createdDate ?? draft.createdDate ?? new Date().toISOString(),
+        modifiedDate: savedNote?.modifiedDate ?? new Date().toISOString(),
+        attachment:
+          Array.isArray(savedNote?.attachment) && savedNote.attachment.length
+            ? savedNote.attachment
+            : fallbackAttachments(draft),
+      };
+
+      cacheFileNoteAttachments(nextNote);
+
+      setNotes((current) =>
+        draft.id
+          ? current.map((note) => (note.id === draft.id ? nextNote : note))
+          : [nextNote, ...current],
       );
-
-      const responseText = await response.text();
-      const result = parseResponseBody<FileNoteRecord>(responseText);
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          setApiForbidden(true);
-        }
-        throw new Error(getErrorMessage(result, responseText, "Unable to save the file note right now", response.status));
-      }
 
       setIsModalOpen(false);
       setDraft(emptyDraft());
-      await loadNotes();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save the file note right now.");
     } finally {
@@ -287,15 +372,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
     setDeleteErrorMessage("");
 
     try {
-      const response = await fetch(`/api/client-profiles/file-notes/${encodeURIComponent(deleteCandidate.id)}`, {
-        method: "DELETE",
-      });
-      const responseText = await response.text();
-      const result = parseResponseBody<FileNoteRecord>(responseText);
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(result, responseText, "Unable to delete the file note right now", response.status));
-      }
+      await deleteFileNoteAction(deleteCandidate.id);
 
       setDeleteCandidate(null);
       await loadNotes();
@@ -318,7 +395,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
         />
         <select className={styles.fileNotesFilter} value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
           <option value="">Choose an option...</option>
-          {noteTypeOptions.map((option) => (
+          {FILE_NOTE_TYPE_OPTIONS.map((option) => (
             <option key={option} value={option}>
               {option}
             </option>
@@ -343,7 +420,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
           <div>Sub Type</div>
           <div>Subject</div>
           <div>Date</div>
-          <div>Created Date</div>
+          <div>Attachment</div>
           <div>Action</div>
         </div>
 
@@ -357,7 +434,15 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
                 <div>{note.subType ?? ""}</div>
                 <div>{note.subject ?? ""}</div>
                 <div>{formatDate(note.serviceDate)}</div>
-                <div>{formatDate(note.createdDate)}</div>
+                <div className={styles.fileNoteAttachmentCell}>
+                  {hasAttachments(note) ? (
+                    <span className={styles.fileNoteAttachmentIcon} title="This file note has attachments" aria-label="Has attachments">
+                      📎
+                    </span>
+                  ) : (
+                    <span className={styles.fileNoteAttachmentEmpty}>—</span>
+                  )}
+                </div>
                 <div className={styles.entitiesActions}>
                   <button type="button" className={styles.rowActionButton} onClick={() => openEditModal(note)} disabled={useMockFallback}>
                     Edit
@@ -413,7 +498,7 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
                     }
                   >
                     <option value="">Note type</option>
-                    {noteTypeOptions.map((option) => (
+                    {FILE_NOTE_TYPE_OPTIONS.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
@@ -460,8 +545,93 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
                 />
               </label>
               <label className={styles.profileField}>
-                <span>Add Attachment:</span>
-                <div className={styles.fileNoteUploadPlaceholder}>Drop files here to upload (or click)</div>
+                <span>Attachments:</span>
+                {draft.files.length || draft.attachment.length ? (
+                  <div className={styles.attachmentList}>
+                    {draft.attachment.map((attachment, index) => (
+                      <div key={`${attachment.name ?? "attachment"}-${index}`} className={styles.attachmentItem}>
+                        <span>{attachment.name ?? "Existing attachment"}</span>
+                        <div className={styles.attachmentActions}>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() => {
+                              if (attachment.url) {
+                                downloadAttachmentUrl(attachment.url, attachment.name);
+                              }
+                            }}
+                            aria-label={`Download ${attachment.name ?? "attachment"}`}
+                            title={attachment.url ? "Download attachment" : "Download unavailable for this attachment"}
+                            disabled={!attachment.url}
+                          >
+                            ⬇
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() =>
+                              setAttachmentDeleteCandidate({
+                                kind: "saved",
+                                index,
+                                name: attachment.name ?? "attachment",
+                              })
+                            }
+                            aria-label={`Remove ${attachment.name ?? "attachment"}`}
+                            title="Remove attachment"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {draft.files.map((file, index) => (
+                      <div key={`${file.name}-${index}`} className={styles.attachmentItem}>
+                        <span>{file.name}</span>
+                        <div className={styles.attachmentActions}>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() => downloadDraftFile(file)}
+                            aria-label={`Download ${file.name}`}
+                            title="Download attachment"
+                          >
+                            ⬇
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.attachmentIconButton}
+                            onClick={() =>
+                              setAttachmentDeleteCandidate({
+                                kind: "file",
+                                index,
+                                name: file.name,
+                              })
+                            }
+                            aria-label={`Remove ${file.name}`}
+                            title="Remove attachment"
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {draft.files.length || draft.attachment.length ? (
+                  <span className={styles.attachmentSubLabel}>Add another attachment:</span>
+                ) : null}
+                <div className={styles.fileNoteUploadPlaceholder}>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        files: [...current.files, ...Array.from(event.target.files ?? [])],
+                      }))
+                    }
+                  />
+                </div>
               </label>
             </div>
             <div className={styles.identityModalActions}>
@@ -488,6 +658,33 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
               </button>
             </div>
             {deleteErrorMessage ? <p className={styles.modalError}>{deleteErrorMessage}</p> : null}
+          </div>
+        </div>
+      ) : null}
+
+      {attachmentDeleteCandidate ? (
+        <div className={styles.modalOverlay}>
+          <div className={styles.confirmDialog}>
+            <h2 className={styles.confirmTitle}>Remove Attachment</h2>
+            <p className={styles.confirmText}>
+              Are you sure you want to remove <strong>{attachmentDeleteCandidate.name}</strong> from this file note?
+            </p>
+            <div className={styles.confirmActions}>
+              <button
+                type="button"
+                className={`${styles.modalPrimary} ${styles.confirmDanger}`.trim()}
+                onClick={confirmRemoveAttachment}
+              >
+                Remove
+              </button>
+              <button
+                type="button"
+                className={styles.modalSecondary}
+                onClick={() => setAttachmentDeleteCandidate(null)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

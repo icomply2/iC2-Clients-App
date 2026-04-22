@@ -1,0 +1,603 @@
+{
+  "version": 3,
+  "pages404": true,
+  "appType": "app",
+  "caseSensitive": false,
+  "basePath": "",
+  "redirects": [
+    {
+      "source": "/:path+/",
+      "destination": "/:path+",
+      "internal": true,
+      "priority": true,
+      "statusCode": 308,
+      "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
+    }
+  ],
+  "headers": [],
+  "onMatchHeaders": [],
+  "rewrites": {
+    "beforeFiles": [],
+    "afterFiles": [],
+    "fallback": []
+  },
+  "dynamicRoutes": [
+    {
+      "page": "/api/client-profiles/file-notes/client/[clientId]",
+      "regex": "^/api/client\\-profiles/file\\-notes/client/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/api/client\\-profiles/file\\-notes/client/(?<nxtPclientId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/file-notes/[fileNoteId]",
+      "regex": "^/api/client\\-profiles/file\\-notes/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPfileNoteId": "nxtPfileNoteId"
+      },
+      "namedRegex": "^/api/client\\-profiles/file\\-notes/(?<nxtPfileNoteId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/assets",
+      "regex": "^/api/client\\-profiles/([^/]+?)/assets(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/assets(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/assets/[assetId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/assets/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPassetId": "nxtPassetId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/assets/(?<nxtPassetId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/client/[personId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/client/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPpersonId": "nxtPpersonId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/client/(?<nxtPpersonId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/dependants",
+      "regex": "^/api/client\\-profiles/([^/]+?)/dependants(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/dependants(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/dependants/[dependantId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/dependants/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPdependantId": "nxtPdependantId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/dependants/(?<nxtPdependantId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/entities",
+      "regex": "^/api/client\\-profiles/([^/]+?)/entities(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/entities(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/entities/[entityId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/entities/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPentityId": "nxtPentityId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/entities/(?<nxtPentityId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/expenses",
+      "regex": "^/api/client\\-profiles/([^/]+?)/expenses(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/expenses(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/expenses/[expenseId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/expenses/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPexpenseId": "nxtPexpenseId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/expenses/(?<nxtPexpenseId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/income",
+      "regex": "^/api/client\\-profiles/([^/]+?)/income(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/income(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/income/[incomeId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/income/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPincomeId": "nxtPincomeId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/income/(?<nxtPincomeId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/insurance",
+      "regex": "^/api/client\\-profiles/([^/]+?)/insurance(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/insurance(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/insurance/[insuranceId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/insurance/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPinsuranceId": "nxtPinsuranceId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/insurance/(?<nxtPinsuranceId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/liabilities",
+      "regex": "^/api/client\\-profiles/([^/]+?)/liabilities(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/liabilities(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/liabilities/[liabilityId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/liabilities/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPliabilityId": "nxtPliabilityId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/liabilities/(?<nxtPliabilityId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/partner/[personId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/partner/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPpersonId": "nxtPpersonId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/partner/(?<nxtPpersonId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/retirement-income",
+      "regex": "^/api/client\\-profiles/([^/]+?)/retirement\\-income(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/retirement\\-income(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/retirement-income/[pensionId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/retirement\\-income/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPpensionId": "nxtPpensionId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/retirement\\-income/(?<nxtPpensionId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/superannuation",
+      "regex": "^/api/client\\-profiles/([^/]+?)/superannuation(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/superannuation(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/[profileId]/superannuation/[superannuationId]",
+      "regex": "^/api/client\\-profiles/([^/]+?)/superannuation/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPprofileId": "nxtPprofileId",
+        "nxtPsuperannuationId": "nxtPsuperannuationId"
+      },
+      "namedRegex": "^/api/client\\-profiles/(?<nxtPprofileId>[^/]+?)/superannuation/(?<nxtPsuperannuationId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/api/finley/plans/[planId]/approve",
+      "regex": "^/api/finley/plans/([^/]+?)/approve(?:/)?$",
+      "routeKeys": {
+        "nxtPplanId": "nxtPplanId"
+      },
+      "namedRegex": "^/api/finley/plans/(?<nxtPplanId>[^/]+?)/approve(?:/)?$"
+    },
+    {
+      "page": "/api/finley/plans/[planId]/cancel",
+      "regex": "^/api/finley/plans/([^/]+?)/cancel(?:/)?$",
+      "routeKeys": {
+        "nxtPplanId": "nxtPplanId"
+      },
+      "namedRegex": "^/api/finley/plans/(?<nxtPplanId>[^/]+?)/cancel(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]",
+      "regex": "^/clients/([^/]+?)(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/assets",
+      "regex": "^/clients/([^/]+?)/assets(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/assets(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/dependents",
+      "regex": "^/clients/([^/]+?)/dependents(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/dependents(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/entities",
+      "regex": "^/clients/([^/]+?)/entities(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/entities(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/expenses",
+      "regex": "^/clients/([^/]+?)/expenses(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/expenses(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/file-notes",
+      "regex": "^/clients/([^/]+?)/file\\-notes(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/file\\-notes(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/identity-check",
+      "regex": "^/clients/([^/]+?)/identity\\-check(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/identity\\-check(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/income",
+      "regex": "^/clients/([^/]+?)/income(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/income(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/insurance",
+      "regex": "^/clients/([^/]+?)/insurance(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/insurance(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/liabilities",
+      "regex": "^/clients/([^/]+?)/liabilities(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/liabilities(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/portfolio",
+      "regex": "^/clients/([^/]+?)/portfolio(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/portfolio(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/retirement-income",
+      "regex": "^/clients/([^/]+?)/retirement\\-income(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/retirement\\-income(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/superannuation",
+      "regex": "^/clients/([^/]+?)/superannuation(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/superannuation(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards",
+      "regex": "^/clients/([^/]+?)/wizards(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards/engagement-letter",
+      "regex": "^/clients/([^/]+?)/wizards/engagement\\-letter(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/engagement\\-letter(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards/fact-find",
+      "regex": "^/clients/([^/]+?)/wizards/fact\\-find(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/fact\\-find(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards/record-of-advice",
+      "regex": "^/clients/([^/]+?)/wizards/record\\-of\\-advice(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/record\\-of\\-advice(?:/)?$"
+    },
+    {
+      "page": "/clients/[clientId]/wizards/statement-of-advice",
+      "regex": "^/clients/([^/]+?)/wizards/statement\\-of\\-advice(?:/)?$",
+      "routeKeys": {
+        "nxtPclientId": "nxtPclientId"
+      },
+      "namedRegex": "^/clients/(?<nxtPclientId>[^/]+?)/wizards/statement\\-of\\-advice(?:/)?$"
+    }
+  ],
+  "staticRoutes": [
+    {
+      "page": "/",
+      "regex": "^/(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/(?:/)?$"
+    },
+    {
+      "page": "/_global-error",
+      "regex": "^/_global\\-error(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_global\\-error(?:/)?$"
+    },
+    {
+      "page": "/_not-found",
+      "regex": "^/_not\\-found(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/_not\\-found(?:/)?$"
+    },
+    {
+      "page": "/admin",
+      "regex": "^/admin(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/admin(?:/)?$"
+    },
+    {
+      "page": "/api/advisers",
+      "regex": "^/api/advisers(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/advisers(?:/)?$"
+    },
+    {
+      "page": "/api/auth/forgot-password",
+      "regex": "^/api/auth/forgot\\-password(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/forgot\\-password(?:/)?$"
+    },
+    {
+      "page": "/api/auth/login",
+      "regex": "^/api/auth/login(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/login(?:/)?$"
+    },
+    {
+      "page": "/api/auth/register",
+      "regex": "^/api/auth/register(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/register(?:/)?$"
+    },
+    {
+      "page": "/api/auth/verify-2fa",
+      "regex": "^/api/auth/verify\\-2fa(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/auth/verify\\-2fa(?:/)?$"
+    },
+    {
+      "page": "/api/client-profiles/file-notes",
+      "regex": "^/api/client\\-profiles/file\\-notes(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/client\\-profiles/file\\-notes(?:/)?$"
+    },
+    {
+      "page": "/api/clients",
+      "regex": "^/api/clients(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/clients(?:/)?$"
+    },
+    {
+      "page": "/api/finley/assist-field",
+      "regex": "^/api/finley/assist\\-field(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/assist\\-field(?:/)?$"
+    },
+    {
+      "page": "/api/finley/chat",
+      "regex": "^/api/finley/chat(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/chat(?:/)?$"
+    },
+    {
+      "page": "/api/finley/fact-find",
+      "regex": "^/api/finley/fact\\-find(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/fact\\-find(?:/)?$"
+    },
+    {
+      "page": "/api/finley/fact-find/save-step",
+      "regex": "^/api/finley/fact\\-find/save\\-step(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/fact\\-find/save\\-step(?:/)?$"
+    },
+    {
+      "page": "/api/finley/invoice/generate",
+      "regex": "^/api/finley/invoice/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/invoice/generate(?:/)?$"
+    },
+    {
+      "page": "/api/finley/invoice/prefill",
+      "regex": "^/api/finley/invoice/prefill(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/invoice/prefill(?:/)?$"
+    },
+    {
+      "page": "/api/finley/prepare-edit",
+      "regex": "^/api/finley/prepare\\-edit(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/finley/prepare\\-edit(?:/)?$"
+    },
+    {
+      "page": "/api/integrations/rex-token/callback",
+      "regex": "^/api/integrations/rex\\-token/callback(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/integrations/rex\\-token/callback(?:/)?$"
+    },
+    {
+      "page": "/api/integrations/rex-token/connect",
+      "regex": "^/api/integrations/rex\\-token/connect(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/integrations/rex\\-token/connect(?:/)?$"
+    },
+    {
+      "page": "/api/integrations/rex-token/disconnect",
+      "regex": "^/api/integrations/rex\\-token/disconnect(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/integrations/rex\\-token/disconnect(?:/)?$"
+    },
+    {
+      "page": "/api/integrations/rex-token/refresh",
+      "regex": "^/api/integrations/rex\\-token/refresh(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/integrations/rex\\-token/refresh(?:/)?$"
+    },
+    {
+      "page": "/api/integrations/rex-token/token",
+      "regex": "^/api/integrations/rex\\-token/token(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/integrations/rex\\-token/token(?:/)?$"
+    },
+    {
+      "page": "/api/integrations/rex-token/user",
+      "regex": "^/api/integrations/rex\\-token/user(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/integrations/rex\\-token/user(?:/)?$"
+    },
+    {
+      "page": "/api/users/me",
+      "regex": "^/api/users/me(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/users/me(?:/)?$"
+    },
+    {
+      "page": "/api/wizards/engagement-letter/generate",
+      "regex": "^/api/wizards/engagement\\-letter/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/wizards/engagement\\-letter/generate(?:/)?$"
+    },
+    {
+      "page": "/api/wizards/fact-find/generate",
+      "regex": "^/api/wizards/fact\\-find/generate(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/wizards/fact\\-find/generate(?:/)?$"
+    },
+    {
+      "page": "/apple-icon.png",
+      "regex": "^/apple\\-icon\\.png(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/apple\\-icon\\.png(?:/)?$"
+    },
+    {
+      "page": "/clients",
+      "regex": "^/clients(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/clients(?:/)?$"
+    },
+    {
+      "page": "/clients/new",
+      "regex": "^/clients/new(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/clients/new(?:/)?$"
+    },
+    {
+      "page": "/dashboard",
+      "regex": "^/dashboard(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/dashboard(?:/)?$"
+    },
+    {
+      "page": "/finley",
+      "regex": "^/finley(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/finley(?:/)?$"
+    },
+    {
+      "page": "/icon.png",
+      "regex": "^/icon\\.png(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/icon\\.png(?:/)?$"
+    },
+    {
+      "page": "/letters",
+      "regex": "^/letters(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/letters(?:/)?$"
+    },
+    {
+      "page": "/profile",
+      "regex": "^/profile(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/profile(?:/)?$"
+    }
+  ],
+  "dataRoutes": [],
+  "rsc": {
+    "header": "rsc",
+    "varyHeader": "rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch",
+    "prefetchHeader": "next-router-prefetch",
+    "didPostponeHeader": "x-nextjs-postponed",
+    "contentTypeHeader": "text/x-component",
+    "suffix": ".rsc",
+    "prefetchSegmentHeader": "next-router-segment-prefetch",
+    "prefetchSegmentSuffix": ".segment.rsc",
+    "prefetchSegmentDirSuffix": ".segments",
+    "clientParamParsing": false,
+    "dynamicRSCPrerender": false
+  },
+  "rewriteHeaders": {
+    "pathHeader": "x-nextjs-rewritten-path",
+    "queryHeader": "x-nextjs-rewritten-query"
+  }
+}

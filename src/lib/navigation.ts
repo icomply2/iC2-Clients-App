@@ -28,6 +28,39 @@ export const appNavItems: AppNavItem[] = [
   },
 ];
 
+export const adminNavItems: AppNavItem[] = [
+  {
+    href: "/admin",
+    label: "Overview",
+    description: "Administration summary and quick links.",
+  },
+  {
+    href: "/admin/users",
+    label: "Users",
+    description: "Manage user access, roles, and app admin flags.",
+  },
+  {
+    href: "/admin/licensees",
+    label: "Licensees",
+    description: "Review and manage licensee structures.",
+  },
+  {
+    href: "/admin/practices",
+    label: "Practices",
+    description: "Review and manage practice structures.",
+  },
+  {
+    href: "/admin/integrations",
+    label: "Integrations",
+    description: "Control ProductRex, Docmosis, and partner connections.",
+  },
+  {
+    href: "/admin/templates",
+    label: "Templates",
+    description: "Manage Docmosis template assignments and document coverage.",
+  },
+];
+
 export const dashboardMetrics: DashboardMetric[] = [
   {
     label: "Open Clients",

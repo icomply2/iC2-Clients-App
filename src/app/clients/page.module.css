@@ -166,6 +166,7 @@
   background: #fffbea;
   color: #243b53;
   min-height: 2.95rem;
+  font-size: 0.9rem;
 }
 
 .clientLink {
@@ -240,6 +241,13 @@
   font-size: 0.92rem;
 }
 
+.confirmError {
+  margin: 0.65rem 0 0;
+  color: #c53030;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 .confirmActions {
   display: flex;
   justify-content: flex-end;
@@ -266,6 +274,99 @@
 .confirmDeleteButton {
   border: 0;
   background: #4d4d4d;
+  color: #fff;
+}
+
+.confirmCancelButton:disabled,
+.confirmDeleteButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.createClientModal {
+  width: min(100%, 36rem);
+  padding: 1.6rem;
+  border: 2px solid #f2c656;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 24px 60px rgba(36, 59, 83, 0.2);
+}
+
+.createClientTitle {
+  margin: 0 0 1.25rem;
+  color: #173f73;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.createClientGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  margin-bottom: 1.1rem;
+}
+
+.createClientField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+
+.createClientLabel {
+  color: #334e68;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.createClientInput {
+  min-height: 3rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #cfdae8;
+  border-radius: 0.95rem;
+  background: #fff;
+  color: #243b53;
+  font: inherit;
+}
+
+.createClientInput:focus {
+  outline: 2px solid rgba(23, 63, 115, 0.16);
+  border-color: #9ab0c9;
+}
+
+.createClientError {
+  color: #b42318;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.createClientActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+.createClientCancelButton,
+.createClientApproveButton {
+  min-height: 3rem;
+  padding: 0 1.25rem;
+  border-radius: 0.9rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.createClientCancelButton {
+  border: 1px solid #c7d0d9;
+  background: #fff;
+  color: #173f73;
+}
+
+.createClientApproveButton {
+  border: 0;
+  background: #173f73;
   color: #fff;
 }
 
@@ -328,7 +429,8 @@
 
   .searchHeader,
   .tableHeader,
-  .tableRow {
+  .tableRow,
+  .createClientGrid {
     grid-template-columns: 1fr;
   }
 

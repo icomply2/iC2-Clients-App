@@ -3,9 +3,10 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
-export async function PATCH(
+async function forwardPersonUpdate(
   request: NextRequest,
-  { params }: { params: Promise<{ profileId: string; personId: string }> },
+  paramsPromise: Promise<{ profileId: string; personId: string }>,
+  method: "PUT" | "PATCH",
 ) {
   if (!API_BASE_URL) {
     return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
@@ -18,13 +19,13 @@ export async function PATCH(
   }
 
   const payload = await request.json().catch(() => null);
-  const { profileId, personId } = await params;
+  const { profileId, personId } = await paramsPromise;
 
   try {
     const response = await fetch(
       new URL(`/api/ClientProfiles/${profileId}/Client/${personId}`, API_BASE_URL),
       {
-        method: "PATCH",
+        method,
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -50,4 +51,18 @@ export async function PATCH(
 
     return NextResponse.json({ message }, { status: 502 });
   }
+}
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ profileId: string; personId: string }> },
+) {
+  return forwardPersonUpdate(request, params, "PUT");
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ profileId: string; personId: string }> },
+) {
+  return forwardPersonUpdate(request, params, "PATCH");
 }

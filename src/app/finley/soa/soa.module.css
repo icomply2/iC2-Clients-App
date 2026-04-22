@@ -1,0 +1,718 @@
+.sidebarFill {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+}
+
+.quickActionList {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.quickActionButton,
+.sectionActionButton {
+  min-height: 2.35rem;
+  padding: 0 0.85rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.workflowCardFill {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.sectionNav {
+  display: grid;
+  flex: 1;
+  gap: 0.45rem;
+  margin-top: 0.8rem;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  scrollbar-gutter: stable;
+}
+
+.sectionNavItem {
+  display: block;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #dfe5ec;
+  border-radius: 0.85rem;
+  background: #fff;
+  text-align: left;
+}
+
+.sectionNavItemConfirmed {
+  border-color: #b7e4c7;
+  background: #f3fcf6;
+}
+
+.sectionNavRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.sectionNavItemActive {
+  border-color: #f2c500;
+  background: #fff8d9;
+}
+
+.sectionNavTitle {
+  color: #113864;
+  font-size: 0.9rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.sectionStatusPill {
+  min-height: 1.45rem;
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.71rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 1;
+  text-align: center;
+}
+
+.sectionStatusBadgeLarge {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  font-size: 0.82rem;
+}
+
+.statusNotstarted,
+.statusInprogress {
+  background: #eff4f9;
+  border-color: #d9e2ec;
+  color: #486581;
+}
+
+.statusSuggested,
+.statusNeedsconfirmation {
+  background: #fff3ba;
+  border-color: #f2c94c;
+  color: #7c5f00;
+}
+
+.statusConfirmed {
+  background: #e7f7ed;
+  border-color: #79c58e;
+  color: #17673a;
+}
+
+.statusBlocked {
+  background: #fde8e8;
+  border-color: #f2b8b5;
+  color: #9b1c1c;
+}
+
+.sectionCard {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.95rem;
+  background: #fff;
+}
+
+.sectionCardTitle {
+  color: #113864;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.sectionCardText {
+  color: #66788a;
+  line-height: 1.6;
+}
+
+.workflowDraftStack {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.workflowDraftCard {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.9rem;
+  background: #f8fafc;
+}
+
+.workflowDraftSubcard {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.85rem;
+  background: #fff;
+}
+
+.workflowDraftHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.workflowDraftHeaderMain {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.collapseToggleButton {
+  min-height: 1.9rem;
+  padding: 0 0.7rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.7rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.objectiveDeleteButton {
+  min-height: 1.9rem;
+  padding: 0 0.7rem;
+  border: 1px solid #f2c4c4;
+  border-radius: 0.7rem;
+  background: #fff;
+  color: #9b1c1c;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.workflowDraftLabel {
+  color: #6b7c93;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workflowDraftPreview {
+  color: #486581;
+  line-height: 1.6;
+}
+
+.sectionGrid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sectionGridCompact {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.moduleGrid {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.moduleOption {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid #dfe5ec;
+  border-radius: 0.85rem;
+  background: #fff;
+  color: #113864;
+  font-weight: 700;
+}
+
+.linkedObjectiveList {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.simpleBulletList {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #486581;
+  line-height: 1.6;
+}
+
+.dataTableWrap {
+  overflow-x: auto;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 36rem;
+}
+
+.dataTable th,
+.dataTable td {
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid #e5edf5;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dataTable th {
+  color: #113864;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #f8fafc;
+}
+
+.dataTable td {
+  color: #486581;
+  line-height: 1.45;
+}
+
+.linkedObjectiveOption {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  padding: 0.8rem 0.85rem;
+  border: 1px solid #dfe5ec;
+  border-radius: 0.85rem;
+  background: #fff;
+  color: #113864;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.strategyTabRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: #fffaf0;
+}
+
+.strategyTabButton {
+  min-height: 2.5rem;
+  padding: 0 0.9rem;
+  border: 0;
+  border-right: 1px solid #dbe4ee;
+  background: transparent;
+  color: #113864;
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.strategyTabButton:last-child {
+  border-right: 0;
+}
+
+.strategyTabButtonActive {
+  background: #f2c500;
+  color: #113864;
+  font-weight: 800;
+}
+
+.personTabRow {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: #fffaf0;
+}
+
+.personTabButton {
+  min-height: 2.2rem;
+  padding: 0 1rem;
+  border: 0;
+  border-right: 1px solid #dbe4ee;
+  background: transparent;
+  color: #113864;
+  font: inherit;
+  cursor: pointer;
+}
+
+.personTabButton:last-child {
+  border-right: 0;
+}
+
+.personTabButtonActive {
+  background: #f2c500;
+  color: #113864;
+  font-weight: 800;
+}
+
+.uploadControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.impactNotice {
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.8rem;
+  background: #fff7db;
+  color: #7c5f00;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.uploadListItemMain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.productRexBadge,
+.productRexActiveBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.4rem;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.uploadChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.uploadChip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.8rem;
+  background: #fff;
+}
+
+.uploadChipName {
+  color: #113864;
+  font-size: 0.84rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.productRexBadge {
+  background: #e8f1ff;
+  border: 1px solid #b8cff7;
+  color: #1d4f91;
+}
+
+.productRexActiveBadge {
+  background: #e7f7ed;
+  border: 1px solid #79c58e;
+  color: #17673a;
+}
+
+.sectionActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.sectionNavigationRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.sectionNavigationActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.sectionActionButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.composerFooterRight {
+  justify-content: flex-end;
+}
+
+.llmLoaderCard {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.95rem;
+  background: #f8fafc;
+}
+
+.llmLoaderDot {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  background: #f2c500;
+  box-shadow: 0 0 0 0 rgba(242, 197, 0, 0.5);
+  animation: finleyLoaderPulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.llmLoaderTitle {
+  color: #113864;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.llmLoaderText {
+  color: #66788a;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+@keyframes finleyLoaderPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(242, 197, 0, 0.5);
+  }
+
+  70% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 0.45rem rgba(242, 197, 0, 0);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(242, 197, 0, 0);
+  }
+}
+
+.intakeSummaryCard {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.95rem;
+  background: #f8fafc;
+}
+
+.intakeSummaryTitle {
+  color: #113864;
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.intakeSummaryBlock {
+  display: grid;
+  gap: 0.35rem;
+  color: #334e68;
+  line-height: 1.55;
+}
+
+.intakeSummaryLabel {
+  color: #6b7c93;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.intakeChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.intakeChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.9rem;
+  padding: 0 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: #fff3ba;
+  color: #7c5f00;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.intakeChipActive {
+  border-color: #2f9e44;
+  background: #e7f7ed;
+  color: #17673a;
+}
+
+.intakeList {
+  margin: 0;
+  padding-left: 1rem;
+  color: #486581;
+  line-height: 1.6;
+}
+
+.intakeSummaryHint {
+  color: #66788a;
+  font-size: 0.8rem;
+}
+
+.intakeQuestionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #127cc1;
+  font: inherit;
+  line-height: 1.6;
+  text-align: left;
+  cursor: pointer;
+}
+
+.intakeQuestionButton:hover {
+  text-decoration: underline;
+}
+
+.intakeQuestionAnswered {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: #e7f7ed;
+  color: #17673a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.intakeQuestionAnsweredButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0 0.45rem;
+  border: 0;
+  border-radius: 999px;
+  background: #e7f7ed;
+  color: #17673a;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.intakeAnsweredRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.intakeQuestionUnanswered {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: #fde8e8;
+  color: #9b1c1c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.largeTextarea {
+  min-height: 7rem;
+  padding-top: 0.8rem;
+  padding-bottom: 0.8rem;
+  resize: vertical;
+}
+
+.mediumTextarea {
+  min-height: 5rem;
+  padding-top: 0.8rem;
+  padding-bottom: 0.8rem;
+  resize: vertical;
+}
+
+.largeTextareaTall {
+  min-height: 14rem;
+  padding-top: 0.8rem;
+  padding-bottom: 0.8rem;
+  resize: vertical;
+}
+
+.readinessList {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.readinessItem {
+  padding: 0.9rem 1rem;
+  border-radius: 0.9rem;
+  background: rgba(15, 46, 87, 0.05);
+}
+
+.readinessTitle {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  color: #113864;
+  font-weight: 800;
+}
+
+.readinessSeverity {
+  color: #7c5f00;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+}
+
+.readinessProblems {
+  margin: 0.55rem 0 0;
+  padding-left: 1rem;
+  color: #486581;
+  line-height: 1.6;
+}
+
+@media (max-width: 920px) {
+  .sectionGrid,
+  .sectionGridCompact,
+  .moduleGrid {
+    grid-template-columns: 1fr;
+  }
+}

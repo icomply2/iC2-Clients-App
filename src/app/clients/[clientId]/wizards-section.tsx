@@ -1,7 +1,9 @@
+import Link from "next/link";
 import type { ClientProfile } from "@/lib/api/types";
 import styles from "./page.module.css";
 
 type WizardsSectionProps = {
+  clientId?: string;
   profile: ClientProfile;
   useMockFallback?: boolean;
 };
@@ -11,6 +13,7 @@ type WizardCard = {
   description: string;
   status: "Ready" | "Coming soon";
   fields: string[];
+  href?: string;
 };
 
 const onboardingWizards: WizardCard[] = [
@@ -29,6 +32,27 @@ const onboardingWizards: WizardCard[] = [
 ];
 
 const adviceWizards: WizardCard[] = [
+  {
+    title: "Engagement Letter",
+    description: "Prepare the adviser engagement scope, service terms, and client acknowledgements before document generation is connected.",
+    status: "Coming soon",
+    fields: ["Scope and services", "Fees and terms", "Acknowledgements"],
+    href: "/wizards/engagement-letter",
+  },
+  {
+    title: "Record of Advice",
+    description: "Guide the adviser through changed circumstances, recommendation updates, and supporting rationale for a Record of Advice.",
+    status: "Coming soon",
+    fields: ["Changed circumstances", "Recommendation summary", "Implementation notes"],
+    href: "/wizards/record-of-advice",
+  },
+  {
+    title: "Statement of Advice",
+    description: "Prepare the full advice narrative, recommendations, and disclosure structure that will feed a complete Statement of Advice.",
+    status: "Coming soon",
+    fields: ["Objectives and strategy", "Recommendations", "Risks and disclosures"],
+    href: "/wizards/statement-of-advice",
+  },
   {
     title: "Insurance Review",
     description: "Prepare the insurance policy and cover information needed once the new backend contract is finalised.",
@@ -62,7 +86,7 @@ function countProfileItems(profile: ClientProfile) {
   };
 }
 
-export function WizardsSection({ profile, useMockFallback = false }: WizardsSectionProps) {
+export function WizardsSection({ clientId, profile, useMockFallback = false }: WizardsSectionProps) {
   const counts = countProfileItems(profile);
   const clientName = profile.client?.name ?? "this client";
 
@@ -114,9 +138,15 @@ export function WizardsSection({ profile, useMockFallback = false }: WizardsSect
                 ))}
               </ul>
               <div className={styles.wizardActions}>
-                <button type="button" className={styles.wizardPrimaryButton}>
-                  Open wizard
-                </button>
+                {wizard.href && clientId ? (
+                  <Link href={`/clients/${clientId}${wizard.href}`} className={styles.wizardPrimaryButton}>
+                    Open wizard
+                  </Link>
+                ) : (
+                  <button type="button" className={styles.wizardPrimaryButton}>
+                    Open wizard
+                  </button>
+                )}
               </div>
             </article>
           ))}
@@ -142,9 +172,15 @@ export function WizardsSection({ profile, useMockFallback = false }: WizardsSect
                 ))}
               </ul>
               <div className={styles.wizardActions}>
-                <button type="button" className={styles.wizardSecondaryButton}>
-                  Plan later
-                </button>
+                {wizard.href && clientId ? (
+                  <Link href={`/clients/${clientId}${wizard.href}`} className={styles.wizardSecondaryButton}>
+                    Open placeholder
+                  </Link>
+                ) : (
+                  <button type="button" className={styles.wizardSecondaryButton}>
+                    Plan later
+                  </button>
+                )}
               </div>
             </article>
           ))}

@@ -1,19 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
+import { AppTopbar } from "@/components/app-topbar";
+import { DesktopBrokerLogo } from "@/components/desktop-broker-logo";
+import { Hub24Logo } from "@/components/hub24-logo";
 import { ProductRexLogo } from "@/components/product-rex-logo";
-import { UserInitialsAvatar } from "@/components/user-initials-avatar";
+import { updateAdminUser } from "@/lib/api/admin";
 import styles from "./page.module.css";
 
 type AccountProfileProps = {
+  userId: string;
   name: string;
   email: string;
   role: string;
   status: string;
   appAccess: string;
+  appAdminValue: string;
+  isAppAdmin: boolean;
+  practiceName: string;
+  practiceAbn: string;
+  licenseeName: string;
+  complianceManagerName: string;
   rexConnected: boolean;
   rexExpiresAt: string | null;
+  desktopBrokerConfigured: boolean;
+  desktopBrokerEnvironment: string;
   integrationStatus: string | null;
   integrationMessage: string | null;
 };
@@ -28,13 +40,22 @@ type ProductRexUserSummary = {
 };
 
 export function ProfileAccount({
+  userId,
   name,
   email,
   role,
   status,
   appAccess,
+  appAdminValue,
+  isAppAdmin,
+  practiceName,
+  practiceAbn,
+  licenseeName,
+  complianceManagerName,
   rexConnected,
   rexExpiresAt,
+  desktopBrokerConfigured,
+  desktopBrokerEnvironment,
   integrationStatus,
   integrationMessage,
 }: AccountProfileProps) {
@@ -43,14 +64,36 @@ export function ProfileAccount({
   const [emailAddress, setEmailAddress] = useState(email);
   const [preferredPhone, setPreferredPhone] = useState("");
   const [jobTitle, setJobTitle] = useState(role);
+  const [accountStatus, setAccountStatus] = useState(status);
+  const [accountAccess, setAccountAccess] = useState(appAccess);
+  const [appAdminSelection, setAppAdminSelection] = useState(appAdminValue);
   const [defaultLandingPage, setDefaultLandingPage] = useState("/clients");
   const [defaultPageSize, setDefaultPageSize] = useState("10");
   const [compactLists, setCompactLists] = useState(false);
+  const [practiceLogoName, setPracticeLogoName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [saveBusy, setSaveBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [rexBusy, setRexBusy] = useState(false);
   const [rexMessage, setRexMessage] = useState<string | null>(null);
   const [rexUser, setRexUser] = useState<ProductRexUserSummary | null>(null);
+
+  const roleOptions = [
+    "Adviser",
+    "Compliance Manager",
+    "Practice Admin",
+    "Paraplanner",
+    "Support Staff",
+    "Licensee Admin",
+  ];
+  const statusOptions = ["Active", "Pending", "Suspended", "Inactive"];
+  const appAccessOptions = ["Full Access", "Standard Access", "Read Only", "No Access"];
+  const appAdminOptions = ["No", "App Admin", "ic2 App Admin"];
+
+  function handlePracticeLogoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setPracticeLogoName(file?.name ?? "");
+  }
 
   useEffect(() => {
     if (integrationStatus === "connected") {
@@ -162,8 +205,32 @@ export function ProfileAccount({
     }
   }
 
-  function handleSave() {
-    setMessage("Profile editing is ready in the UI. We can connect the save action once the user update endpoint is available.");
+  async function handleSave() {
+    if (!userId) {
+      setMessage("Unable to save this account because the user id could not be resolved.");
+      return;
+    }
+
+    setSaveBusy(true);
+    setMessage(null);
+
+    try {
+      const payload = {
+        ...(accountAccess ? { appAccess: accountAccess } : {}),
+        ...(jobTitle ? { userRole: jobTitle } : {}),
+        ...(accountStatus ? { userStatus: accountStatus } : {}),
+      };
+
+      await updateAdminUser(userId, payload);
+
+      setMessage(
+        "Account changes saved. Role, account status, and app access are now connected to the live user endpoint.",
+      );
+    } catch (saveError) {
+      setMessage(saveError instanceof Error ? saveError.message : "Unable to save user changes right now.");
+    } finally {
+      setSaveBusy(false);
+    }
   }
 
   async function handleDisconnectProductRex() {
@@ -193,37 +260,12 @@ export function ProfileAccount({
 
   return (
     <div className={styles.page}>
-      <header className={styles.topbar}>
-        <div className={styles.topbarLeft}>
-          <button type="button" className={styles.gridButton} aria-label="App menu">
-            {Array.from({ length: 9 }).map((_, index) => (
-              <span key={index} className={styles.gridDot} />
-            ))}
-          </button>
-          <Link href="/admin" className={styles.inviteButton}>
-            + Invite New User
-          </Link>
-          <span className={styles.pageName}>My Account</span>
-        </div>
-
-        <div className={styles.topbarRight}>
-          <Link href="/profile" className={styles.topLink}>
-            <UserInitialsAvatar className={styles.avatar} />
-            <span>Me</span>
-          </Link>
-          <Link href="/" className={styles.topLink}>
-            <span className={styles.icon}>→</span>
-            <span>Sign Out</span>
-          </Link>
-        </div>
-      </header>
+      <AppTopbar finleyHref="/finley" />
 
       <main className={styles.content}>
-        <div className={styles.profileHero}>
-          <div>
-            <h1 className={styles.title}>Manage your account</h1>
-          </div>
-        </div>
+        <section className={styles.headerBar}>
+          <span className={styles.headerTitle}>Manage your account</span>
+        </section>
 
         <div className={styles.subnav}>
           <button
@@ -254,35 +296,114 @@ export function ProfileAccount({
           >
             Integrations
           </button>
+          {isAppAdmin ? (
+            <Link href="/admin" className={styles.subnavButton}>
+              Administration
+            </Link>
+          ) : null}
         </div>
 
         <section className={styles.panel}>
           {activeTab === "account" ? (
-            <div className={styles.panelGrid}>
-              <div className={styles.field}>
-                <span>Full name</span>
-                <input value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            <div className={styles.accountSectionStack}>
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Account Details</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>Full name</span>
+                    <input value={fullName} onChange={(event) => setFullName(event.target.value)} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Email</span>
+                    <input value={emailAddress} onChange={(event) => setEmailAddress(event.target.value)} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Preferred phone</span>
+                    <input value={preferredPhone} onChange={(event) => setPreferredPhone(event.target.value)} placeholder="Preferred phone" readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Role</span>
+                    <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
+                      {!roleOptions.includes(jobTitle) && jobTitle ? <option value={jobTitle}>{jobTitle}</option> : null}
+                      {roleOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>Account status</span>
+                    <select value={accountStatus} onChange={(event) => setAccountStatus(event.target.value)}>
+                      {!statusOptions.includes(accountStatus) && accountStatus ? <option value={accountStatus}>{accountStatus}</option> : null}
+                      {statusOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>App access</span>
+                    <select value={accountAccess} onChange={(event) => setAccountAccess(event.target.value)}>
+                      {!appAccessOptions.includes(accountAccess) && accountAccess ? (
+                        <option value={accountAccess}>{accountAccess}</option>
+                      ) : null}
+                      {appAccessOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>App admin value</span>
+                    <select value={appAdminSelection} onChange={(event) => setAppAdminSelection(event.target.value)} disabled>
+                      {!appAdminOptions.includes(appAdminSelection) && appAdminSelection ? (
+                        <option value={appAdminSelection}>{appAdminSelection}</option>
+                      ) : null}
+                      {appAdminOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-              <div className={styles.field}>
-                <span>Email</span>
-                <input value={emailAddress} onChange={(event) => setEmailAddress(event.target.value)} />
+
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Practice Details</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>Practice name</span>
+                    <input value={practiceName} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Practice ABN</span>
+                    <input value={practiceAbn} placeholder="Practice ABN" readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Licensee name</span>
+                    <input value={licenseeName} readOnly />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Compliance manager</span>
+                    <input value={complianceManagerName} readOnly />
+                  </div>
+                  <label className={`${styles.field} ${styles.logoUploadField}`}>
+                    <span>Practice logo</span>
+                    <input type="file" accept="image/*" onChange={handlePracticeLogoChange} />
+                    <span className={styles.uploadMeta}>
+                      {practiceLogoName || "Choose a logo file to upload"}
+                    </span>
+                  </label>
+                </div>
               </div>
-              <div className={styles.field}>
-                <span>Preferred phone</span>
-                <input value={preferredPhone} onChange={(event) => setPreferredPhone(event.target.value)} placeholder="Preferred phone" />
-              </div>
-              <div className={styles.field}>
-                <span>Role</span>
-                <input value={jobTitle} onChange={(event) => setJobTitle(event.target.value)} />
-              </div>
-              <div className={styles.field}>
-                <span>Account status</span>
-                <input value={status} readOnly />
-              </div>
-              <div className={styles.field}>
-                <span>App access</span>
-                <input value={appAccess} readOnly />
-              </div>
+
+              <p className={styles.cardText}>
+                The live user endpoint currently saves role, account status, and app access. Name, email, phone, app admin, and practice details remain backend-managed for now. Practice logo upload is UI-ready but not connected to storage yet.
+              </p>
             </div>
           ) : null}
 
@@ -400,6 +521,128 @@ export function ProfileAccount({
                   {rexMessage ? <p className={styles.success}>{rexMessage}</p> : null}
                 </div>
               </div>
+
+              <div className={styles.integrationCard}>
+                <div className={styles.integrationBrand}>
+                  <DesktopBrokerLogo className={styles.integrationLogo} />
+                </div>
+                <div className={styles.integrationDetails}>
+                  <div className={styles.integrationHeader}>
+                    <div>
+                      <h3 className={styles.cardTitle}>Desktop Broker</h3>
+                      <p className={styles.cardText}>
+                        Trading and portfolio integration for contract notes, holdings, and holding transactions through a secure server-side proxy.
+                      </p>
+                    </div>
+                    <span className={desktopBrokerConfigured ? styles.statusPill : styles.statusPillMuted}>
+                      {desktopBrokerConfigured ? "Configured" : "Not configured"}
+                    </span>
+                  </div>
+
+                  <div className={styles.integrationGrid}>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration type</span>
+                      <strong>Third-party API</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Environment</span>
+                      <strong>{desktopBrokerEnvironment}</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Authentication</span>
+                      <strong>Server-side basic auth</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Enabled endpoints</span>
+                      <strong>3 ready</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Staging test accounts</span>
+                      <strong>105143, 105538</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Date filters</span>
+                      <strong>180 day max block</strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.integrationListBlock}>
+                    <span className={styles.integrationListTitle}>Available proxy routes</span>
+                    <ul className={styles.integrationList}>
+                      <li>/api/integrations/desktop-broker/contractnotes</li>
+                      <li>/api/integrations/desktop-broker/holdings</li>
+                      <li>/api/integrations/desktop-broker/holdingtransactions</li>
+                    </ul>
+                  </div>
+
+                  <div className={styles.integrationActions}>
+                    <button type="button" className={styles.primaryButton} disabled={!desktopBrokerConfigured}>
+                      {desktopBrokerConfigured ? "Integration Ready" : "Configure Desktop Broker"}
+                    </button>
+                    <button type="button" className={styles.secondaryButton}>
+                      Client Mapping
+                    </button>
+                    <span className={styles.statusPillMuted}>
+                      {desktopBrokerConfigured
+                        ? "Credentials stay on the server. We can now use these routes in portfolio and transaction workflows."
+                        : "Add Desktop Broker env vars to enable the staging proxy routes."}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.integrationCard}>
+                <div className={styles.integrationBrand}>
+                  <Hub24Logo className={styles.integrationLogo} />
+                </div>
+                <div className={styles.integrationDetails}>
+                  <div className={styles.integrationHeader}>
+                    <div>
+                      <h3 className={styles.cardTitle}>HUB24</h3>
+                      <p className={styles.cardText}>
+                        Platform integration placeholder for adviser portfolio data, investment workflows, and future automation across client records.
+                      </p>
+                    </div>
+                    <span className={styles.statusPillMuted}>Coming soon</span>
+                  </div>
+
+                  <div className={styles.integrationGrid}>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration type</span>
+                      <strong>Investment platform</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Gateway</span>
+                      <strong>To be configured</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Connection</span>
+                      <strong>Not connected</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Platform account</span>
+                      <strong>Not connected yet</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Account email</span>
+                      <strong>Not available</strong>
+                    </div>
+                    <div className={styles.integrationMetric}>
+                      <span>Integration status</span>
+                      <strong>Placeholder only</strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.integrationActions}>
+                    <button type="button" className={styles.primaryButton} disabled>
+                      Connect HUB24
+                    </button>
+                    <span className={styles.statusPillMuted}>
+                      Placeholder card only for now. Authentication and portfolio sync will be added in a later build.
+                    </span>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : null}
 
@@ -408,8 +651,8 @@ export function ProfileAccount({
               {message ? <p className={styles.success}>{message}</p> : null}
             </div>
             {activeTab !== "security" && activeTab !== "integrations" ? (
-              <button type="button" className={styles.primaryButton} onClick={handleSave}>
-                Save changes
+              <button type="button" className={styles.primaryButton} onClick={handleSave} disabled={saveBusy}>
+                {saveBusy ? "Saving..." : "Save changes"}
               </button>
             ) : null}
           </div>

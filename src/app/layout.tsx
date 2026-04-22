@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
+import { Titillium_Web } from "next/font/google";
 import "./globals.css";
+
+const titilliumWeb = Titillium_Web({
+  variable: "--font-sans",
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "iC2 Clients",
@@ -17,7 +25,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className={titilliumWeb.variable}>{children}</body>
     </html>
   );
 }
