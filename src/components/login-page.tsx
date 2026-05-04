@@ -86,7 +86,7 @@ export function LoginPage() {
           throw new Error(body?.message ?? "Two-factor verification failed.");
         }
 
-        router.push("/clients");
+        router.push("/finley");
         return;
       }
 
@@ -112,7 +112,7 @@ export function LoginPage() {
         return;
       }
 
-      router.push("/clients");
+      router.push("/finley");
     } catch (submissionError) {
       const message =
         submissionError instanceof Error ? submissionError.message : "Unable to sign in right now.";

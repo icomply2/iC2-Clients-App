@@ -1,42 +1,44 @@
+import { DOCUMENT_TEMPLATES, type DocumentSectionKey } from "@/lib/documents/document-sections";
 import styles from "../admin.module.css";
 
-const templates = [
-  {
-    name: "Fact Find",
-    scope: "Global",
-    engine: "Docmosis",
-    templateName: process.env.DOCMOSIS_FACT_FIND_TEMPLATE_NAME || "Not configured",
-    status: process.env.DOCMOSIS_FACT_FIND_TEMPLATE_NAME ? "Configured" : "Missing",
-  },
-  {
-    name: "Engagement Letter",
-    scope: "Global",
-    engine: "Docmosis",
-    templateName: process.env.DOCMOSIS_ENGAGEMENT_TEMPLATE_NAME || "Not configured",
-    status: process.env.DOCMOSIS_ENGAGEMENT_TEMPLATE_NAME ? "Configured" : "Missing",
-  },
-  {
-    name: "Invoice",
-    scope: "Global",
-    engine: "Docmosis",
-    templateName: process.env.DOCMOSIS_INVOICE_TEMPLATE_NAME || "Not configured",
-    status: process.env.DOCMOSIS_INVOICE_TEMPLATE_NAME ? "Configured" : "Missing",
-  },
-  {
-    name: "Record of Advice",
-    scope: "Planned",
-    engine: "Docmosis",
-    templateName: "Awaiting template mapping",
-    status: "Coming soon",
-  },
-  {
-    name: "Statement of Advice",
-    scope: "Planned",
-    engine: "Docmosis",
-    templateName: "Awaiting template mapping",
-    status: "Coming soon",
-  },
-];
+const sectionLabels: Record<DocumentSectionKey, string> = {
+  factFind: "Fact Find",
+  engagementLetter: "Engagement Letter",
+  invoice: "Invoice",
+  coverPage: "Cover Page",
+  tableOfContents: "Table of Contents",
+  letter: "Letter",
+  executiveSummary: "Executive Summary",
+  aboutThisAdvice: "About This Advice",
+  scopeOfAdvice: "Scope of Advice",
+  personalFinancialPosition: "Personal and Financial Position",
+  riskProfile: "Risk Profile",
+  strategyRecommendations: "Strategy Recommendations",
+  productRecommendations: "Product Recommendations",
+  investmentPortfolioRecommendations: "Investment Portfolio Recommendations",
+  portfolioAllocation: "Portfolio Allocation",
+  replacementAnalysis: "Replacement Analysis",
+  insuranceNeedsAnalysis: "Insurance Needs Analysis",
+  recommendedInsurancePolicies: "Recommended Insurance Policies",
+  insuranceProductReplacement: "Insurance Product Replacement",
+  projections: "Projections",
+  feesAndDisclosures: "Fees and Disclosures",
+  actionsRequired: "Actions Required by You",
+  authorityToProceed: "Authority to Proceed",
+  serviceAgreement: "Service Agreement",
+  consentToDeductFees: "Consent to Deduct Fees",
+  appendix: "Appendix",
+};
+
+const templates = Object.values(DOCUMENT_TEMPLATES);
+
+function getStatusClass(status: (typeof templates)[number]["status"]) {
+  if (status === "Active") {
+    return `${styles.statusPill} ${styles.statusPillAdmin}`;
+  }
+
+  return styles.statusPill;
+}
 
 export default function AdminTemplatesPage() {
   return (
@@ -45,8 +47,8 @@ export default function AdminTemplatesPage() {
         <div>
           <h2 className={styles.cardTitle}>Templates</h2>
           <p className={styles.cardText}>
-            Template ownership sits alongside Integrations so administrators can manage Docmosis template mappings,
-            document scope, and rollout readiness in one place.
+            Templates are now managed as reusable Finley document structures. Standalone documents and larger advice
+            documents can share the same sections, wording, tables, agreement blocks, and DOCX export logic.
           </p>
         </div>
 
@@ -57,21 +59,34 @@ export default function AdminTemplatesPage() {
         <table className={styles.table}>
           <thead>
             <tr>
-              <th>Document type</th>
+              <th>Template</th>
               <th>Engine</th>
               <th>Scope</th>
-              <th>Template name</th>
+              <th>Reusable sections</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {templates.map((template) => (
-              <tr key={template.name}>
-                <td>{template.name}</td>
+              <tr key={template.key}>
+                <td>
+                  <strong>{template.label}</strong>
+                  <p className={styles.tableSubtext}>{template.description}</p>
+                </td>
                 <td>{template.engine}</td>
                 <td>{template.scope}</td>
-                <td>{template.templateName}</td>
-                <td>{template.status}</td>
+                <td>
+                  <div className={styles.templateSectionList}>
+                    {template.sections.map((section) => (
+                      <span className={styles.templateSectionPill} key={`${template.key}-${section}`}>
+                        {sectionLabels[section]}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                <td>
+                  <span className={getStatusClass(template.status)}>{template.status}</span>
+                </td>
               </tr>
             ))}
           </tbody>

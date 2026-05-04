@@ -17,6 +17,8 @@ export async function POST(request: NextRequest) {
       role?: "assistant" | "user";
       content?: string;
     }> | null;
+    activeFollowUpQuestion?: string | null;
+    answeredFollowUpResponses?: Record<string, string> | null;
   }
     | null;
 
@@ -45,6 +47,8 @@ export async function POST(request: NextRequest) {
         })) ?? [],
     currentAssessment: payload?.currentAssessment ?? null,
     recentMessages: payload?.recentMessages ?? null,
+    activeFollowUpQuestion: payload?.activeFollowUpQuestion ?? null,
+    answeredFollowUpResponses: payload?.answeredFollowUpResponses ?? null,
   });
 
   return NextResponse.json(result);

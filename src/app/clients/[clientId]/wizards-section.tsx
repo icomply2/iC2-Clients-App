@@ -14,6 +14,7 @@ type WizardCard = {
   status: "Ready" | "Coming soon";
   fields: string[];
   href?: string;
+  getHref?: (clientId: string) => string;
 };
 
 const onboardingWizards: WizardCard[] = [
@@ -49,9 +50,9 @@ const adviceWizards: WizardCard[] = [
   {
     title: "Statement of Advice",
     description: "Prepare the full advice narrative, recommendations, and disclosure structure that will feed a complete Statement of Advice.",
-    status: "Coming soon",
+    status: "Ready",
     fields: ["Objectives and strategy", "Recommendations", "Risks and disclosures"],
-    href: "/wizards/statement-of-advice",
+    getHref: (clientId) => `/clients/${encodeURIComponent(clientId)}?section=wizards-statement-of-advice`,
   },
   {
     title: "Insurance Review",
@@ -172,9 +173,12 @@ export function WizardsSection({ clientId, profile, useMockFallback = false }: W
                 ))}
               </ul>
               <div className={styles.wizardActions}>
-                {wizard.href && clientId ? (
-                  <Link href={`/clients/${clientId}${wizard.href}`} className={styles.wizardSecondaryButton}>
-                    Open placeholder
+                {clientId && (wizard.getHref || wizard.href) ? (
+                  <Link
+                    href={wizard.getHref ? wizard.getHref(clientId) : `/clients/${clientId}${wizard.href}`}
+                    className={styles.wizardSecondaryButton}
+                  >
+                    Open wizard
                   </Link>
                 ) : (
                   <button type="button" className={styles.wizardSecondaryButton}>

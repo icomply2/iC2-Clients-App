@@ -61,6 +61,10 @@ Do not zip the full project root or `node_modules` manually for App Service depl
 - Real API mode: set `NEXT_PUBLIC_API_BASE_URL` to your backend and leave `NEXT_PUBLIC_ENABLE_MOCK_AUTH=false`
 - Mock login mode: set `NEXT_PUBLIC_ENABLE_MOCK_AUTH=true` to bypass the live login API locally and enter the app with any email and password
 
+## API reference
+
+- [API Reference](docs/api-reference.md) is generated from the latest Swagger/OpenAPI schema supplied on 30 April 2026.
+
 ## Third-party integrations
 
 Server-side integration proxies can be configured with private env vars so secrets do not reach the browser.
