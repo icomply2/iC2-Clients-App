@@ -6,6 +6,139 @@
   min-height: 0;
 }
 
+.workspaceWithLivePreview {
+  grid-template-columns: 20rem minmax(34rem, 1fr) minmax(30rem, 0.88fr);
+}
+
+.livePreviewPane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: calc(100vh - 5.5rem);
+  max-height: calc(100vh - 5.5rem);
+  padding: 0.9rem;
+  border: 1px solid rgba(15, 46, 87, 0.08);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(15, 46, 87, 0.08);
+}
+
+.livePreviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.livePreviewEyebrow {
+  color: #6b7c93;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.livePreviewTitle {
+  margin-top: 0.15rem;
+  color: #113864;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.livePreviewOpenButton {
+  min-height: 2.25rem;
+  padding: 0 0.8rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.livePreviewStyleControls {
+  display: flex;
+  align-items: end;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
+.livePreviewStyleControl,
+.livePreviewColorControl {
+  display: grid;
+  gap: 0.2rem;
+  color: #6b7c93;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.livePreviewStyleControl select {
+  width: 5.8rem;
+  height: 2.15rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.65rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.livePreviewColorControl input {
+  width: 2.25rem;
+  height: 2.15rem;
+  padding: 0.18rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.65rem;
+  background: #fff;
+  cursor: pointer;
+}
+
+.livePreviewResetButton {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.15rem;
+  padding: 0;
+  border: 1px solid #d2dae5;
+  border-radius: 0.65rem;
+  background: #fff;
+  color: #113864;
+  cursor: pointer;
+}
+
+.livePreviewResetButton:hover {
+  background: #f8fafc;
+  border-color: #b8c4d2;
+}
+
+.livePreviewResetButton svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.livePreviewFrame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+}
+
 .quickActionList {
   display: grid;
   gap: 0.6rem;
@@ -297,6 +430,60 @@
   line-height: 1.45;
 }
 
+.tableInput,
+.tableSelect {
+  width: 100%;
+  min-width: 7.25rem;
+  height: 2.45rem;
+  padding: 0 0.65rem;
+  border: 1px solid #cbd8e6;
+  border-radius: 0.55rem;
+  background: #fff;
+  color: #173b63;
+  font: inherit;
+}
+
+.tableInput:focus,
+.tableSelect:focus {
+  border-color: #f2c911;
+  box-shadow: 0 0 0 3px rgba(242, 201, 17, 0.18);
+  outline: none;
+}
+
+.inlineAddButton {
+  min-height: 2.25rem;
+  padding: 0 0.8rem;
+  border: 1px solid #cbd8e6;
+  border-radius: 0.55rem;
+  background: #fff;
+  color: #113864;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.inlineAddButton:hover {
+  border-color: #f2c911;
+  color: #0d2d52;
+}
+
+.splitMiniInputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.dataTableTotalRow td {
+  border-top: 2px solid #d5dde7;
+  color: #113864;
+  font-weight: 800;
+}
+
+.dataTableGroupRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+}
+
 .linkedObjectiveOption {
   display: flex;
   gap: 0.55rem;
@@ -397,6 +584,8 @@
 }
 
 .productRexBadge,
+.insuranceQuoteBadge,
+.factFindBadge,
 .productRexActiveBadge {
   display: inline-flex;
   align-items: center;
@@ -438,10 +627,57 @@
   color: #1d4f91;
 }
 
+.insuranceQuoteBadge {
+  background: #fff4e6;
+  border: 1px solid #e2b673;
+  color: #8a4f13;
+}
+
+.factFindBadge {
+  background: #eef7f3;
+  border: 1px solid #86cbb0;
+  color: #16624a;
+}
+
 .productRexActiveBadge {
   background: #e7f7ed;
   border: 1px solid #79c58e;
   color: #17673a;
+}
+
+.factFindImportModal {
+  width: min(58rem, 100%);
+  max-height: min(48rem, calc(100vh - 2.5rem));
+  overflow: auto;
+}
+
+.factFindCountGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.6rem;
+}
+
+.factFindCountCard {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+}
+
+.factFindCountCard span {
+  color: #6b7c93;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.factFindCountCard strong {
+  color: #113864;
+  font-size: 1.1rem;
+  font-weight: 800;
 }
 
 .sectionActionRow {
@@ -550,6 +786,94 @@
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.intakeInsightGrid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.intakeInsightItem {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.75rem;
+  background: #ffffff;
+}
+
+.intakeInsightHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #113864;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.intakeInsightHeader span:last-child {
+  color: #66788a;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.intakeReadinessGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.65rem;
+}
+
+.intakeReadinessItem {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.75rem;
+  background: #ffffff;
+}
+
+.intakeReadinessHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  color: #113864;
+  font-size: 0.83rem;
+  font-weight: 800;
+}
+
+.intakeReadinessBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.intakeReadinessReady {
+  background: #e7f7ed;
+  color: #17673a;
+}
+
+.intakeReadinessConfirm {
+  background: #fff3ba;
+  color: #7c5f00;
+}
+
+.intakeReadinessMissing {
+  background: #fde8e8;
+  color: #9b1c1c;
+}
+
+.intakeReadinessOut {
+  background: #edf2f7;
+  color: #52606d;
 }
 
 .intakeChipRow {
@@ -707,6 +1031,18 @@
   padding-left: 1rem;
   color: #486581;
   line-height: 1.6;
+}
+
+@media (max-width: 1280px) {
+  .workspaceWithLivePreview {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .livePreviewPane {
+    min-height: 42rem;
+    max-height: none;
+  }
 }
 
 @media (max-width: 920px) {

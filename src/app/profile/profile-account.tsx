@@ -1,12 +1,20 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import Link from "next/link";
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type CSSProperties } from "react";
 import { AppTopbar } from "@/components/app-topbar";
 import { DesktopBrokerLogo } from "@/components/desktop-broker-logo";
 import { Hub24Logo } from "@/components/hub24-logo";
 import { ProductRexLogo } from "@/components/product-rex-logo";
-import { updateAdminUser } from "@/lib/api/admin";
+import {
+  DEFAULT_DOCUMENT_STYLE_PROFILE,
+  DOCUMENT_FONT_OPTIONS,
+  DOCUMENT_STYLE_PROFILE_STORAGE_KEY,
+  normalizeDocumentStyleProfile,
+  type DocumentStyleProfile,
+} from "@/lib/documents/document-style-profile";
 import styles from "./page.module.css";
 
 type AccountProfileProps = {
@@ -22,6 +30,26 @@ type AccountProfileProps = {
   practiceAbn: string;
   licenseeName: string;
   complianceManagerName: string;
+  dateOfBirth: string;
+  phoneNumber: string;
+  officeNumber: string;
+  occupation: string;
+  adviserExperience: string;
+  businessName: string;
+  acn: string;
+  abn: string;
+  asicNumber: string;
+  website: string;
+  xplanSite: string;
+  street: string;
+  suburb: string;
+  state: string;
+  postCode: string;
+  country: string;
+  profilePhoto: string;
+  practiceLogo: string;
+  practiceLetterHead: string;
+  documentStyleProfile: DocumentStyleProfile;
   rexConnected: boolean;
   rexExpiresAt: string | null;
   desktopBrokerConfigured: boolean;
@@ -52,6 +80,26 @@ export function ProfileAccount({
   practiceAbn,
   licenseeName,
   complianceManagerName,
+  dateOfBirth,
+  phoneNumber,
+  officeNumber,
+  occupation,
+  adviserExperience,
+  businessName,
+  acn,
+  abn,
+  asicNumber,
+  website,
+  xplanSite,
+  street,
+  suburb,
+  state,
+  postCode,
+  country,
+  profilePhoto,
+  practiceLogo,
+  practiceLetterHead,
+  documentStyleProfile,
   rexConnected,
   rexExpiresAt,
   desktopBrokerConfigured,
@@ -62,15 +110,41 @@ export function ProfileAccount({
   const [activeTab, setActiveTab] = useState<TabKey>("account");
   const [fullName, setFullName] = useState(name);
   const [emailAddress, setEmailAddress] = useState(email);
-  const [preferredPhone, setPreferredPhone] = useState("");
+  const [preferredPhone, setPreferredPhone] = useState(phoneNumber);
+  const [officePhone, setOfficePhone] = useState(officeNumber);
+  const [birthDate, setBirthDate] = useState(dateOfBirth);
   const [jobTitle, setJobTitle] = useState(role);
   const [accountStatus, setAccountStatus] = useState(status);
   const [accountAccess, setAccountAccess] = useState(appAccess);
   const [appAdminSelection, setAppAdminSelection] = useState(appAdminValue);
+  const [occupationValue, setOccupationValue] = useState(occupation);
+  const [adviserExperienceValue, setAdviserExperienceValue] = useState(adviserExperience);
+  const [businessNameValue, setBusinessNameValue] = useState(businessName);
+  const [acnValue, setAcnValue] = useState(acn);
+  const [abnValue, setAbnValue] = useState(abn || practiceAbn);
+  const [asicNumberValue, setAsicNumberValue] = useState(asicNumber);
+  const [websiteValue, setWebsiteValue] = useState(website);
+  const [xplanSiteValue, setXplanSiteValue] = useState(xplanSite);
+  const [practiceNameValue, setPracticeNameValue] = useState(practiceName);
+  const [licenseeNameValue, setLicenseeNameValue] = useState(licenseeName);
+  const [complianceManagerValue, setComplianceManagerValue] = useState(complianceManagerName);
+  const [streetValue, setStreetValue] = useState(street);
+  const [suburbValue, setSuburbValue] = useState(suburb);
+  const [stateValue, setStateValue] = useState(state);
+  const [postCodeValue, setPostCodeValue] = useState(postCode);
+  const [countryValue, setCountryValue] = useState(country);
   const [defaultLandingPage, setDefaultLandingPage] = useState("/clients");
   const [defaultPageSize, setDefaultPageSize] = useState("10");
   const [compactLists, setCompactLists] = useState(false);
-  const [practiceLogoName, setPracticeLogoName] = useState("");
+  const [profilePhotoData, setProfilePhotoData] = useState(profilePhoto);
+  const [practiceLogoData, setPracticeLogoData] = useState(practiceLogo);
+  const [practiceLetterHeadData, setPracticeLetterHeadData] = useState(practiceLetterHead);
+  const [documentStyle, setDocumentStyle] = useState<DocumentStyleProfile>(
+    normalizeDocumentStyleProfile(documentStyleProfile),
+  );
+  const [profilePhotoName, setProfilePhotoName] = useState(profilePhoto ? "Profile photo saved" : "");
+  const [practiceLogoName, setPracticeLogoName] = useState(practiceLogo ? "Practice logo saved" : "");
+  const [practiceLetterHeadName, setPracticeLetterHeadName] = useState(practiceLetterHead ? "Letterhead saved" : "");
   const [busy, setBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -90,10 +164,37 @@ export function ProfileAccount({
   const appAccessOptions = ["Full Access", "Standard Access", "Read Only", "No Access"];
   const appAdminOptions = ["No", "App Admin", "ic2 App Admin"];
 
-  function handlePracticeLogoChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    setPracticeLogoName(file?.name ?? "");
+  async function readFileAsDataUrl(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.addEventListener("load", () => resolve(String(reader.result ?? "")));
+      reader.addEventListener("error", () => reject(reader.error ?? new Error("Unable to read file.")));
+      reader.readAsDataURL(file);
+    });
   }
+
+  async function handleImageUpload(
+    event: ChangeEvent<HTMLInputElement>,
+    setName: (value: string) => void,
+    setData: (value: string) => void,
+  ) {
+    const file = event.target.files?.[0] ?? null;
+    setName(file?.name ?? "");
+
+    if (!file) {
+      setData("");
+      return;
+    }
+
+    setData(await readFileAsDataUrl(file));
+  }
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      DOCUMENT_STYLE_PROFILE_STORAGE_KEY,
+      JSON.stringify(normalizeDocumentStyleProfile(documentStyleProfile)),
+    );
+  }, [documentStyleProfile]);
 
   useEffect(() => {
     if (integrationStatus === "connected") {
@@ -215,17 +316,61 @@ export function ProfileAccount({
     setMessage(null);
 
     try {
-      const payload = {
-        ...(accountAccess ? { appAccess: accountAccess } : {}),
-        ...(jobTitle ? { userRole: jobTitle } : {}),
-        ...(accountStatus ? { userStatus: accountStatus } : {}),
-      };
+      const response = await fetch("/api/users/me/profile", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          userUpdate: {
+            ...(accountAccess ? { appAccess: accountAccess } : {}),
+            ...(jobTitle ? { userRole: jobTitle } : {}),
+            ...(accountStatus ? { userStatus: accountStatus } : {}),
+          },
+          profile: {
+            name: fullName,
+            email: emailAddress,
+            dateOfBirth: birthDate,
+            phoneNumber: preferredPhone,
+            officeNumber: officePhone,
+            occupation: occupationValue,
+            adviserExperience: adviserExperienceValue,
+            businessName: businessNameValue,
+            acn: acnValue,
+            abn: abnValue,
+            asicNumber: asicNumberValue,
+            website: websiteValue,
+            xplanSite: xplanSiteValue,
+            practiceName: practiceNameValue,
+            licenseeName: licenseeNameValue,
+            complianceManagerName: complianceManagerValue,
+            profilePhoto: profilePhotoData,
+            practiceLogo: practiceLogoData,
+            practiceLetterHead: practiceLetterHeadData,
+            documentStyleProfile: normalizeDocumentStyleProfile(documentStyle),
+            address: {
+              street: streetValue,
+              suburb: suburbValue,
+              state: stateValue,
+              postCode: postCodeValue,
+              country: countryValue,
+            },
+          },
+        }),
+      });
 
-      await updateAdminUser(userId, payload);
+      const body = (await response.json().catch(() => null)) as { message?: string; warnings?: string[] } | null;
 
-      setMessage(
-        "Account changes saved. Role, account status, and app access are now connected to the live user endpoint.",
+      if (!response.ok) {
+        throw new Error(body?.message ?? "Unable to save user changes right now.");
+      }
+
+      window.localStorage.setItem(
+        DOCUMENT_STYLE_PROFILE_STORAGE_KEY,
+        JSON.stringify(normalizeDocumentStyleProfile(documentStyle)),
       );
+      setMessage(body?.message ?? "Profile details saved.");
     } catch (saveError) {
       setMessage(saveError instanceof Error ? saveError.message : "Unable to save user changes right now.");
     } finally {
@@ -311,18 +456,26 @@ export function ProfileAccount({
                 <div className={styles.panelGrid}>
                   <div className={styles.field}>
                     <span>Full name</span>
-                    <input value={fullName} onChange={(event) => setFullName(event.target.value)} readOnly />
+                    <input value={fullName} onChange={(event) => setFullName(event.target.value)} />
                   </div>
                   <div className={styles.field}>
                     <span>Email</span>
-                    <input value={emailAddress} onChange={(event) => setEmailAddress(event.target.value)} readOnly />
+                    <input value={emailAddress} onChange={(event) => setEmailAddress(event.target.value)} />
                   </div>
                   <div className={styles.field}>
-                    <span>Preferred phone</span>
-                    <input value={preferredPhone} onChange={(event) => setPreferredPhone(event.target.value)} placeholder="Preferred phone" readOnly />
+                    <span>Mobile phone</span>
+                    <input value={preferredPhone} onChange={(event) => setPreferredPhone(event.target.value)} placeholder="Mobile phone" />
                   </div>
                   <div className={styles.field}>
-                    <span>Role</span>
+                    <span>Office phone</span>
+                    <input value={officePhone} onChange={(event) => setOfficePhone(event.target.value)} placeholder="Office phone" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Date of birth</span>
+                    <input value={birthDate} onChange={(event) => setBirthDate(event.target.value)} placeholder="Date of birth" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>User role</span>
                     <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
                       {!roleOptions.includes(jobTitle) && jobTitle ? <option value={jobTitle}>{jobTitle}</option> : null}
                       {roleOptions.map((option) => (
@@ -373,36 +526,111 @@ export function ProfileAccount({
               </div>
 
               <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Adviser Details</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>ASIC adviser / CAR number</span>
+                    <input value={asicNumberValue} onChange={(event) => setAsicNumberValue(event.target.value)} placeholder="ASIC adviser / CAR number" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>ABN</span>
+                    <input value={abnValue} onChange={(event) => setAbnValue(event.target.value)} placeholder="ABN" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>ACN</span>
+                    <input value={acnValue} onChange={(event) => setAcnValue(event.target.value)} placeholder="ACN" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Business name</span>
+                    <input value={businessNameValue} onChange={(event) => setBusinessNameValue(event.target.value)} placeholder="Business name" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Occupation</span>
+                    <input value={occupationValue} onChange={(event) => setOccupationValue(event.target.value)} placeholder="Occupation" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Adviser experience</span>
+                    <input value={adviserExperienceValue} onChange={(event) => setAdviserExperienceValue(event.target.value)} placeholder="Adviser experience" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Website</span>
+                    <input value={websiteValue} onChange={(event) => setWebsiteValue(event.target.value)} placeholder="Website" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Xplan site</span>
+                    <input value={xplanSiteValue} onChange={(event) => setXplanSiteValue(event.target.value)} placeholder="Xplan site" />
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Address</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>Street</span>
+                    <input value={streetValue} onChange={(event) => setStreetValue(event.target.value)} placeholder="Street address" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Suburb</span>
+                    <input value={suburbValue} onChange={(event) => setSuburbValue(event.target.value)} placeholder="Suburb" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>State</span>
+                    <input value={stateValue} onChange={(event) => setStateValue(event.target.value)} placeholder="State" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Postcode</span>
+                    <input value={postCodeValue} onChange={(event) => setPostCodeValue(event.target.value)} placeholder="Postcode" />
+                  </div>
+                  <div className={styles.field}>
+                    <span>Country</span>
+                    <input value={countryValue} onChange={(event) => setCountryValue(event.target.value)} placeholder="Country" />
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.sectionBlock}>
                 <div className={styles.sectionBanner}>Practice Details</div>
                 <div className={styles.panelGrid}>
                   <div className={styles.field}>
                     <span>Practice name</span>
-                    <input value={practiceName} readOnly />
+                    <input value={practiceNameValue} onChange={(event) => setPracticeNameValue(event.target.value)} placeholder="Practice name" />
                   </div>
                   <div className={styles.field}>
-                    <span>Practice ABN</span>
-                    <input value={practiceAbn} placeholder="Practice ABN" readOnly />
+                    <span>Practice / adviser ABN</span>
+                    <input value={abnValue} onChange={(event) => setAbnValue(event.target.value)} placeholder="Practice / adviser ABN" />
                   </div>
                   <div className={styles.field}>
                     <span>Licensee name</span>
-                    <input value={licenseeName} readOnly />
+                    <input value={licenseeNameValue} onChange={(event) => setLicenseeNameValue(event.target.value)} placeholder="Licensee name" />
                   </div>
                   <div className={styles.field}>
                     <span>Compliance manager</span>
-                    <input value={complianceManagerName} readOnly />
+                    <input value={complianceManagerValue} onChange={(event) => setComplianceManagerValue(event.target.value)} placeholder="Compliance manager" />
                   </div>
                   <label className={`${styles.field} ${styles.logoUploadField}`}>
+                    <span>Profile photo</span>
+                    <input type="file" accept="image/*" onChange={(event) => void handleImageUpload(event, setProfilePhotoName, setProfilePhotoData)} />
+                    <span className={styles.uploadMeta}>{profilePhotoName || "Choose a profile photo to upload"}</span>
+                    {profilePhotoData ? <img src={profilePhotoData} alt="Profile preview" className={styles.imagePreview} /> : null}
+                  </label>
+                  <label className={`${styles.field} ${styles.logoUploadField}`}>
                     <span>Practice logo</span>
-                    <input type="file" accept="image/*" onChange={handlePracticeLogoChange} />
-                    <span className={styles.uploadMeta}>
-                      {practiceLogoName || "Choose a logo file to upload"}
-                    </span>
+                    <input type="file" accept="image/*" onChange={(event) => void handleImageUpload(event, setPracticeLogoName, setPracticeLogoData)} />
+                    <span className={styles.uploadMeta}>{practiceLogoName || "Choose a logo file to upload"}</span>
+                    {practiceLogoData ? <img src={practiceLogoData} alt="Practice logo preview" className={styles.imagePreview} /> : null}
+                  </label>
+                  <label className={`${styles.field} ${styles.logoUploadField}`}>
+                    <span>Practice letterhead</span>
+                    <input type="file" accept="image/*" onChange={(event) => void handleImageUpload(event, setPracticeLetterHeadName, setPracticeLetterHeadData)} />
+                    <span className={styles.uploadMeta}>{practiceLetterHeadName || "Choose a letterhead image to upload"}</span>
+                    {practiceLetterHeadData ? <img src={practiceLetterHeadData} alt="Letterhead preview" className={styles.letterheadPreview} /> : null}
                   </label>
                 </div>
               </div>
 
               <p className={styles.cardText}>
-                The live user endpoint currently saves role, account status, and app access. Name, email, phone, app admin, and practice details remain backend-managed for now. Practice logo upload is UI-ready but not connected to storage yet.
+                Role, account status, and app access are sent to the live user endpoint. Adviser details and branding are saved locally for Finley and the SOA cover page until the backend PATCH endpoint supports the full user profile contract.
               </p>
             </div>
           ) : null}
@@ -430,27 +658,118 @@ export function ProfileAccount({
           ) : null}
 
           {activeTab === "preferences" ? (
-            <div className={styles.panelGrid}>
-              <div className={styles.field}>
-                <span>Default landing page</span>
-                <select value={defaultLandingPage} onChange={(event) => setDefaultLandingPage(event.target.value)}>
-                  <option value="/clients">Clients</option>
-                  <option value="/dashboard">Dashboard</option>
-                  <option value="/profile">My Account</option>
-                </select>
+            <div className={styles.preferenceStack}>
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>App Preferences</div>
+                <div className={styles.panelGrid}>
+                  <div className={styles.field}>
+                    <span>Default landing page</span>
+                    <select value={defaultLandingPage} onChange={(event) => setDefaultLandingPage(event.target.value)}>
+                      <option value="/clients">Clients</option>
+                      <option value="/dashboard">Dashboard</option>
+                      <option value="/profile">My Account</option>
+                    </select>
+                  </div>
+                  <div className={styles.field}>
+                    <span>Default page size</span>
+                    <select value={defaultPageSize} onChange={(event) => setDefaultPageSize(event.target.value)}>
+                      <option value="10">10</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                    </select>
+                  </div>
+                  <label className={styles.checkboxRow}>
+                    <input type="checkbox" checked={compactLists} onChange={(event) => setCompactLists(event.target.checked)} />
+                    <span>Use compact list spacing where available</span>
+                  </label>
+                </div>
               </div>
-              <div className={styles.field}>
-                <span>Default page size</span>
-                <select value={defaultPageSize} onChange={(event) => setDefaultPageSize(event.target.value)}>
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                </select>
+
+              <div className={styles.sectionBlock}>
+                <div className={styles.sectionBanner}>Document Style Profile</div>
+                <div className={styles.documentStyleGrid}>
+                  <div className={styles.field}>
+                    <span>Font family</span>
+                    <select
+                      value={documentStyle.fontFamily}
+                      onChange={(event) =>
+                        setDocumentStyle((current) => ({ ...current, fontFamily: event.target.value }))
+                      }
+                    >
+                      {DOCUMENT_FONT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <label className={styles.colorField}>
+                    <span>Body text colour</span>
+                    <input
+                      type="color"
+                      value={documentStyle.bodyTextColor}
+                      onChange={(event) =>
+                        setDocumentStyle((current) => ({ ...current, bodyTextColor: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className={styles.colorField}>
+                    <span>Heading colour</span>
+                    <input
+                      type="color"
+                      value={documentStyle.headingColor}
+                      onChange={(event) =>
+                        setDocumentStyle((current) => ({ ...current, headingColor: event.target.value }))
+                      }
+                    />
+                  </label>
+                  <label className={styles.colorField}>
+                    <span>Table header colour</span>
+                    <input
+                      type="color"
+                      value={documentStyle.tableHeaderColor}
+                      onChange={(event) =>
+                        setDocumentStyle((current) => ({ ...current, tableHeaderColor: event.target.value }))
+                      }
+                    />
+                  </label>
+                </div>
+                <div
+                  className={styles.documentStylePreview}
+                  style={{
+                    "--document-preview-font": documentStyle.fontFamily,
+                    "--document-preview-text": documentStyle.bodyTextColor,
+                    "--document-preview-heading": documentStyle.headingColor,
+                    "--document-preview-table": documentStyle.tableHeaderColor,
+                  } as CSSProperties}
+                >
+                  <div>
+                    <h3>Document heading</h3>
+                    <p>Body text and tables will use this profile across Finley generated documents.</p>
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Table header</th>
+                        <th>Example</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Body row</td>
+                        <td>$1,000.00</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => setDocumentStyle(DEFAULT_DOCUMENT_STYLE_PROFILE)}
+                >
+                  Reset document style
+                </button>
               </div>
-              <label className={styles.checkboxRow}>
-                <input type="checkbox" checked={compactLists} onChange={(event) => setCompactLists(event.target.checked)} />
-                <span>Use compact list spacing where available</span>
-              </label>
             </div>
           ) : null}
 

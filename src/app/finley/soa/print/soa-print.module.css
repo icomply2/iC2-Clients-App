@@ -1,14 +1,39 @@
 .previewPage {
+  --soa-page-width: 210mm;
+  --soa-page-min-height: 297mm;
+  --soa-page-padding: 18mm 16mm 20mm;
+  --soa-font-family: "Titillium Web", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --soa-text-color: #2F4A6D;
+  --soa-heading-color: #B3742A;
+  --soa-table-header-bg: #faf7eb;
+  --soa-table-header-text: #113864;
+
+  font-family: var(--soa-font-family);
+  color: var(--soa-text-color);
   min-height: 100vh;
   background:
     linear-gradient(180deg, #f6f1e6 0%, #f7f7f3 16rem, #eef2f7 100%);
   padding: 1.5rem;
 }
 
+.previewPageEmbedded {
+  --soa-page-padding: 14mm 12mm 16mm;
+
+  min-height: 100%;
+  padding: 0.85rem;
+  background: #f8fafc;
+}
+
 .previewShell,
 .document {
-  max-width: 960px;
+  width: var(--soa-page-width);
+  max-width: var(--soa-page-width);
   margin: 0 auto;
+}
+
+.previewPageEmbedded .previewShell,
+.previewPageEmbedded .document {
+  max-width: none;
 }
 
 .toolbar {
@@ -32,23 +57,54 @@
 
 .document {
   display: grid;
-  gap: 1rem;
+  gap: 1.25rem;
 }
 
 .page {
   position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--soa-page-min-height);
   background: #fff;
   border: 0;
   border-radius: 1rem;
-  padding: 2rem 3.2rem 3.4rem;
+  padding: var(--soa-page-padding);
   box-shadow: 0 18px 45px rgba(17, 56, 100, 0.08);
   break-after: page;
+  page-break-after: always;
+  overflow: visible;
+  color: var(--soa-text-color);
+}
+
+.previewPageEmbedded .page {
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  box-shadow: none;
+}
+
+.previewPageEmbedded .pageNumber {
+  right: 12mm;
+  bottom: 10mm;
+}
+
+.previewPageEmbedded .letterTitle,
+.previewPageEmbedded .contentsTitle {
+  font-size: 1.85rem;
+}
+
+.previewPageEmbedded .sectionHeading {
+  font-size: 1.7rem;
+}
+
+.previewPageEmbedded .coverSummary h2,
+.previewPageEmbedded .inlineSectionHeading {
+  font-size: 1.55rem;
 }
 
 .pageNumber {
   position: absolute;
-  right: 3.2rem;
-  bottom: 1.35rem;
+  right: 16mm;
+  bottom: 10mm;
   color: #6b7280;
   font-size: 0.88rem;
   font-weight: 700;
@@ -89,7 +145,7 @@
 .letterTitle {
   margin: 0;
   color: #111827;
-  font-size: 2rem;
+  font-size: 2.45rem;
   line-height: 1.15;
 }
 
@@ -111,12 +167,13 @@
 
 .coverPage {
   min-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  background:
-    radial-gradient(circle at top right, rgba(242, 197, 0, 0.12), transparent 20rem),
-    linear-gradient(180deg, #fff 0%, #fbfcfe 100%);
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  gap: 1.15rem;
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+  background: #fff;
 }
 
 .contentsPage {
@@ -174,27 +231,100 @@
   height: 1px;
 }
 
-.coverEyebrow {
-  color: #8a6d00;
-  font-size: 0.88rem;
+.coverTitle {
+  margin: 0;
+  color: #003366;
+  font-size: 3rem;
   font-weight: 800;
-  letter-spacing: 0.14em;
+  line-height: 1.12;
+}
+
+.coverLogoMark {
+  display: grid;
+  place-items: center;
+  width: 7.4rem;
+  height: 7.4rem;
+  margin: 0.15rem 0;
+  border: 3px double #111827;
+  border-radius: 50%;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-align: center;
   text-transform: uppercase;
 }
 
-.coverTitle {
-  margin: 0;
-  color: #113864;
-  font-size: clamp(2.2rem, 5vw, 3.8rem);
-  line-height: 1.08;
+.coverLogoMark strong {
+  font-size: 2rem;
+  line-height: 0.9;
 }
 
-.coverMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.5rem;
-  color: #486581;
-  font-size: 0.98rem;
+.coverLogoImage {
+  display: block;
+  width: 9rem;
+  max-height: 7.5rem;
+  margin: 0.15rem 0;
+  object-fit: contain;
+}
+
+.coverTitleBlock {
+  margin-top: 0;
+}
+
+.coverPreparedBlock {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: center;
+  margin-top: 0.2rem;
+}
+
+.coverLabel {
+  color: #003366;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.coverPreparedName {
+  color: #003366;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.coverDetailLine,
+.coverDate {
+  color: #003366;
+  font-size: 1rem;
+}
+
+.coverDetailsGrid {
+  display: grid;
+  gap: 0.95rem;
+  justify-items: center;
+  margin-top: 0.4rem;
+}
+
+.coverDetailSection {
+  display: grid;
+  gap: 0.25rem;
+  justify-items: center;
+  color: #003366;
+}
+
+.coverDetailSection h2 {
+  margin: 0 0 0.05rem;
+  color: #003366;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.coverDetailSection p {
+  margin: 0;
+  color: #003366;
+  font-size: 1rem;
+  line-height: 1.35;
 }
 
 .coverSummary,
@@ -208,17 +338,34 @@
   background: #fff;
 }
 
+.coverSummary,
+.recommendationBlock,
+.allocationChartWrap {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 .coverSummary h2,
 .card h3,
 .recommendationBlock h3 {
   margin: 0;
   color: #113864;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.coverSummary h2 {
+  font-size: 2.05rem;
+  line-height: 1.12;
 }
 
 .sectionHeading {
-  margin: 0 0 1rem;
+  margin: 0 1.05rem 1.35rem;
   color: #113864;
-  font-size: 1.6rem;
+  font-size: 2.15rem;
+  line-height: 1.12;
+  break-after: avoid;
+  page-break-after: avoid;
 }
 
 .subheading {
@@ -228,7 +375,7 @@
 }
 
 .sectionIntro {
-  margin: 0 0 1rem;
+  margin: 0 1.05rem 1rem;
   color: #334e68;
   line-height: 1.7;
 }
@@ -252,9 +399,10 @@
 }
 
 .inlineSectionHeading {
-  margin: 0;
+  margin: 0 1.05rem;
   color: #113864;
-  font-size: 1.35rem;
+  font-size: 1.85rem;
+  line-height: 1.14;
 }
 
 .bulletList {
@@ -273,26 +421,95 @@
   line-height: 1.7;
 }
 
+.warningDisclosureStack {
+  display: grid;
+  gap: 1rem;
+}
+
+.warningDisclosureBlock {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.warningDisclosureBlock h4 {
+  margin: 0;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.feeSubheading {
+  margin: 1.1rem 0 0;
+  color: #b3742a;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.portfolioAccountGroup {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.portfolioAccountGroup + .portfolioAccountGroup {
+  margin-top: 1.25rem;
+}
+
+.portfolioAccountGroup h4 {
+  margin: 0.25rem 0 0;
+  color: var(--soa-text-color);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.accountSectionHeading {
+  margin: 0;
+  color: var(--soa-text-color);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.allocationAccountChart {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.table thead {
+  display: table-header-group;
+}
+
+.table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 .totalRow td {
   border-top: 2px solid #d5dde7;
 }
 
-.allocationTotalRow td {
-  background: #113864;
-  color: #fff;
-  font-weight: 700;
-  border-bottom-color: #113864;
-}
-
 .platformColumnHeadingRow td {
   background: #fff;
   color: #486581;
   font-weight: 700;
+}
+
+.platformSubheadingRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+}
+
+.platformSubtotalRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
 }
 
 .table th,
@@ -318,68 +535,333 @@
   line-height: 1.45;
 }
 
-.allocationChartWrap {
+.targetAllocationCell {
+  text-align: center !important;
+}
+
+.mutedText {
+  color: #718096;
+  font-size: 0.82rem;
+}
+
+.table .allocationTotalRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+  border-top: 2px solid #d5dde7;
+  border-bottom-color: #e7edf4;
+}
+
+.insuranceCommissionTable th {
+  background: #faf7eb;
+  color: #113864;
+  text-align: center;
+  border-bottom-color: #e7edf4;
+}
+
+.insuranceCommissionTable th:first-child {
+  text-align: left;
+}
+
+.insuranceCommissionTable td:not(:first-child) {
+  text-align: right;
+}
+
+.insuranceCommissionOwnerRow td {
+  background: #fff;
+  color: #113864;
+  font-weight: 800;
+}
+
+.insuranceCommissionTotalRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+  border-top: 2px solid #d5dde7;
+  border-bottom-color: #e7edf4;
+}
+
+.insuranceCommissionNotes {
   display: grid;
-  gap: 1.25rem;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  align-items: center;
+  gap: 0.75rem;
+}
+
+.insuranceCommissionNotes p {
+  margin: 0;
+  color: #334e68;
+  line-height: 1.6;
+}
+
+.insurancePolicyHeader {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #d5dde7;
+  background: #faf7eb;
+  color: #113864;
+}
+
+.insurancePolicyHeader div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.insurancePolicyHeader span {
+  color: #334e68;
+}
+
+.insurancePolicyGroup {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.insurancePolicyGroup h4 {
+  margin: 0.75rem 0 0;
+  color: var(--soa-heading-color, #b3742a);
+  font-size: 1rem;
+}
+
+.twoColumnGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.allocationChartWrap {
+  display: flex;
+  justify-content: center;
 }
 
 .allocationPieChart {
   width: 100%;
   max-width: 260px;
   height: auto;
-  justify-self: center;
-}
-
-.allocationPieLabel {
-  fill: #486581;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.allocationPieValue {
-  fill: #113864;
-  font-size: 1rem;
-  font-weight: 800;
 }
 
 .allocationLegend {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.5rem 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0.35rem auto 0;
+  max-width: 30rem;
+  width: 100%;
 }
 
 .allocationLegendItem {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.65rem;
+  gap: 0.5rem;
   align-items: center;
+  color: #334e68;
+  font-size: 0.92rem;
+  line-height: 1.25;
 }
 
 .allocationLegendSwatch {
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 0.2rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 0.18rem;
 }
 
-.allocationLegendText {
-  color: #334e68;
-  font-size: 0.92rem;
-  line-height: 1.4;
+.allocationLegendLabel {
+  min-width: 0;
 }
 
 .allocationLegendValue {
   color: #113864;
-  font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .emptyState {
   margin: 0;
   color: #7b8794;
   font-style: italic;
+}
+
+.actionsRequiredBody {
+  display: grid;
+  gap: 1rem;
+  margin: 0 1.05rem;
+  color: #334e68;
+  line-height: 1.65;
+}
+
+.actionsRequiredBody p {
+  margin: 0;
+}
+
+.actionsRequiredList {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.actionsRequiredList li {
+  padding-left: 0.2rem;
+}
+
+.authorityIntro,
+.authorityText,
+.authorityVariationBox,
+.authoritySignatureGrid {
+  margin: 0 1.05rem 1.15rem;
+}
+
+.authorityIntro {
+  display: grid;
+  gap: 0.25rem;
+  color: #111827;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.authorityText {
+  display: grid;
+  gap: 0.75rem;
+  color: #334e68;
+  line-height: 1.65;
+}
+
+.authorityText p,
+.authorityVariationBox p {
+  margin: 0;
+}
+
+.authorityDisclosureList {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.authorityDisclosureList li {
+  padding-left: 0.2rem;
+}
+
+.authorityVariationBox {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid #d5dde7;
+  border-radius: 0.45rem;
+  background: #fbfcfe;
+}
+
+.authorityVariationBox h3 {
+  margin: 0;
+  color: #113864;
+  font-size: 1rem;
+}
+
+.authorityVariationLines {
+  display: grid;
+  gap: 1rem;
+  padding-top: 0.35rem;
+}
+
+.authorityVariationLines span {
+  display: block;
+  min-height: 1.35rem;
+  border-bottom: 1px solid #9aa6b2;
+}
+
+.authoritySignatureGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  padding-top: 0.85rem;
+}
+
+.authoritySignatureBlock {
+  display: grid;
+  gap: 0.8rem;
+  color: #111827;
+}
+
+.authoritySignatureBlock:only-child {
+  max-width: 22rem;
+}
+
+.serviceAgreementIntro,
+.serviceAgreementBody {
+  margin: 0 1.05rem 1.15rem;
+}
+
+.serviceAgreementIntro {
+  display: grid;
+  gap: 0.25rem;
+  color: #111827;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.serviceAgreementBody {
+  display: grid;
+  gap: 1rem;
+  color: #334e68;
+  line-height: 1.65;
+}
+
+.serviceAgreementBody p,
+.serviceAgreementTextBlock p {
+  margin: 0;
+}
+
+.serviceAgreementTextBlock {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.serviceAgreementTextBlock h3 {
+  margin: 0;
+  color: #113864;
+  font-size: 1rem;
+}
+
+.serviceAgreementServices {
+  display: grid;
+  gap: 1.05rem;
+}
+
+.serviceAgreementServiceGroup {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.serviceAgreementServiceGroup h4 {
+  margin: 0;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.serviceAgreementServiceGroup .bulletList {
+  margin-top: 0;
+}
+
+.appendixSubsection {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.45rem;
+}
+
+.appendixSubsection h4 {
+  margin: 0;
+  color: #113864;
+  font-size: 1rem;
+}
+
+.authoritySignatureLine {
+  min-height: 2.2rem;
+  padding-top: 0.35rem;
+  border-bottom: 1px solid #111827;
+}
+
+.authoritySignatureName {
+  color: #334e68;
+  font-weight: 700;
 }
 
 .emptyCard {
@@ -398,22 +880,92 @@
   font-size: 1.8rem;
 }
 
+.previewPage h1,
+.previewPage h2,
+.previewPage h3,
+.previewPage h4,
+.previewPage p,
+.previewPage li,
+.previewPage td,
+.previewPage .letterDate,
+.previewPage .letterAddressBlock,
+.previewPage .letterGreeting,
+.previewPage .letterBody,
+.previewPage .letterSignatureBlock,
+.previewPage .contentsEyebrow,
+.previewPage .contentsIndex,
+.previewPage .contentsLabel,
+.previewPage .coverEyebrow,
+.previewPage .coverMeta,
+.previewPage .coverLabel,
+.previewPage .coverPreparedName,
+.previewPage .coverDetailLine,
+.previewPage .coverDate,
+.previewPage .coverDetailSection,
+.previewPage .coverLogoMark,
+.previewPage .sectionIntro,
+.previewPage .bulletList,
+.previewPage .recommendationText,
+.previewPage .emptyState,
+.previewPage .actionsRequiredBody,
+.previewPage .authorityIntro,
+.previewPage .authorityText,
+.previewPage .insuranceCommissionNotes p {
+  color: var(--soa-text-color);
+  font-family: var(--soa-font-family);
+}
+
+.previewPage h1,
+.previewPage h2,
+.previewPage h3 {
+  color: var(--soa-heading-color);
+}
+
+.previewPage .signatureMark {
+  color: var(--soa-text-color);
+}
+
+.previewPage .letterTitle,
+.previewPage .coverTitle,
+.previewPage .contentsTitle,
+.previewPage .sectionHeading,
+.previewPage .inlineSectionHeading,
+.previewPage .emptyTitle {
+  color: var(--soa-heading-color);
+}
+
+.previewPage .feeSubheading {
+  color: var(--soa-heading-color);
+}
+
+.previewPage .table th,
+.previewPage .insuranceCommissionTable th {
+  background: var(--soa-table-header-bg);
+  color: var(--soa-table-header-text);
+}
+
+.previewPage .totalRow td,
+.previewPage .insuranceCommissionTotalRow td,
+.previewPage .table .allocationTotalRow td {
+  background: var(--soa-table-header-bg);
+  color: var(--soa-table-header-text);
+  border-bottom-color: #e7edf4;
+}
+
 @media (max-width: 800px) {
   .previewPage {
     padding: 1rem;
-  }
-
-  .page {
-    padding: 1.2rem;
   }
 
   .twoColumn {
     grid-template-columns: 1fr;
   }
 
-  .allocationChartWrap {
-    grid-template-columns: 1fr;
-  }
+}
+
+@page {
+  size: A4;
+  margin: 0;
 }
 
 @media print {
@@ -427,20 +979,25 @@
   }
 
   .document {
+    display: block;
+    width: auto;
     max-width: none;
     gap: 0;
   }
 
   .page {
+    width: auto;
+    min-height: 297mm;
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    padding: 1.6cm 1.4cm;
+    padding: 18mm 16mm 20mm;
     page-break-after: always;
     break-after: page;
   }
 
-  .coverPage {
-    min-height: auto;
+  .page:first-child {
+    break-before: auto;
+    page-break-before: auto;
   }
 }

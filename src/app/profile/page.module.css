@@ -166,6 +166,11 @@
   gap: 0.9rem 1rem;
 }
 
+.preferenceStack {
+  display: grid;
+  gap: 1rem;
+}
+
 .accountSectionStack {
   display: grid;
   gap: 1rem;
@@ -206,6 +211,70 @@
   font: inherit;
 }
 
+.documentStyleGrid {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1.3fr) repeat(3, minmax(8rem, 0.7fr));
+  gap: 0.9rem 1rem;
+  align-items: end;
+}
+
+.colorField {
+  display: grid;
+  gap: 0.35rem;
+  color: #102a56;
+  font-size: 0.88rem;
+}
+
+.colorField input {
+  width: 100%;
+  min-height: 2.45rem;
+  padding: 0.25rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.3rem;
+  background: #fff;
+}
+
+.documentStylePreview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 0.85fr);
+  gap: 1rem;
+  align-items: start;
+  padding: 1rem;
+  border: 1px solid #d8dee6;
+  border-radius: 0.35rem;
+  color: var(--document-preview-text);
+  font-family: var(--document-preview-font);
+}
+
+.documentStylePreview h3 {
+  margin: 0 0 0.5rem;
+  color: var(--document-preview-heading);
+  font-size: 1.15rem;
+}
+
+.documentStylePreview p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.documentStylePreview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.documentStylePreview th,
+.documentStylePreview td {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #d8dee6;
+  text-align: left;
+}
+
+.documentStylePreview th {
+  background: var(--document-preview-table);
+  color: #102a56;
+}
+
 .logoUploadField input[type="file"] {
   min-height: auto;
   padding: 0.6rem 0;
@@ -217,6 +286,28 @@
 .uploadMeta {
   color: #66788a;
   font-size: 0.84rem;
+}
+
+.imagePreview,
+.letterheadPreview {
+  display: block;
+  max-width: 100%;
+  border: 1px solid #d8dee6;
+  border-radius: 0.35rem;
+  background: #fff;
+  object-fit: contain;
+}
+
+.imagePreview {
+  width: 10rem;
+  max-height: 7rem;
+  padding: 0.35rem;
+}
+
+.letterheadPreview {
+  width: 100%;
+  max-height: 10rem;
+  padding: 0.5rem;
 }
 
 .securityGrid {
@@ -439,6 +530,8 @@
   }
 
   .panelGrid,
+  .documentStyleGrid,
+  .documentStylePreview,
   .securityGrid,
   .integrationGrid,
   .integrationCard {

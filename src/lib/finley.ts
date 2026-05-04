@@ -15,6 +15,7 @@ import type {
   UserSummary,
 } from "@/lib/api/types";
 import { readAuthTokenFromCookies } from "@/lib/auth";
+import { resolveCurrentUserFromApi } from "@/lib/current-user";
 import { API_BASE_URL } from "@/app/api/client-profiles/_shared";
 import { createFileNote as createFileNoteAction } from "@/lib/services/file-notes";
 import {
@@ -542,20 +543,8 @@ function makeId(prefix: string) {
 }
 
 async function loadCurrentUser(token: string): Promise<UserSummary | null> {
-  if (!API_BASE_URL) return null;
-
   try {
-    const response = await fetch(new URL("/api/Users", API_BASE_URL), {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
-
-    const body = (await response.json().catch(() => null)) as { data?: UserSummary[] | null } | null;
-    return response.ok && body?.data?.length ? (body.data[0] ?? null) : null;
+    return await resolveCurrentUserFromApi(token);
   } catch {
     return null;
   }
@@ -3297,6 +3286,95 @@ function buildPlanStep(
   };
 }
 
+function isFinleyCapabilityQuestion(message: string) {
+  const lower = message.toLowerCase().trim();
+
+  return (
+    /\b(?:who are you|what are you|what is your name|what's your name|your name)\b/.test(lower) ||
+    /\b(?:how can you help|what can you help with|what can you do|what do you do|what should i do next|what are you able to do|help me|your capabilities|what are your capabilities|introduce yourself|tell me about yourself)\b/.test(lower)
+  );
+}
+
+function normaliseConversationalMessage(message: string) {
+  return message
+    .toLowerCase()
+    .replace(/[’']/g, "'")
+    .replace(/[^\w\s']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isCasualConversationMessage(message: string) {
+  const lower = normaliseConversationalMessage(message);
+
+  return (
+    /^(?:hi|hello|hey|hiya|morning|good morning|good afternoon|good evening)(?:\s+(?:finley|finly|finey))?$/.test(lower) ||
+    /^(?:thanks|thank you|cheers|ta|no worries|all good)(?:\s+(?:finley|finly|finey))?$/.test(lower) ||
+    /^(?:ok|okay|cool|great|nice|awesome|perfect|sounds good)$/.test(lower) ||
+    /^(?:how are you|how's it going|how are you going|you there|are you there)(?:\s+(?:finley|finly|finey))?$/.test(lower)
+  );
+}
+
+function firstName(value?: string | null) {
+  return value?.trim().split(/\s+/)[0] ?? null;
+}
+
+function userPracticeLabel(user?: UserSummary | null) {
+  const practiceName = user?.practice?.name?.trim();
+  const licenseeName = user?.licensee?.name?.trim();
+
+  if (practiceName && licenseeName) {
+    return `${practiceName}, under ${licenseeName}`;
+  }
+
+  return practiceName || licenseeName || null;
+}
+
+function buildFinleyCapabilityMessage(clientName: string, hasClient: boolean, currentUser?: UserSummary | null) {
+  const userName = currentUser?.name?.trim();
+  const userFirstName = firstName(userName);
+  const practiceLabel = userPracticeLabel(currentUser);
+  const greeting = userFirstName ? `Hi ${userFirstName}. I'm Finley, your advice practice concierge inside iC2.` : "I'm Finley, your advice practice concierge inside iC2.";
+  const userContext = userName
+    ? practiceLabel
+      ? `I can see you're signed in as ${userName} from ${practiceLabel}.`
+      : `I can see you're signed in as ${userName}.`
+    : "I can use your signed-in adviser profile when it is available.";
+  const clientContext = hasClient
+    ? `Right now I'm working in the context of ${clientName}.`
+    : "Once you select a client, I can work in that client's context.";
+
+  return [
+    greeting,
+    userContext,
+    clientContext,
+    "I can help with everyday adviser tasks like updating a fact find, checking missing client information, creating file notes, summarising uploaded documents or meeting transcripts, preparing engagement letters, preparing Records of Advice, drafting service agreements, and creating invoices.",
+    "When you upload files, I can detect documents such as fact finds, meeting transcripts, insurance quotes, ProductRex reports, strategy papers, and service agreements, then suggest the most useful next step.",
+    "For anything that changes a client record or creates a document record, I'll show you the proposed update first so you can review and approve it.",
+  ].join("\n\n");
+}
+
+function buildFinleyCasualMessage(message: string, clientName: string, hasClient: boolean, currentUser?: UserSummary | null) {
+  const lower = normaliseConversationalMessage(message);
+  const userFirstName = firstName(currentUser?.name);
+  const greetingName = userFirstName ? ` ${userFirstName}` : "";
+  const clientContext = hasClient ? `I’m here with ${clientName} loaded.` : "I’m here. Select a client when you’re ready and I’ll work in that context.";
+
+  if (/^(?:thanks|thank you|cheers|ta|no worries|all good)/.test(lower)) {
+    return `No worries${greetingName}. ${clientContext}`;
+  }
+
+  if (/^(?:ok|okay|cool|great|nice|awesome|perfect|sounds good)$/.test(lower)) {
+    return `Great${greetingName}. ${clientContext} Tell me what you’d like to work on next, or upload a file and I’ll suggest the next useful step.`;
+  }
+
+  if (/^(?:how are you|how's it going|how are you going|you there|are you there)/.test(lower)) {
+    return `I’m here and ready to help${greetingName}. ${clientContext} You can ask me naturally, like “create a file note”, “prepare an engagement letter”, or “check what’s missing for this client”.`;
+  }
+
+  return `Hi${greetingName}, I’m here. ${clientContext} You can ask me naturally, or upload documents and I’ll help work out the next step.`;
+}
+
 function buildCollectionUpdatePlanResponse(
   base: Omit<FinleyChatResponse, "status" | "responseMode" | "assistantMessage" | "plan" | "results" | "missingInformation" | "warnings" | "errors" | "suggestedActions">,
   liveContext: LiveContext,
@@ -4115,6 +4193,42 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
       missingInformation: [{ field: "message", question: "What would you like Finley to do?" }],
       warnings: [],
       errors: [{ code: "EMPTY_MESSAGE", message: "A chat message is required.", retryable: true }],
+      suggestedActions: [],
+    };
+  }
+
+  if (isFinleyCapabilityQuestion(message)) {
+    return {
+      ...base,
+      status: "completed",
+      responseMode: "inform",
+      assistantMessage: buildFinleyCapabilityMessage(clientName, Boolean(liveContext.resolvedClientId), liveContext.currentUser),
+      plan: null,
+      results: [],
+      missingInformation: liveContext.resolvedClientId
+        ? []
+        : [{ field: "activeClientId", question: "Select a client so Finley can work in the correct client context." }],
+      warnings: [],
+      errors: [],
+      displayCard: null,
+      editorCard: null,
+      suggestedActions: [],
+    };
+  }
+
+  if (isCasualConversationMessage(message)) {
+    return {
+      ...base,
+      status: "completed",
+      responseMode: "inform",
+      assistantMessage: buildFinleyCasualMessage(message, clientName, Boolean(liveContext.resolvedClientId), liveContext.currentUser),
+      plan: null,
+      results: [],
+      missingInformation: [],
+      warnings: [],
+      errors: [],
+      displayCard: null,
+      editorCard: null,
       suggestedActions: [],
     };
   }

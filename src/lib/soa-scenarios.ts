@@ -34,10 +34,19 @@ export type SoaScenarioDraftValue = {
   riskProfilesByPerson: Record<string, RiskProfileV1>;
 };
 
+export type SoaScenarioStatus = "Draft" | "In progress" | "Ready for review" | "Finalised";
+
+export const soaScenarioStatuses: SoaScenarioStatus[] = [
+  "Draft",
+  "In progress",
+  "Ready for review",
+  "Finalised",
+];
+
 export type SoaScenario = {
   id: string;
   name: string;
-  status: "Draft";
+  status: SoaScenarioStatus;
   createdAt: string;
   updatedAt: string;
   draft: SoaScenarioDraftValue | null;
