@@ -1,0 +1,34 @@
+{
+  "name": "Anthony Lyon",
+  "email": "anthony.lyon@insightmp.com.au",
+  "dateOfBirth": "1983-03-09T14:00:00.000Z",
+  "address": {
+    "street": "Level 10, 60 York Street",
+    "suburb": "SYDNEY",
+    "state": "NSW",
+    "postCode": "2000",
+    "country": null
+  },
+  "acn": null,
+  "abn": null,
+  "asicNumber": null,
+  "occupation": "Compliance Manager",
+  "adviserExperience": null,
+  "businessName": null,
+  "profilePhoto": "//b89e102ca9987036348701a7d0caafc3.cdn.bubble.io/f1755125462924x524728060991246340/AL%20Linkedin.jfif",
+  "practiceLetterHead": "//s3.amazonaws.com/appforest_uf/f1615780802533x804271420598954200/IIP%20Letterhead.jpg",
+  "practiceLogo": "//s3.amazonaws.com/appforest_uf/f1615780829586x333365601995695400/IIP%20Logo.jpg",
+  "phoneNumber": null,
+  "officeNumber": null,
+  "website": "www.insightmp.com.au",
+  "xplanSite": null,
+  "practiceName": "IIP Asset Management",
+  "licenseeName": "Insight Investment Partners",
+  "complianceManagerName": "Anthony Lyon",
+  "documentStyleProfile": {
+    "fontFamily": "\"Titillium Web\", \"Segoe UI\", \"Helvetica Neue\", Arial, sans-serif",
+    "bodyTextColor": "#000000",
+    "headingColor": "#B3742A",
+    "tableHeaderColor": "#756629"
+  }
+}
