@@ -44,7 +44,7 @@ const productDraftJsonSchema = {
           properties: {
             action: {
               type: "string",
-              enum: ["obtain", "retain", "replace", "rollover", "dispose"],
+              enum: ["obtain", "retain", "replace", "rollover", "consolidate", "dispose"],
             },
             productType: {
               type: "string",
@@ -181,6 +181,7 @@ function normalizeProductDrafts(value: unknown): ProductRecommendationDraftV1[] 
         entry.action === "retain" ||
         entry.action === "replace" ||
         entry.action === "rollover" ||
+        entry.action === "consolidate" ||
         entry.action === "dispose"
           ? entry.action
           : "retain"
@@ -267,9 +268,13 @@ async function requestOpenAiProductDrafts(
             "You are Finley, an AI assistant helping an Australian financial adviser prepare a Statement of Advice.",
             "Draft product recommendations only and return JSON matching the provided schema.",
             "Write as an adviser-assistant reasoning about this specific client and their likely product needs, not as a generic product marketing template.",
+            "Write all recommendationText, clientBenefits, suitabilityRationale, consequences, and alternativesConsidered.reasonDiscounted in second person, addressed directly to the client using 'you' and 'your'.",
+            "Do not write about the client in third person using wording such as 'Guy's superannuation', 'their objectives', 'the client will benefit', 'he', 'she', or 'they'.",
+            "For joint clients, use 'you' and 'your' as the collective addressee. Use names only where needed to identify account ownership, policy ownership, or which person will take a specific action, then return to second-person wording.",
             "Every recommendation must explain the current position where known, the proposed product direction, and why the recommendation is suitable for this client's goals and circumstances.",
             "For each recommendation:",
-            "- state the action clearly (retain, replace, rollover, obtain, or dispose)",
+            "- state the action clearly (retain, replace, rollover, consolidate, obtain, or dispose)",
+            "- use consolidate when multiple existing funds or accounts are being consolidated into one recommended fund or account",
             "- explain how the recommendation supports the client's objectives",
             "- explain why the current position may be less suitable where relevant",
             "- include meaningful benefits specific to this matter",

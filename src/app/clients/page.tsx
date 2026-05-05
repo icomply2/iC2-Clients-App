@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { AppTopbar } from "@/components/app-topbar";
+import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import styles from "./page.module.css";
@@ -21,36 +22,6 @@ type CurrentUserScope = {
   userRole?: string | null;
   practice?: { id?: string | null; name?: string | null } | null;
   licensee?: { id?: string | null; name?: string | null } | null;
-};
-
-type CreateClientAdviserOption = {
-  id: string;
-  entityId: string;
-  name: string;
-  email: string;
-};
-
-type CreatedClientResponse = {
-  id?: string | null;
-  client?: { id?: string | null; name?: string | null } | null;
-  partner?: { id?: string | null; name?: string | null } | null;
-  adviser?: {
-    id?: string | null;
-    entity?: string | null;
-    name?: string | null;
-    email?: string | null;
-  } | null;
-  name?: string | null;
-  clientAdviserName?: string | null;
-  clientAdviserPracticeName?: string | null;
-  clientAdviserLicenseeName?: string | null;
-};
-
-type CreateClientResult = {
-  status?: boolean | null;
-  message?: string | null;
-  modelErrors?: { propertyName?: string | null; errorMessage?: string | null }[] | null;
-  data?: CreatedClientResponse | null;
 };
 
 function mapClientSummaryToRow(client: ClientSummary): ClientRow {
@@ -73,12 +44,19 @@ function filterRowsByPractice(rows: ClientRow[], practiceName?: string | null) {
   return rows.filter((row) => row.practice.trim().toLowerCase() === normalizedPractice);
 }
 
-function normalizeText(value?: string | null) {
-  return value?.trim().toLowerCase() ?? "";
-}
+function getMockClientRows(search: string, adviser: string, practiceName?: string | null) {
+  const normalizedSearch = search.trim().toLowerCase();
+  const rows = filterRowsByPractice(
+    mockClientSummaries.map(mapClientSummaryToRow),
+    practiceName,
+  );
 
-function getCreateClientAdviserOptionValue(option: CreateClientAdviserOption) {
-  return option.entityId || option.id || option.email || option.name;
+  return rows.filter((row) => {
+    const matchesSearch = !normalizedSearch || row.name.toLowerCase().includes(normalizedSearch);
+    const matchesAdviser = adviser === "All advisers" || row.adviser === adviser;
+
+    return matchesSearch && matchesAdviser;
+  });
 }
 
 function ClientsPageContent() {
@@ -100,19 +78,20 @@ function ClientsPageContent() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingClient, setIsDeletingClient] = useState(false);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
-  const [newClientName, setNewClientName] = useState("");
-  const [newPartnerName, setNewPartnerName] = useState("");
-  const [newClientAdviserValue, setNewClientAdviserValue] = useState("");
-  const [createClientAdviserOptions, setCreateClientAdviserOptions] = useState<CreateClientAdviserOption[]>([]);
-  const [newClientPracticeName, setNewClientPracticeName] = useState("");
-  const [newClientError, setNewClientError] = useState<string | null>(null);
-  const [creatingClient, setCreatingClient] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadClients() {
       if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
+        const fallbackRows = getMockClientRows(search, adviser, currentUserScope?.practice?.name);
+
+        if (isMounted) {
+          setClients(fallbackRows.slice((currentPage - 1) * pageSize, currentPage * pageSize));
+          setNextContinuationToken(null);
+          setTotalPages(Math.max(Math.ceil(fallbackRows.length / pageSize), 1));
+        }
+
         return;
       }
 
@@ -263,19 +242,25 @@ function ClientsPageContent() {
       return;
     }
 
-    setNewClientName("");
-    setNewPartnerName("");
-    setNewClientAdviserValue("");
-    setNewClientPracticeName(currentUserScope?.practice?.name ?? "");
-    setNewClientError(null);
     setIsCreateClientOpen(true);
-  }, [currentUserScope?.practice?.name, searchParams]);
+  }, [searchParams]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadAdvisers() {
       if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
+        const names = filterRowsByPractice(
+          mockClientSummaries.map(mapClientSummaryToRow),
+          currentUserScope?.practice?.name,
+        )
+          .map((client) => client.adviser.trim())
+          .filter(Boolean);
+
+        if (isMounted) {
+          setAdviserOptions(["All advisers", ...Array.from(new Set(names)).sort((left, right) => left.localeCompare(right))]);
+        }
+
         return;
       }
 
@@ -340,168 +325,6 @@ function ClientsPageContent() {
       isMounted = false;
     };
   }, [clients, currentUserScope]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function loadCreateClientAdvisers() {
-      const practiceName = currentUserScope?.practice?.name?.trim();
-      const normalizedPracticeName = practiceName?.toLowerCase();
-      const licenseeName = currentUserScope?.licensee?.name?.trim();
-
-      if (!normalizedPracticeName) {
-        if (isMounted) {
-          setCreateClientAdviserOptions([]);
-        }
-        return;
-      }
-
-      try {
-        const usersResponse = await fetch("/api/users", {
-          method: "GET",
-          cache: "no-store",
-        });
-
-        const usersBody = (await usersResponse.json().catch(() => null)) as
-          | {
-              data?:
-                | Array<{
-                    id?: string | null;
-                    entityId?: string | null;
-                    name?: string | null;
-                    email?: string | null;
-                    userRole?: string | null;
-                    practice?: { name?: string | null } | null;
-                  }>
-                | null;
-              message?: string;
-            }
-          | null;
-
-        if (!usersResponse.ok) {
-          throw new Error(usersBody?.message ?? `Request failed with status ${usersResponse.status}.`);
-        }
-
-        const scopedUserAdvisers = (usersBody?.data ?? [])
-          .filter((user) => user.name)
-          .filter((user) => normalizeText(user.userRole) === "adviser")
-          .filter((user) => normalizeText(user.practice?.name) === normalizedPracticeName)
-          .map((user) => ({
-            id: "",
-            entityId: user.entityId?.trim() ?? "",
-            name: user.name?.trim() ?? "",
-            email: user.email?.trim() ?? "",
-          }))
-          .filter((user) => user.name);
-
-        const adviserParams = new URLSearchParams();
-
-        if (licenseeName) {
-          adviserParams.set("licenseeName", licenseeName);
-        } else {
-          adviserParams.set("practiceName", practiceName ?? "");
-        }
-
-        const advisersResponse = await fetch(`/api/advisers?${adviserParams.toString()}`, {
-          method: "GET",
-          cache: "no-store",
-        });
-
-        const advisersBody = (await advisersResponse.json().catch(() => null)) as
-          | {
-              data?: AdviserSummary[] | null;
-              message?: string;
-            }
-          | null;
-
-        if (!advisersResponse.ok) {
-          throw new Error(advisersBody?.message ?? `Request failed with status ${advisersResponse.status}.`);
-        }
-
-        if (!isMounted) {
-          return;
-        }
-
-        const adviserRecords = (advisersBody?.data ?? [])
-          .filter((user) => user.id && user.name)
-          .map((user) => ({
-            id: user.id ?? "",
-            name: user.name?.trim() ?? "",
-            email: user.email?.trim() ?? "",
-            practiceName: user.practiceName?.trim() ?? "",
-          }))
-          .filter((user) => user.id && user.name);
-
-        const matchedAdvisers =
-          scopedUserAdvisers
-            .map((userAdviser) => {
-              const matchedRecord =
-                adviserRecords.find(
-                  (adviserRecord) =>
-                    userAdviser.email &&
-                    normalizeText(adviserRecord.email) === normalizeText(userAdviser.email),
-                ) ??
-                adviserRecords.find((adviserRecord) => normalizeText(adviserRecord.name) === normalizeText(userAdviser.name)) ??
-                null;
-
-              return matchedRecord
-                ? {
-                    id: matchedRecord.id,
-                    entityId: userAdviser.entityId,
-                    name: matchedRecord.name,
-                    email: matchedRecord.email,
-                  }
-                : userAdviser;
-            })
-            .filter((user) => user.name) ?? [];
-
-        const practiceScopedAdvisers = adviserRecords
-          .filter((user) => !user.practiceName || normalizeText(user.practiceName) === normalizedPracticeName)
-          .map((user) => ({
-            id: user.id,
-            entityId: "",
-            name: user.name,
-            email: user.email,
-          }));
-
-        const sourceOptions =
-          matchedAdvisers.length > 0
-            ? matchedAdvisers
-            : practiceScopedAdvisers.length > 0
-              ? practiceScopedAdvisers
-              : scopedUserAdvisers;
-
-        const deduped = Array.from(
-          new Map(
-            sourceOptions.map((user) => [`${normalizeText(user.name)}|${normalizeText(user.email)}`, user]),
-          ).values(),
-        ).sort((left, right) => left.name.localeCompare(right.name));
-
-        setCreateClientAdviserOptions(deduped);
-
-        setNewClientAdviserValue((current) => {
-          if (current && deduped.some((user) => getCreateClientAdviserOptionValue(user) === current)) {
-            return current;
-          }
-
-          const currentUserOption = deduped.find((user) => user.name === currentUserScope?.name);
-          return currentUserOption ? getCreateClientAdviserOptionValue(currentUserOption) : deduped[0] ? getCreateClientAdviserOptionValue(deduped[0]) : "";
-        });
-      } catch {
-        if (!isMounted) {
-          return;
-        }
-
-        setCreateClientAdviserOptions([]);
-      }
-    }
-
-    void loadCreateClientAdvisers();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [currentUserScope?.name, currentUserScope?.practice?.name]);
 
   function resetPagination() {
     setCurrentPage(1);
@@ -573,79 +396,17 @@ function ClientsPageContent() {
     params.delete("createClient");
     router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname);
     setIsCreateClientOpen(false);
-    setNewClientError(null);
   }
 
-  async function handleCreateClient() {
-    const primaryName = newClientName.trim();
+  function handleClientCreated(createdClient: CreatedClientResponse) {
+    const createdProfileId = createdClient.id?.trim() || "";
 
-    if (!primaryName) {
-      setNewClientError("Enter the primary client name to start a new client record.");
+    if (!createdProfileId) {
       return;
     }
 
-    setCreatingClient(true);
-    setNewClientError(null);
-
-    try {
-      const selectedAdviserOption =
-        createClientAdviserOptions.find((option) => getCreateClientAdviserOptionValue(option) === newClientAdviserValue) ??
-        createClientAdviserOptions[0] ??
-        null;
-
-      const response = await fetch("/api/client-profiles", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          practice: newClientPracticeName.trim() || currentUserScope?.practice?.name || "",
-          licensee: currentUserScope?.licensee?.name || "",
-          adviser: selectedAdviserOption
-            ? {
-                id: selectedAdviserOption.id || null,
-                entity: selectedAdviserOption.entityId || null,
-                name: selectedAdviserOption.name || null,
-                email: selectedAdviserOption.email || null,
-              }
-            : {},
-          client: {
-            name: primaryName,
-            status: "Client",
-            clientCategory: "Draft",
-          },
-          partner: newPartnerName.trim()
-            ? {
-                name: newPartnerName.trim(),
-                status: "Client",
-                clientCategory: "Draft",
-              }
-            : {},
-        }),
-        cache: "no-store",
-      });
-
-      const body = (await response.json().catch(() => null)) as CreateClientResult | null;
-
-      const createdProfileId = body?.data?.id?.trim() || "";
-      const modelErrorMessage = body?.modelErrors?.map((entry) => entry.errorMessage).filter(Boolean).join(", ");
-
-      if (!response.ok || body?.status === false || !createdProfileId) {
-        const fallbackMessage = body
-          ? `Create client failed (${response.status}): ${JSON.stringify(body)}`
-          : `Create client failed (${response.status}).`;
-
-        throw new Error(modelErrorMessage || body?.message || fallbackMessage);
-      }
-
-      closeCreateClientModal();
-      router.push(`/clients/${createdProfileId}`);
-      router.refresh();
-    } catch (error) {
-      setNewClientError(error instanceof Error ? error.message : "Unable to create the client profile.");
-    } finally {
-      setCreatingClient(false);
-    }
+    router.push(`/clients/${createdProfileId}`);
+    router.refresh();
   }
 
   return (
@@ -799,87 +560,12 @@ function ClientsPageContent() {
         </div>
       ) : null}
 
-      {isCreateClientOpen ? (
-        <div className={styles.modalOverlay} role="presentation" onClick={closeCreateClientModal}>
-          <div
-            className={styles.createClientModal}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-client-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 id="create-client-title" className={styles.createClientTitle}>
-              Create a new client or household in Finley
-            </h2>
-
-            <div className={styles.createClientGrid}>
-              <label className={styles.createClientField}>
-                <span className={styles.createClientLabel}>Primary client name</span>
-                <input
-                  className={styles.createClientInput}
-                  value={newClientName}
-                  onChange={(event) => setNewClientName(event.target.value)}
-                />
-              </label>
-              <label className={styles.createClientField}>
-                <span className={styles.createClientLabel}>Partner name</span>
-                <input
-                  className={styles.createClientInput}
-                  value={newPartnerName}
-                  onChange={(event) => setNewPartnerName(event.target.value)}
-                />
-              </label>
-            </div>
-
-            <label className={styles.createClientField}>
-              <span className={styles.createClientLabel}>Adviser</span>
-              <select
-                className={styles.createClientInput}
-                value={newClientAdviserValue}
-                onChange={(event) => setNewClientAdviserValue(event.target.value)}
-              >
-                {createClientAdviserOptions.length ? (
-                  createClientAdviserOptions.map((adviserOption) => (
-                    <option
-                      key={`${adviserOption.id}-${adviserOption.entityId}-${adviserOption.email}-${adviserOption.name}`}
-                      value={getCreateClientAdviserOptionValue(adviserOption)}
-                    >
-                      {adviserOption.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">{currentUserScope?.practice?.name ? "No advisers available in this practice" : "No practice selected"}</option>
-                )}
-              </select>
-            </label>
-
-            <label className={styles.createClientField}>
-              <span className={styles.createClientLabel}>Practice</span>
-              <input
-                className={styles.createClientInput}
-                value={newClientPracticeName}
-                onChange={(event) => setNewClientPracticeName(event.target.value)}
-              />
-            </label>
-
-            {newClientError ? <div className={styles.createClientError}>{newClientError}</div> : null}
-
-            <div className={styles.createClientActions}>
-              <button type="button" className={styles.createClientCancelButton} onClick={closeCreateClientModal}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={styles.createClientApproveButton}
-                onClick={() => void handleCreateClient()}
-                disabled={creatingClient}
-              >
-                {creatingClient ? "Creating..." : "Create and select"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <CreateClientDialog
+        isOpen={isCreateClientOpen}
+        currentUserScope={currentUserScope}
+        onClose={closeCreateClientModal}
+        onCreated={handleClientCreated}
+      />
     </div>
   );
 }

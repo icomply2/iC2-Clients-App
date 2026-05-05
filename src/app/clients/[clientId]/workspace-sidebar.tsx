@@ -136,7 +136,7 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
                     Record of Advice
                   </Link>
                   <Link
-                    href={`/clients/${clientId}/wizards/statement-of-advice`}
+                    href={`/clients/${encodeURIComponent(clientId)}?section=wizards-statement-of-advice`}
                     className={`${styles.subnavItem} ${section === "wizards-statement-of-advice" ? styles.subnavItemActive : ""}`.trim()}
                   >
                     Statement of Advice

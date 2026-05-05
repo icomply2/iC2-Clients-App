@@ -1,9 +1,10 @@
 import { DesktopBrokerLogo } from "@/components/desktop-broker-logo";
 import { Hub24Logo } from "@/components/hub24-logo";
 import { ProductRexLogo } from "@/components/product-rex-logo";
+import { XeroLogo } from "@/components/xero-logo";
 import styles from "../admin.module.css";
 
-const docmosisConfigured = Boolean(process.env.DOCMOSIS_API_URL && process.env.DOCMOSIS_ACCESS_KEY);
+const xeroConfigured = Boolean(process.env.XERO_CLIENT_ID && process.env.XERO_CLIENT_SECRET);
 
 export default function AdminIntegrationsPage() {
   return (
@@ -115,49 +116,46 @@ export default function AdminIntegrationsPage() {
 
       <section className={styles.integrationCard}>
         <div className={styles.integrationBrand}>
-          <div>
-            <p className={styles.eyebrow}>Docmosis</p>
-            <h3 className={styles.cardTitle}>Document generation</h3>
-          </div>
+          <XeroLogo className={styles.integrationLogo} />
         </div>
 
         <div className={styles.integrationDetails}>
           <div className={styles.contentCardHeader}>
             <div>
-              <h2 className={styles.cardTitle}>Docmosis</h2>
+              <h2 className={styles.cardTitle}>Xero</h2>
               <p className={styles.cardText}>
-                Central connection for merge template rendering across Fact Find, Engagement Letters, and invoices.
-                Template ownership will also sit under the dedicated Templates area next.
+                Accounting integration for creating invoices, syncing revenue line items, and supporting payment
+                reconciliation once adviser invoice workflows are approved.
               </p>
             </div>
 
-            <span className={styles.badge}>{docmosisConfigured ? "Configured" : "Needs configuration"}</span>
+            <span className={styles.badge}>{xeroConfigured ? "Configured" : "Needs configuration"}</span>
           </div>
 
           <div className={styles.integrationMetrics}>
             <div className={styles.integrationMetric}>
-              <span>API URL</span>
-              <strong>{process.env.DOCMOSIS_API_URL || "Not configured"}</strong>
+              <span>Type</span>
+              <strong>Accounting platform</strong>
             </div>
             <div className={styles.integrationMetric}>
-              <span>Fact Find template</span>
-              <strong>{process.env.DOCMOSIS_FACT_FIND_TEMPLATE_NAME || "Not configured"}</strong>
+              <span>Scope</span>
+              <strong>Practice or licensee</strong>
             </div>
             <div className={styles.integrationMetric}>
-              <span>Engagement template</span>
-              <strong>{process.env.DOCMOSIS_ENGAGEMENT_TEMPLATE_NAME || "Not configured"}</strong>
+              <span>Auth method</span>
+              <strong>OAuth 2.0</strong>
             </div>
             <div className={styles.integrationMetric}>
-              <span>Invoice template</span>
-              <strong>{process.env.DOCMOSIS_INVOICE_TEMPLATE_NAME || "Not configured"}</strong>
+              <span>Client ID</span>
+              <strong>{process.env.XERO_CLIENT_ID ? "Configured" : "Not configured"}</strong>
             </div>
             <div className={styles.integrationMetric}>
-              <span>Access key</span>
-              <strong>{process.env.DOCMOSIS_ACCESS_KEY ? "Configured" : "Missing"}</strong>
+              <span>Client secret</span>
+              <strong>{process.env.XERO_CLIENT_SECRET ? "Configured" : "Missing"}</strong>
             </div>
             <div className={styles.integrationMetric}>
               <span>Responsibility</span>
-              <strong>Admin + Templates</strong>
+              <strong>Admin + Invoices</strong>
             </div>
           </div>
         </div>

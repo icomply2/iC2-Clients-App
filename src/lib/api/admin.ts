@@ -41,6 +41,16 @@ export async function createAdminLicensee(payload: LicenseeDto) {
   return (await readResponse(response)) as ApiResult<LicenseeDto> | null;
 }
 
+export async function getAdminLicensee(licenseeId: string) {
+  const response = await fetch(`/api/admin/licensees/${encodeURIComponent(licenseeId)}`, {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  return (await readResponse(response)) as ApiResult<LicenseeDto> | null;
+}
+
 export async function updateAdminLicensee(licenseeId: string, payload: LicenseeDto) {
   const response = await fetch(`/api/admin/licensees/${encodeURIComponent(licenseeId)}`, {
     method: "PUT",

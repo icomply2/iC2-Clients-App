@@ -178,7 +178,7 @@ export type ProductAlternativeConsideredV1 = {
 
 export type ProductRecommendationV1 = {
   recommendationId: string;
-  action: "obtain" | "retain" | "replace" | "rollover" | "dispose";
+  action: "obtain" | "retain" | "replace" | "rollover" | "consolidate" | "dispose";
   productType: "super" | "pension" | "investment" | "annuity" | "insurance" | "other";
   recommendedProductName?: string | null;
   recommendedProvider?: string | null;
@@ -220,33 +220,59 @@ export type ReplacementRecommendationV1 = {
   rationale?: string | null;
 };
 
+export type PortfolioHoldingV1 = {
+  holdingId: string;
+  platformName?: string | null;
+  fundName: string;
+  code?: string | null;
+  currentAmount?: number | null;
+  changeAmount?: number | null;
+  proposedAmount?: number | null;
+  amount?: number | null;
+  investmentFeePct?: number | null;
+  investmentFeeAmount?: number | null;
+  transactionAmount?: number | null;
+  buySellSpreadPct?: number | null;
+  buySellSpreadAmount?: number | null;
+  brokerageAmount?: number | null;
+};
+
+export type PortfolioAllocationRowV1 = {
+  rowId: string;
+  assetClass: string;
+  currentPct?: number | null;
+  riskProfilePct?: number | null;
+  recommendedPct?: number | null;
+  variancePct?: number | null;
+};
+
+export type PortfolioAccountV1 = {
+  accountId: string;
+  ownerPersonIds: string[];
+  entityName?: string | null;
+  accountName?: string | null;
+  accountType?: "super" | "pension" | "investment" | "smsf" | "trust" | "company" | "joint" | "other" | null;
+  accountNumber?: string | null;
+  currentProductName?: string | null;
+  currentProvider?: string | null;
+  recommendedProductName?: string | null;
+  recommendedProvider?: string | null;
+  sourceFileName?: string | null;
+  productRexReportId?: string | null;
+  linkedReplacementRecommendationIds?: string[] | null;
+  holdings?: PortfolioHoldingV1[] | null;
+  allocationComparison?: PortfolioAllocationRowV1[] | null;
+};
+
 export type PortfolioRecommendationV1 = {
   recommended: boolean;
   assetClasses: {
     assetClass: string;
     targetPct?: number | null;
   }[];
-  holdings?: {
-    holdingId: string;
-    platformName?: string | null;
-    fundName: string;
-    code?: string | null;
-    amount?: number | null;
-    investmentFeePct?: number | null;
-    investmentFeeAmount?: number | null;
-    transactionAmount?: number | null;
-    buySellSpreadPct?: number | null;
-    buySellSpreadAmount?: number | null;
-    brokerageAmount?: number | null;
-  }[] | null;
-  allocationComparison?: {
-    rowId: string;
-    assetClass: string;
-    currentPct?: number | null;
-    riskProfilePct?: number | null;
-    recommendedPct?: number | null;
-    variancePct?: number | null;
-  }[] | null;
+  accounts?: PortfolioAccountV1[] | null;
+  holdings?: PortfolioHoldingV1[] | null;
+  allocationComparison?: PortfolioAllocationRowV1[] | null;
   sourceFileName?: string | null;
   linkedObjectiveIds?: string[] | null;
   clientBenefits?: RecommendationBenefitV1[] | null;
@@ -291,7 +317,21 @@ export type InsuranceNeedsAnalysisV1 = {
     suggestedPolicyOwnership?: "super" | "retail" | "either" | "unknown" | null;
     suggestedStructureNotes?: string | null;
   };
+  requirements?: InsuranceNeedsAnalysisLineItemV1[] | null;
+  provisions?: InsuranceNeedsAnalysisLineItemV1[] | null;
   rationale?: string | null;
+};
+
+export type InsuranceCoverAmountSetV1 = {
+  life?: number | null;
+  tpd?: number | null;
+  trauma?: number | null;
+  incomeProtection?: number | null;
+};
+
+export type InsuranceNeedsAnalysisLineItemV1 = InsuranceCoverAmountSetV1 & {
+  itemId: string;
+  title: string;
 };
 
 export type InsuranceRecommendationV1 = {
@@ -311,6 +351,109 @@ export type InsuranceRecommendationV1 = {
   consequences: RecommendationConsequenceV1[];
   alternativesConsidered: AlternativeConsideredV1[];
   rationale?: string | null;
+};
+
+export type InsurancePolicyCoverTypeV1 = "life" | "tpd" | "trauma" | "income-protection" | "other";
+
+export type InsurancePolicyOwnershipV1 =
+  | "inside-super"
+  | "outside-super"
+  | "flexi-linked"
+  | "smsf"
+  | "employer"
+  | "other"
+  | "unknown";
+
+export type InsurancePolicyPremiumFrequencyV1 =
+  | "weekly"
+  | "fortnightly"
+  | "monthly"
+  | "quarterly"
+  | "half-yearly"
+  | "annually"
+  | "unknown";
+
+export type InsurancePolicyPremiumTypeV1 =
+  | "variable-age-stepped"
+  | "stepped"
+  | "level"
+  | "hybrid"
+  | "unknown";
+
+export type InsurancePolicyActionV1 =
+  | "apply-new"
+  | "retain-existing"
+  | "replace-existing"
+  | "vary-existing"
+  | "cancel"
+  | "not-recommended";
+
+export type InsurancePolicyCoverComponentV1 = {
+  coverId: string;
+  coverType: InsurancePolicyCoverTypeV1;
+  details?: string | null;
+  premiumType?: InsurancePolicyPremiumTypeV1 | null;
+  sumInsured?: number | null;
+  monthlyBenefit?: number | null;
+  waitingPeriod?: string | null;
+  benefitPeriod?: string | null;
+};
+
+export type InsurancePolicyOwnershipGroupV1 = {
+  groupId: string;
+  ownership: InsurancePolicyOwnershipV1;
+  fundingSource?: string | null;
+  premiumFrequency?: InsurancePolicyPremiumFrequencyV1 | null;
+  premiumAmount?: number | null;
+  annualisedPremium?: number | null;
+  covers: InsurancePolicyCoverComponentV1[];
+};
+
+export type InsurancePolicyPremiumBreakdownItemV1 = {
+  itemId: string;
+  ownership: InsurancePolicyOwnershipV1;
+  label: string;
+  amount?: number | null;
+};
+
+export type InsurancePolicyRecommendationV1 = {
+  policyRecommendationId: string;
+  insuredPersonId?: string | null;
+  action: InsurancePolicyActionV1;
+  insurerName?: string | null;
+  productName?: string | null;
+  policyName?: string | null;
+  recommendationText?: string | null;
+  ownershipGroups: InsurancePolicyOwnershipGroupV1[];
+  optionalBenefits?: string[] | null;
+  premiumBreakdown?: InsurancePolicyPremiumBreakdownItemV1[] | null;
+  underwritingNotes?: string | null;
+  replacementNotes?: string | null;
+  sourceFileName?: string | null;
+  sourceEvidence?: string | null;
+};
+
+export type InsurancePolicySnapshotV1 = {
+  insurer?: string | null;
+  totalLifeCover?: number | null;
+  totalTpdCover?: number | null;
+  totalIncomeProtectionCover?: number | null;
+  totalTraumaCover?: number | null;
+  totalAnnualPremium?: number | null;
+};
+
+export type InsurancePolicyReplacementV1 = {
+  replacementId: string;
+  ownerPersonId?: string | null;
+  currentPolicy: InsurancePolicySnapshotV1;
+  recommendedPolicy: InsurancePolicySnapshotV1;
+  premiumDifference?: number | null;
+  reasons: string[];
+  costs: string[];
+  benefitsGained: string[];
+  benefitsLost: string[];
+  notes?: string | null;
+  linkedPolicyRecommendationIds?: string[] | null;
 };
 
 export type ProjectionMetricV1 = {
@@ -372,6 +515,8 @@ export type AdviceRecommendationsV1 = {
   portfolio?: PortfolioRecommendationV1 | null;
   insuranceNeedsAnalyses?: InsuranceNeedsAnalysisV1[] | null;
   insurance?: InsuranceRecommendationV1[] | null;
+  insurancePolicies?: InsurancePolicyRecommendationV1[] | null;
+  insuranceReplacements?: InsurancePolicyReplacementV1[] | null;
 };
 
 export type AdviceFeeItemV1 = {
@@ -385,6 +530,9 @@ export type AdviceFeeItemV1 = {
 export type ProductFeeItemV1 = {
   feeId: string;
   productName?: string | null;
+  ownerName?: string | null;
+  sourceFileName?: string | null;
+  productRexReportId?: string | null;
   amount?: number | null;
   percentage?: number | null;
   feeType: "investment" | "admin" | "platform" | "other";
@@ -394,7 +542,14 @@ export type CommissionItemV1 = {
   commissionId: string;
   type: "upfront" | "ongoing";
   productType: "insurance" | "other";
+  ownerPersonId?: string | null;
+  productName?: string | null;
+  percentage?: number | null;
   amount?: number | null;
+  upfrontPercentage?: number | null;
+  upfrontAmount?: number | null;
+  ongoingPercentage?: number | null;
+  ongoingAmount?: number | null;
   disclosed?: boolean | null;
 };
 
@@ -404,6 +559,15 @@ export type AdviceFeesV1 = {
   commissions: CommissionItemV1[];
 };
 
+export type ServiceAgreementFeeItemV1 = {
+  feeItemId: string;
+  ownerPersonId?: string | null;
+  productName?: string | null;
+  accountNumber?: string | null;
+  feeAmount?: number | null;
+  frequency: "weekly" | "fortnightly" | "monthly" | "quarterly" | "half-yearly" | "annually";
+};
+
 export type FeeAgreementV1 = {
   present: boolean;
   agreementType: "ongoing" | "fixed-term" | "annual" | "none";
@@ -411,6 +575,7 @@ export type FeeAgreementV1 = {
   endDate?: string | null;
   referenceDate?: string | null;
   services: string[];
+  feeItems?: ServiceAgreementFeeItemV1[] | null;
 };
 
 export type AdviceAgreementsV1 = {
@@ -435,6 +600,14 @@ export type ProductRexFeeComparisonRowV1 = {
   currentValue?: string | null;
   recommendedValue?: string | null;
   alternativeValue?: string | null;
+  values?: string[] | null;
+};
+
+export type ProductRexComparisonColumnV1 = {
+  columnId: string;
+  status: "current" | "recommended" | "alternative" | "unknown";
+  productName?: string | null;
+  accountBalance?: string | null;
 };
 
 export type ProductRexTransactionRowV1 = {
@@ -452,6 +625,9 @@ export type ProductRexHoldingV1 = {
   platformName?: string | null;
   fundName: string;
   code?: string | null;
+  currentAmount?: number | null;
+  changeAmount?: number | null;
+  proposedAmount?: number | null;
   amount?: number | null;
   investmentFeePct?: number | null;
   investmentFeeAmount?: number | null;
@@ -469,9 +645,11 @@ export type ProductRexAllocationRowV1 = {
 export type ProductRexReportV1 = {
   reportId: string;
   sourceFileName: string;
+  ownerName?: string | null;
   currentPlatform?: string | null;
   recommendedPlatform?: string | null;
   alternativePlatform?: string | null;
+  comparisonColumns?: ProductRexComparisonColumnV1[] | null;
   replacementReasons: string[];
   platformComparisonRows: ProductRexFeeComparisonRowV1[];
   recommendedHoldings: ProductRexHoldingV1[];
