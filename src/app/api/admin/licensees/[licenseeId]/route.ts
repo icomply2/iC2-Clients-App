@@ -1,6 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { API_BASE_URL, adminAuthError, adminConfigError, parseJsonBody, readAdminToken } from "../../_shared";
 
+export async function GET(_request: NextRequest, context: { params: Promise<{ licenseeId: string }> }) {
+  if (!API_BASE_URL) {
+    return adminConfigError();
+  }
+
+  const token = await readAdminToken();
+
+  if (!token) {
+    return adminAuthError();
+  }
+
+  const { licenseeId } = await context.params;
+  const response = await fetch(new URL(`/api/Licensees/${encodeURIComponent(licenseeId)}`, API_BASE_URL), {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  const text = await response.text();
+
+  return new NextResponse(text, {
+    status: response.status,
+    headers: {
+      "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+    },
+  });
+}
+
 export async function PUT(request: NextRequest, context: { params: Promise<{ licenseeId: string }> }) {
   if (!API_BASE_URL) {
     return adminConfigError();

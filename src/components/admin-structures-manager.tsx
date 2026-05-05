@@ -4,10 +4,12 @@ import { useMemo, useState } from "react";
 import {
   createAdminLicensee,
   createAdminPractice,
+  getAdminLicensee,
   updateAdminLicensee,
   updateAdminPractice,
 } from "@/lib/api/admin";
 import type { LicenseeSummary, PracticeSummary } from "@/lib/admin-data";
+import type { LicenseeDto } from "@/lib/api/types";
 import styles from "@/app/admin/admin.module.css";
 
 type Mode = "create" | "edit";
@@ -15,7 +17,97 @@ type Mode = "create" | "edit";
 type StructureDraft = {
   name: string;
   licenseeId: string;
+  abn: string;
+  account: string;
+  asicLicenseeNumber: string;
+  b2bPay: string;
+  bsb: string;
+  customPrompt: boolean;
+  hubDoc: string;
+  licenseeAddress: string;
+  licenseeLogo: string;
+  licenseePostCode: string;
+  licenseeState: string;
+  suburb: string;
+  xplanUrl: string;
 };
+
+type LicenseeTextDraftKey =
+  | "abn"
+  | "account"
+  | "asicLicenseeNumber"
+  | "b2bPay"
+  | "bsb"
+  | "hubDoc"
+  | "licenseeAddress"
+  | "licenseeLogo"
+  | "licenseePostCode"
+  | "licenseeState"
+  | "suburb"
+  | "xplanUrl";
+
+const licenseeTextFields: { key: LicenseeTextDraftKey; label: string; placeholder?: string }[] = [
+  { key: "asicLicenseeNumber", label: "AFSL number", placeholder: "Australian Financial Services Licence number" },
+  { key: "abn", label: "ABN", placeholder: "Licensee ABN" },
+  { key: "licenseeAddress", label: "Street address", placeholder: "Licensee street address" },
+  { key: "suburb", label: "Suburb", placeholder: "Suburb" },
+  { key: "licenseeState", label: "State", placeholder: "State" },
+  { key: "licenseePostCode", label: "Post code", placeholder: "Post code" },
+  { key: "bsb", label: "BSB", placeholder: "Payment BSB" },
+  { key: "account", label: "Account number", placeholder: "Payment account number" },
+  { key: "b2bPay", label: "B2BPay", placeholder: "B2BPay reference or account" },
+  { key: "xplanUrl", label: "Xplan URL", placeholder: "Xplan URL" },
+  { key: "hubDoc", label: "HubDoc", placeholder: "HubDoc reference or URL" },
+  { key: "licenseeLogo", label: "Licensee logo", placeholder: "Logo URL or data URL" },
+];
+
+function cleanText(value: string | null | undefined) {
+  return value?.trim() ?? "";
+}
+
+function emptyDraft(): StructureDraft {
+  return {
+    name: "",
+    licenseeId: "",
+    abn: "",
+    account: "",
+    asicLicenseeNumber: "",
+    b2bPay: "",
+    bsb: "",
+    customPrompt: false,
+    hubDoc: "",
+    licenseeAddress: "",
+    licenseeLogo: "",
+    licenseePostCode: "",
+    licenseeState: "",
+    suburb: "",
+    xplanUrl: "",
+  };
+}
+
+function licenseeToDraft(licensee: LicenseeDto | null | undefined, fallback?: LicenseeSummary | null): StructureDraft {
+  return {
+    ...emptyDraft(),
+    name: cleanText(licensee?.name) || fallback?.name || "",
+    abn: cleanText(licensee?.abn),
+    account: cleanText(licensee?.account),
+    asicLicenseeNumber: cleanText(licensee?.asicLicenseeNumber),
+    b2bPay: cleanText(licensee?.b2bPay),
+    bsb: cleanText(licensee?.bsb),
+    customPrompt: Boolean(licensee?.customPrompt),
+    hubDoc: cleanText(licensee?.hubDoc),
+    licenseeAddress: cleanText(licensee?.licenseeAddress),
+    licenseeLogo: cleanText(licensee?.licenseeLogo),
+    licenseePostCode: cleanText(licensee?.licenseePostCode),
+    licenseeState: cleanText(licensee?.licenseeState),
+    suburb: cleanText(licensee?.suburb),
+    xplanUrl: cleanText(licensee?.xplanUrl),
+  };
+}
+
+function nullableText(value: string) {
+  return value.trim() || null;
+}
 
 type AdminStructuresManagerProps =
   | {
@@ -39,6 +131,7 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const licenseeOptions = useMemo(() => {
     if (!isPractice) {
@@ -80,14 +173,10 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
     setEditingId(null);
     setSaveError(null);
     setSaveSuccess(null);
-    setDraft(
-      isPractice
-        ? { name: "", licenseeId: "" }
-        : { name: "", licenseeId: "" },
-    );
+    setDraft(emptyDraft());
   }
 
-  function openEdit(item: PracticeSummary | LicenseeSummary) {
+  async function openEdit(item: PracticeSummary | LicenseeSummary) {
     setMode("edit");
     setEditingId(item.id);
     setSaveError(null);
@@ -95,20 +184,47 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
     setDraft(
       isPractice
         ? {
+            ...emptyDraft(),
             name: item.name,
             licenseeId: "licenseeId" in item ? item.licenseeId?.trim() || "" : "",
           }
-        : {
-            name: item.name,
-            licenseeId: "",
-          },
+        : licenseeToDraft("record" in item ? item.record : null, item as LicenseeSummary),
     );
+
+    if (!isPractice) {
+      setIsLoadingDetails(true);
+
+      try {
+        const result = await getAdminLicensee(item.id);
+        const fullRecord = result?.data ?? null;
+
+        if (fullRecord) {
+          setDraft(licenseeToDraft(fullRecord, item as LicenseeSummary));
+          setItems((existing) =>
+            ((existing as LicenseeSummary[]).map((existingItem) =>
+              existingItem.id === item.id && "practiceCount" in existingItem
+                ? { ...existingItem, name: fullRecord.name?.trim() || existingItem.name, record: fullRecord }
+                : existingItem,
+            ) as LicenseeSummary[]),
+          );
+        }
+      } catch (error) {
+        setSaveError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load the full licensee details. The summary details are still available.",
+        );
+      } finally {
+        setIsLoadingDetails(false);
+      }
+    }
   }
 
   function closeEditor() {
     setEditingId(null);
     setDraft(null);
     setIsSaving(false);
+    setIsLoadingDetails(false);
     setSaveError(null);
   }
 
@@ -167,7 +283,19 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
           ...(current?.record ?? {}),
           id: mode === "edit" ? current?.record.id ?? current?.id ?? null : null,
           name: draft.name.trim() || "Untitled licensee",
-          customPrompt: current?.record.customPrompt ?? false,
+          abn: nullableText(draft.abn),
+          account: nullableText(draft.account),
+          asicLicenseeNumber: nullableText(draft.asicLicenseeNumber),
+          b2bPay: nullableText(draft.b2bPay),
+          bsb: nullableText(draft.bsb),
+          customPrompt: draft.customPrompt,
+          hubDoc: nullableText(draft.hubDoc),
+          licenseeAddress: nullableText(draft.licenseeAddress),
+          licenseeLogo: nullableText(draft.licenseeLogo),
+          licenseePostCode: nullableText(draft.licenseePostCode),
+          licenseeState: nullableText(draft.licenseeState),
+          suburb: nullableText(draft.suburb),
+          xplanUrl: nullableText(draft.xplanUrl),
         };
 
         const result =
@@ -269,7 +397,7 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
                   <td>{"appAdminCount" in item ? item.appAdminCount : 0}</td>
                   {isPractice ? <td>{"adviserCount" in item ? item.adviserCount : 0}</td> : null}
                   <td>
-                    <button type="button" className={styles.secondaryButton} onClick={() => openEdit(item)}>
+                    <button type="button" className={styles.secondaryButton} onClick={() => void openEdit(item)}>
                       Edit
                     </button>
                   </td>
@@ -325,7 +453,35 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
                   </select>
                 </label>
               ) : null}
+
+              {!isPractice
+                ? licenseeTextFields.map((field) => (
+                    <label className={styles.field} key={field.key}>
+                      <span>{field.label}</span>
+                      <input
+                        value={draft[field.key]}
+                        onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
+                        placeholder={field.placeholder}
+                      />
+                    </label>
+                  ))
+                : null}
+
+              {!isPractice ? (
+                <label className={styles.field}>
+                  <span>Custom prompt</span>
+                  <select
+                    value={draft.customPrompt ? "true" : "false"}
+                    onChange={(event) => setDraft({ ...draft, customPrompt: event.target.value === "true" })}
+                  >
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </label>
+              ) : null}
             </div>
+
+            {isLoadingDetails ? <p className={styles.cardText}>Loading full licensee details...</p> : null}
 
             {saveError ? <p className={styles.errorText}>{saveError}</p> : null}
 

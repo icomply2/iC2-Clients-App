@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError } from "@/lib/api/client";
 import { getClientProfile, getClientProfileId } from "@/lib/api/clients";
-import { readAuthTokenFromCookies } from "@/lib/auth";
+import { readAuthTokenFromCookies, readCurrentUserFromCookies } from "@/lib/auth";
 import {
-  buildEngagementLetterDocmosisModel,
   buildEngagementLetterOutputName,
-  DOCMOSIS_ENGAGEMENT_TEMPLATE_NAME,
-  renderDocmosisDocx,
-  type EngagementLetterDocmosisInput,
-} from "@/lib/services/docmosis";
+  renderEngagementLetterDocx,
+  type EngagementLetterDocxInput,
+} from "@/lib/engagement-letter-docx-export";
+import { readUserProfileOverride } from "@/lib/user-profile-overrides-store";
 
 async function loadProfile(clientId: string) {
   const token = await readAuthTokenFromCookies();
@@ -37,7 +36,7 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as
     | {
         clientId?: string | null;
-        draft?: EngagementLetterDocmosisInput | null;
+        draft?: EngagementLetterDocxInput | null;
       }
     | null;
 
@@ -49,15 +48,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const profile = await loadProfile(clientId);
-    const model = buildEngagementLetterDocmosisModel(profile, body?.draft ?? {});
+    const currentUser = await readCurrentUserFromCookies();
+    const profileOverride = await readUserProfileOverride(currentUser?.id);
+    const draft = {
+      ...(body?.draft ?? {}),
+      documentStyleProfile: profileOverride?.documentStyleProfile ?? null,
+    };
     const outputName = buildEngagementLetterOutputName(profile);
-    const buffer = await renderDocmosisDocx({
-      templateName: DOCMOSIS_ENGAGEMENT_TEMPLATE_NAME,
-      outputName,
-      data: model,
-    });
+    const buffer = await renderEngagementLetterDocx(profile, draft);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(Buffer.from(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",

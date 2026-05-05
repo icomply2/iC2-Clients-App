@@ -189,6 +189,34 @@
   vertical-align: top;
 }
 
+.tableSubtext {
+  margin: 0.28rem 0 0;
+  max-width: 48rem;
+  color: #5f7286;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.templateSectionList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: 44rem;
+}
+
+.templateSectionPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  padding: 0 0.55rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #102a56;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .table tbody tr:nth-child(odd) td {
   background: #fffdf4;
 }
@@ -297,7 +325,9 @@
 }
 
 .modalCard {
-  width: min(42rem, 100%);
+  width: min(56rem, 100%);
+  max-height: min(48rem, calc(100vh - 3rem));
+  overflow: auto;
   display: grid;
   gap: 1rem;
   padding: 1.15rem;

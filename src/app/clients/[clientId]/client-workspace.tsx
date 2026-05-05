@@ -21,7 +21,7 @@ import { WorkspaceSidebar } from "./workspace-sidebar";
 import { WizardsSection } from "./wizards-section";
 import styles from "./page.module.css";
 
-type SectionKey =
+export type SectionKey =
   | "details"
   | "identity-check"
   | "entities"
@@ -141,11 +141,23 @@ async function resolveCurrentUserPracticeName(token: string) {
 }
 
 async function loadClientProfile(clientId: string) {
+  const mockAuthEnabled = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+
+  if (mockAuthEnabled) {
+    return {
+      profile: mockClientProfile,
+      sourceMessage: "Local mock mode is enabled. Showing sample client profile data.",
+      useMockFallback: true,
+      forbidden: false,
+    };
+  }
+
   if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
     return {
       profile: mockClientProfile,
-      sourceMessage: "Showing sample client profile data.",
+      sourceMessage: "No live API base URL is configured. Showing sample client profile data.",
       useMockFallback: true,
+      forbidden: false,
     };
   }
 
@@ -180,7 +192,7 @@ async function loadClientProfile(clientId: string) {
 
       return {
         profile: directProfileResult.data ?? mockClientProfile,
-        sourceMessage: "Loaded live client profile data from the API.",
+        sourceMessage: "",
         useMockFallback: false,
         forbidden: false,
       };
@@ -218,7 +230,7 @@ async function loadClientProfile(clientId: string) {
 
     return {
       profile: profileResult.data ?? mockClientProfile,
-      sourceMessage: "Loaded live client profile data from the API.",
+      sourceMessage: "",
       useMockFallback: false,
       forbidden: false,
     };
@@ -258,7 +270,7 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
           <AppTopbar finleyHref={`/finley?clientId=${encodeURIComponent(clientId)}`} />
 
           <main className={styles.content}>
-            <p className={styles.dataNotice}>{sourceMessage}</p>
+            {sourceMessage ? <p className={styles.dataNotice}>{sourceMessage}</p> : null}
             {forbidden ? (
               <div className={styles.emptyStateCard}>This client is outside your practice scope.</div>
             ) : section === "details" ? (

@@ -360,7 +360,7 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
 
               <label className={styles.field}>
                 <span>App admin</span>
-                <input value={editingUser.appAdmin?.trim() || "Not configured"} readOnly />
+                <input value={editingUser.appAdmin == null ? "Not configured" : String(editingUser.appAdmin)} readOnly />
               </label>
             </div>
 

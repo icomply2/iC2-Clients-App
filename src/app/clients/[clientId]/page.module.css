@@ -925,6 +925,99 @@
   color: #334e68;
 }
 
+.soaScenarioList {
+  overflow-x: auto;
+  border: 1px solid #f1d372;
+  border-radius: 0.35rem;
+  background: #fff;
+}
+
+.soaScenarioHeader,
+.soaScenarioRow {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(12rem, 1.1fr) minmax(14rem, 1.2fr) 8rem 7rem 17rem;
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 69rem;
+}
+
+.soaScenarioHeader {
+  min-height: 2.6rem;
+  padding: 0 0.85rem;
+  background: #fff8de;
+  color: #102a56;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.soaScenarioRows {
+  display: grid;
+}
+
+.soaScenarioRow {
+  min-height: 3.4rem;
+  padding: 0.65rem 0.85rem;
+  border-top: 1px solid #e2e8f0;
+  color: #334e68;
+}
+
+.soaScenarioName,
+.soaScenarioId {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #102a56;
+}
+
+.soaScenarioName {
+  font-weight: 800;
+}
+
+.soaScenarioId {
+  font-weight: 700;
+}
+
+.soaScenarioActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.soaScenarioEditButton,
+.soaScenarioDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border: 1px solid #fecaca;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #b42318;
+  cursor: pointer;
+}
+
+.soaScenarioEditButton {
+  border-color: #c7d7eb;
+  color: #102a56;
+}
+
+.soaScenarioEditButton:hover {
+  background: #f8fafc;
+}
+
+.soaScenarioDeleteButton:hover {
+  background: #fff1f2;
+}
+
+.soaScenarioActionIcon {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
+}
+
 .fileNotesToolbar {
   display: grid;
   grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 0.9fr) auto;

@@ -15,6 +15,20 @@ export type UserSummary = {
   id?: string | null;
   email?: string | null;
   name?: string | null;
+  dateOfBirth?: string | null;
+  address?: ApiAddress | null;
+  acn?: string | null;
+  abn?: string | null;
+  asicNumber?: string | null;
+  occupation?: string | null;
+  adviserExperience?: string | null;
+  businessName?: string | null;
+  dateJoined?: string | null;
+  profilePhoto?: string | null;
+  practiceLetterHead?: string | null;
+  practiceLogo?: string | null;
+  phoneNumber?: string | null;
+  officeNumber?: string | null;
   complianceManager?: {
     id?: string | null;
     name?: string | null;
@@ -35,8 +49,23 @@ export type UserSummary = {
   userRole?: string | null;
   userStatus?: string | null;
   appAccess?: string | null;
-  appAdmin?: string | null;
+  appAdmin?: boolean | string | null;
   entityId?: string | null;
+  website?: string | null;
+  xplanSite?: string | null;
+};
+
+export type ApiAddress = {
+  street?: string | null;
+  suburb?: string | null;
+  state?: string | null;
+  postCode?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  timeZone?: string | null;
+  addressType?: string | null;
 };
 
 export type LicenseeDto = {
@@ -85,6 +114,7 @@ export type UpdateUserRequest = {
   appAccess?: string | null;
   userRole?: string | null;
   userStatus?: string | null;
+  appAdmin?: boolean | null;
 };
 
 export type ClientSummary = {
@@ -212,6 +242,23 @@ export type ClientAdviserRecord = {
   entity?: string | null;
   name?: string | null;
   email?: string | null;
+  address?: ApiAddress | null;
+  abn?: string | null;
+  acn?: string | null;
+  asicNumber?: string | null;
+  businessName?: string | null;
+  phoneNumber?: string | null;
+  officeNumber?: string | null;
+  profilePhoto?: string | null;
+  practiceLogo?: string | null;
+  practice?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  licensee?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
 };
 
 export type ClientEntityRecord = {

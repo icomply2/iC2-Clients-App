@@ -22,6 +22,13 @@ export async function getUsers(token: string) {
   });
 }
 
+export async function getUser(userId: string, token: string) {
+  return apiRequest<ApiResult<UserSummary>>(`/api/Users/${encodeURIComponent(userId)}`, {
+    method: "GET",
+    token,
+  });
+}
+
 export async function verifyTwoFactorAuthentication(email: string, code: string) {
   return apiRequest<ApiResult<{ jwtToken?: string | null }>>("/api/Users/VerifyTwoFactorAuthentication", {
     method: "POST",
