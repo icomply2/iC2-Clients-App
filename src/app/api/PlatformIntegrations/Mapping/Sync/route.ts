@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken } from "../../../client-profiles/_shared";
 
-const SYNCED_MAPPING_FUNCTION_URL = process.env.SYNCED_MAPPING_FUNCTION_URL;
-const SYNCED_MAPPING_FUNCTION_CODE = process.env.SYNCED_MAPPING_FUNCTION_CODE;
+const SYNCED_MAPPING_FUNCTION_URL = process.env.SYNCED_MAPPING_FUNCTION_URL; // This is the URL for Azure Functions, not a secret for our backend, so it's safe to be used in client-side code if needed. We just keep it here to avoid hardcoding it in multiple places and make it easier to update when needed.
+const SYNCED_MAPPING_FUNCTION_CODE = process.env.SYNCED_MAPPING_FUNCTION_CODE; // This is the function key for Azure Functions, not a secret for our backend, so it's safe to be used in client-side code if needed. We just keep it here to avoid hardcoding it in multiple places and make it easier to update when needed.
 
 export async function POST(request: NextRequest) {
   if (!SYNCED_MAPPING_FUNCTION_URL || !SYNCED_MAPPING_FUNCTION_CODE) {
