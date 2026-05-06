@@ -23,6 +23,7 @@ type PortfolioDraftHolding = {
   id: string;
   positionExchange: string;
   positionDescription: string;
+  inceptionDate: string;
   positionCode: string;
   units: string;
   holdingPrice: string;
@@ -402,6 +403,7 @@ function  mapDesktopBrokerHoldingToDraft(holding: DesktopBrokerHoldingBalance): 
     id: `db-${holding.SecurityCode ?? "holding"}-${resolvedUnits}-${marketValueTotal}`,
     positionExchange: mapDesktopBrokerExchange(holding.SecurityExchange),
     positionDescription: holding.SecurityName?.trim() || holding.SecurityCode?.trim() || "Imported holding",
+    inceptionDate: "",
     positionCode: holding.SecurityCode?.trim() || "",
     units: String(resolvedUnits),
     holdingPrice: unitCost > 0 ? unitCost.toFixed(4) : "",
@@ -426,6 +428,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   const [accountDescription, setAccountDescription] = useState("");
   const [positionExchange, setPositionExchange] = useState(exchangeOptions[0]);
   const [positionDescription, setPositionDescription] = useState("");
+  const [inceptionDate, setInceptionDate] = useState("");
   const [positionCode, setPositionCode] = useState("");
   const [units, setUnits] = useState("");
   const [holdingPrice, setHoldingPrice] = useState("");
@@ -436,6 +439,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   const [addingHolding, setAddingHolding] = useState<HoldingAddState | null>(null);
   const [addPositionExchange, setAddPositionExchange] = useState(exchangeOptions[0]);
   const [addPositionDescription, setAddPositionDescription] = useState("");
+  const [addInceptionDate, setAddInceptionDate] = useState("");
   const [addPositionCode, setAddPositionCode] = useState("");
   const [addUnits, setAddUnits] = useState("");
   const [addHoldingPrice, setAddHoldingPrice] = useState("");
@@ -445,6 +449,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   const [isSavingAdd, setIsSavingAdd] = useState(false);
   const [editPositionExchange, setEditPositionExchange] = useState(exchangeOptions[0]);
   const [editPositionDescription, setEditPositionDescription] = useState("");
+  const [editInceptionDate, setEditInceptionDate] = useState("");
   const [editPositionCode, setEditPositionCode] = useState("");
   const [editUnits, setEditUnits] = useState("");
   const [editHoldingPrice, setEditHoldingPrice] = useState("");
@@ -742,6 +747,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   function resetHoldingDraft() {
     setPositionExchange(exchangeOptions[0]);
     setPositionDescription("");
+    setInceptionDate("");
     setPositionCode("");
     setUnits("");
     setHoldingPrice("");
@@ -935,7 +941,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
         }
       }
 
-      await loadPlatformMappings();
+      await Promise.all([loadPlatformMappings(), loadPortfolioData()]);
       setIsMappingModalOpen(false);
       setEditingMapping(null);
     } catch (error) {
@@ -977,7 +983,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   }
 
   async function disconnectPlatformMapping(mapping: ExternalPlatformMapping) {
-    if (!profile.id || !mapping.id) {
+    if (!mapping.id) {
       return;
     }
 
@@ -991,7 +997,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
 
     try {
       const response = await fetch(
-        `/api/client-profiles/${encodeURIComponent(profile.id)}/platform-mappings/${encodeURIComponent(mapping.id)}`,
+        `/api/PlatformIntegrations/Mapping/${encodeURIComponent(mapping.id)}`,
         {
           method: "DELETE",
         },
@@ -1003,14 +1009,14 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
         throw new Error(result.message || `Unable to disconnect mapping (${response.status}).`);
       }
 
-      await loadPlatformMappings();
+      await Promise.all([loadPlatformMappings(), loadPortfolioData()]);
     } catch (error) {
       setPlatformMappingsError(error instanceof Error ? error.message : "Unable to disconnect platform mapping.");
     }
   }
 
   async function openSyncHistory(mapping: ExternalPlatformMapping) {
-    if (!profile.id || !mapping.id) {
+    if (!mapping.id) {
       return;
     }
 
@@ -1021,10 +1027,8 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
 
     try {
       const response = await fetch(
-        `/api/client-profiles/${encodeURIComponent(profile.id)}/platform-mappings/${encodeURIComponent(mapping.id)}/sync-history`,
-        {
-          cache: "no-store",
-        },
+        `/api/PlatformIntegrations/Mapping/${encodeURIComponent(mapping.id)}/PortfolioSyncRun`,
+        { cache: "no-store" },
       );
       const payload = await response.json().catch(() => null);
       const result = parseApiResult<PortfolioSyncRun[]>(payload);
@@ -1134,6 +1138,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
               practiceName: profile.practice ?? "",
               positionExchange: draftHolding.positionExchange,
               positionDescription: draftHolding.positionDescription,
+              inceptionDate: draftHolding.inceptionDate || null,
               positionCode: draftHolding.positionCode,
               units: Number(draftHolding.units || 0),
               holdingPrice: Number(draftHolding.holdingPrice || 0),
@@ -1172,6 +1177,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
         id: `${Date.now()}-${current.length}`,
         positionExchange,
         positionDescription: positionDescription.trim(),
+        inceptionDate,
         positionCode: positionCode.trim(),
         units: normalizeNumberInput(units),
         holdingPrice: normalizeCurrencyInput(holdingPrice),
@@ -1193,6 +1199,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   function openEditHolding(account: ClientPortfolioAccountRecord, holding: ClientPortfolioRecord) {
     setEditPositionExchange(holding.positionExchange || exchangeOptions[0]);
     setEditPositionDescription(holding.positionDescription || "");
+    setEditInceptionDate(holding.inceptionDate?.slice(0, 10) || "");
     setEditPositionCode(holding.positionCode || "");
     setEditUnits(String(holding.units ?? ""));
     setEditHoldingPrice(String(holding.holdingPrice ?? ""));
@@ -1206,6 +1213,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   function openAddHolding(account: ClientPortfolioAccountRecord) {
     setAddPositionExchange(exchangeOptions[0]);
     setAddPositionDescription("");
+    setAddInceptionDate("");
     setAddPositionCode("");
     setAddUnits("");
     setAddHoldingPrice("");
@@ -1265,6 +1273,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
               practiceName: profile.practice ?? "",
               positionExchange: addPositionExchange,
               positionDescription: addPositionDescription.trim(),
+              inceptionDate: addInceptionDate || null,
               positionCode: addPositionCode.trim(),
               units: Number(normalizeNumberInput(addUnits) || 0),
               holdingPrice: Number(normalizeCurrencyInput(addHoldingPrice) || 0),
@@ -1326,6 +1335,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
               practiceName: editingHolding.holding.practiceName ?? profile.practice ?? "",
               positionExchange: editPositionExchange,
               positionDescription: editPositionDescription.trim(),
+              inceptionDate: editInceptionDate || null,
               positionCode: editPositionCode.trim(),
               units: Number(normalizeNumberInput(editUnits) || 0),
               holdingPrice: Number(normalizeCurrencyInput(editHoldingPrice) || 0),
@@ -2270,6 +2280,14 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
                       <input value={positionDescription} onChange={(event) => setPositionDescription(event.target.value)} />
                     </label>
                     <label className={styles.modalField}>
+                      <span>Inception Date</span>
+                      <input
+                        type="date"
+                        value={inceptionDate}
+                        onChange={(event) => setInceptionDate(event.target.value)}
+                      />
+                    </label>
+                    <label className={styles.modalField}>
                       <span>Position Code</span>
                       <input value={positionCode} onChange={(event) => setPositionCode(event.target.value)} />
                     </label>
@@ -2566,6 +2584,14 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
                 <input value={editPositionDescription} onChange={(event) => setEditPositionDescription(event.target.value)} />
               </label>
               <label className={styles.modalField}>
+                <span>Inception Date</span>
+                <input
+                  type="date"
+                  value={editInceptionDate}
+                  onChange={(event) => setEditInceptionDate(event.target.value)}
+                />
+              </label>
+              <label className={styles.modalField}>
                 <span>Position Code</span>
                 <input value={editPositionCode} onChange={(event) => setEditPositionCode(event.target.value)} />
               </label>
@@ -2650,6 +2676,15 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
                   value={addPositionDescription}
                   onChange={(event) => setAddPositionDescription(event.target.value)}
                   placeholder="Enter holding description"
+                />
+              </label>
+
+              <label className={styles.modalField}>
+                <span>Inception Date</span>
+                <input
+                  type="date"
+                  value={addInceptionDate}
+                  onChange={(event) => setAddInceptionDate(event.target.value)}
                 />
               </label>
 

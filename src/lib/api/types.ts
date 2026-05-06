@@ -436,6 +436,7 @@ export type ClientPortfolioRecord = {
   account?: ClientAccountRecord | null;
   positionExchange?: string | null;
   positionDescription?: string | null;
+  inceptionDate?: string | null;
   positionCode?: string | null;
   units?: number | null;
   holdingPrice?: number | null;
