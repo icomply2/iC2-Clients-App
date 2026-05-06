@@ -426,6 +426,7 @@ export type ClientPortfolioAccountRecord = {
   jointAccount?: boolean | null;
   licensee?: string | null;
   practice?: string | null;
+  syncMeta?: SyncedPortfolioAccountMeta | null;
 };
 
 export type ClientPortfolioRecord = {
@@ -435,6 +436,7 @@ export type ClientPortfolioRecord = {
   account?: ClientAccountRecord | null;
   positionExchange?: string | null;
   positionDescription?: string | null;
+  inceptionDate?: string | null;
   positionCode?: string | null;
   units?: number | null;
   holdingPrice?: number | null;
@@ -443,6 +445,71 @@ export type ClientPortfolioRecord = {
   nativeValue?: number | null;
   nativeMarketprice?: number | null;
   nativeCurrency?: string | null;
+  syncMeta?: SyncedHoldingMeta | null;
+};
+
+export type ExternalPlatformProvider = "desktop-broker" | "hub24" | "netwealth" | "other";
+
+export type ExternalPlatformSyncMode = "manual-import" | "daily-feed";
+
+export type ExternalPlatformMappingStatus = "active" | "inactive";
+
+export type ExternalPlatformMapping = {
+  id?: string | null;
+  clientProfileId?: string | null;
+  ownerId?: string | null;
+  provider?: ExternalPlatformProvider | null;
+  accountId?: string | null;
+  owner?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  jointAccount?: boolean | null;
+  externalClientId?: string | null;
+  externalAccountId?: string | null;
+  externalAccountName?: string | null;
+  externalRef?: string | null;
+  accountDescription?: string | null;
+  status?: ExternalPlatformMappingStatus | null;
+  linkedByUserId?: string | null;
+  linkedAt?: string | null;
+  lastSyncedAt?: string | null;
+  syncMode?: ExternalPlatformSyncMode | null;
+};
+
+export type SyncedPortfolioAccountMeta = {
+  provider?: string | null;
+  externalMappingId?: string | null;
+  externalAccountId?: string | null;
+  externalAccountName?: string | null;
+  importedAt?: string | null;
+  lastSyncedAt?: string | null;
+  syncMode?: ExternalPlatformSyncMode | null;
+};
+
+export type SyncedHoldingMeta = {
+  provider?: string | null;
+  externalMappingId?: string | null;
+  externalHoldingKey?: string | null;
+  externalSecurityCode?: string | null;
+  importedAt?: string | null;
+  lastSyncedAt?: string | null;
+  syncStatus?: "active" | "missing-upstream" | "inactive" | null;
+};
+
+export type PortfolioSyncRun = {
+  id?: string | null;
+  mappingId?: string | null;
+  provider?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  status?: "success" | "partial" | "failed" | null;
+  createdAccounts?: number | null;
+  updatedAccounts?: number | null;
+  createdHoldings?: number | null;
+  updatedHoldings?: number | null;
+  missingHoldings?: number | null;
+  errors?: string[] | null;
 };
 
 export type ClientInsuranceRecord = {

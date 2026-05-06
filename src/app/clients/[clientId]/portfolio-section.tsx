@@ -1,10 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ClientPortfolioAccountRecord, ClientPortfolioRecord, ClientProfile } from "@/lib/api/types";
+import type {
+  ClientPortfolioAccountRecord,
+  ClientPortfolioRecord,
+  ClientProfile,
+  ExternalPlatformMapping,
+  ExternalPlatformMappingStatus,
+  ExternalPlatformProvider,
+  ExternalPlatformSyncMode,
+  PortfolioSyncRun,
+} from "@/lib/api/types";
 import styles from "./page.module.css";
 
 type PortfolioSectionProps = {
+  clientId: string;
   profile: ClientProfile;
   useMockFallback?: boolean;
 };
@@ -13,6 +23,7 @@ type PortfolioDraftHolding = {
   id: string;
   positionExchange: string;
   positionDescription: string;
+  inceptionDate: string;
   positionCode: string;
   units: string;
   holdingPrice: string;
@@ -52,8 +63,32 @@ type DesktopBrokerHoldingsPayload = {
   HoldingBalances?: DesktopBrokerHoldingBalance[] | null;
 };
 
+type PlatformMappingFormState = {
+  provider: ExternalPlatformProvider;
+  ownerId: string;
+  externalClientId: string;
+  externalAccountId: string;
+  externalAccountName: string;
+  accountDescription: string;
+  status: ExternalPlatformMappingStatus;
+  syncMode: ExternalPlatformSyncMode;
+};
+
 const portfolioStepLabels = ["Portfolio", "Account Details", "Underlying Holdings"];
 const exchangeOptions = ["ASX Listed", "International", "Managed Fund", "Cash", "Private Asset"];
+const providerOptions: { value: ExternalPlatformProvider; label: string }[] = [
+  { value: "desktop-broker", label: "Desktop Broker" },
+  { value: "hub24", label: "HUB24" },
+  { value: "netwealth", label: "Netwealth" },
+];
+const syncModeOptions: { value: ExternalPlatformSyncMode; label: string }[] = [
+  { value: "daily-feed", label: "Daily Feed" },
+  { value: "manual-import", label: "Manual Import" },
+];
+const mappingStatusOptions: { value: ExternalPlatformMappingStatus; label: string }[] = [
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+];
 const JOINT_OWNER_ID = "__joint__";
 
 function getJointOwnerLabel(profile: ClientProfile) {
@@ -174,6 +209,10 @@ function formatFixedCurrencyInput(value: string) {
   });
 }
 
+function normalizeMappingStatus(status?: string | null): ExternalPlatformMappingStatus {
+  return status?.trim().toLowerCase() === "inactive" ? "inactive" : "active";
+}
+
 function parseNumber(value: string) {
   const normalized = normalizeNumberInput(value);
   const parsed = Number(normalized);
@@ -207,6 +246,107 @@ function formatHoldingNumber(value?: number | null) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 4,
   });
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) {
+    return "Never";
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getProviderLabel(provider?: string | null) {
+  return providerOptions.find((option) => option.value === provider)?.label ?? "Manual";
+}
+
+function getSyncModeLabel(syncMode?: string | null) {
+  return syncModeOptions.find((option) => option.value === syncMode)?.label ?? "Synced";
+}
+
+function getMappingStatusLabel(status?: string | null) {
+  return mappingStatusOptions.find((option) => option.value === normalizeMappingStatus(status))?.label ?? "Inactive";
+}
+
+function resolveMappingReference(mapping: ExternalPlatformMapping) {
+  const parts = [
+    mapping.externalClientId ? `Client ${mapping.externalClientId}` : null,
+    mapping.externalAccountName?.trim() || null,
+    mapping.accountDescription?.trim() || mapping.externalRef?.trim() || null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length ? parts.join(" · ") : "Not linked yet";
+}
+
+function resolveAccountSyncDetails(account: ClientPortfolioAccountRecord) {
+  const provider = account.syncMeta?.provider?.trim() || null;
+  const lastSyncedAt = account.syncMeta?.lastSyncedAt || account.syncMeta?.importedAt || null;
+  const syncMode = account.syncMeta?.syncMode || null;
+
+  return {
+    providerLabel: provider ? getProviderLabel(provider) : null,
+    ownershipLabel: provider ? "Synced" : "Manual",
+    lastSyncedAt,
+    syncModeLabel: provider ? getSyncModeLabel(syncMode) : null,
+  };
+}
+
+function resolveHoldingSyncDetails(holding: ClientPortfolioRecord) {
+  const provider = holding.syncMeta?.provider?.trim() || null;
+  const syncStatus = holding.syncMeta?.syncStatus || null;
+
+  return {
+    providerLabel: provider ? getProviderLabel(provider) : null,
+    syncStatusLabel:
+      syncStatus === "missing-upstream"
+        ? "Missing Upstream"
+        : syncStatus === "inactive"
+          ? "Inactive"
+          : syncStatus === "active"
+            ? "Active"
+            : null,
+  };
+}
+
+function createEmptyMappingFormState(): PlatformMappingFormState {
+  return {
+    provider: "desktop-broker",
+    ownerId: "",
+    externalClientId: "",
+    externalAccountId: "",
+    externalAccountName: "",
+    accountDescription: "",
+    status: "active",
+    syncMode: "daily-feed",
+  };
+}
+
+function resolvePlatformIntegrationOwnerId(
+  ownerId: string,
+  profile: ClientProfile,
+  ownerOptions: Array<{ id: string; name: string }>,
+) {
+  if (ownerId === JOINT_OWNER_ID) {
+    return profile.client?.id ?? "";
+  }
+
+  if (ownerId && ownerOptions.some((option) => option.id === ownerId)) {
+    return ownerId;
+  }
+
+  return profile.client?.id ?? profile.partner?.id ?? "";
 }
 
 function resolveMarketValue(holding: ClientPortfolioRecord) {
@@ -245,7 +385,7 @@ function mapDesktopBrokerExchange(exchange?: string | null) {
   return exchange.trim();
 }
 
-function mapDesktopBrokerHoldingToDraft(holding: DesktopBrokerHoldingBalance): PortfolioDraftHolding | null {
+function  mapDesktopBrokerHoldingToDraft(holding: DesktopBrokerHoldingBalance): PortfolioDraftHolding | null {
   const availableQuantity = toNumber(holding.AvailableQuantity);
   const totalQuantity = toNumber(holding.HoldingQuantity);
   const resolvedUnits = availableQuantity > 0 ? availableQuantity : totalQuantity;
@@ -263,6 +403,7 @@ function mapDesktopBrokerHoldingToDraft(holding: DesktopBrokerHoldingBalance): P
     id: `db-${holding.SecurityCode ?? "holding"}-${resolvedUnits}-${marketValueTotal}`,
     positionExchange: mapDesktopBrokerExchange(holding.SecurityExchange),
     positionDescription: holding.SecurityName?.trim() || holding.SecurityCode?.trim() || "Imported holding",
+    inceptionDate: "",
     positionCode: holding.SecurityCode?.trim() || "",
     units: String(resolvedUnits),
     holdingPrice: unitCost > 0 ? unitCost.toFixed(4) : "",
@@ -273,7 +414,7 @@ function mapDesktopBrokerHoldingToDraft(holding: DesktopBrokerHoldingBalance): P
   };
 }
 
-export function PortfolioSection({ profile, useMockFallback = false }: PortfolioSectionProps) {
+export function PortfolioSection({ clientId, profile, useMockFallback = false }: PortfolioSectionProps) {
   const [accounts, setAccounts] = useState<PortfolioAccountBundle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -287,6 +428,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   const [accountDescription, setAccountDescription] = useState("");
   const [positionExchange, setPositionExchange] = useState(exchangeOptions[0]);
   const [positionDescription, setPositionDescription] = useState("");
+  const [inceptionDate, setInceptionDate] = useState("");
   const [positionCode, setPositionCode] = useState("");
   const [units, setUnits] = useState("");
   const [holdingPrice, setHoldingPrice] = useState("");
@@ -297,6 +439,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   const [addingHolding, setAddingHolding] = useState<HoldingAddState | null>(null);
   const [addPositionExchange, setAddPositionExchange] = useState(exchangeOptions[0]);
   const [addPositionDescription, setAddPositionDescription] = useState("");
+  const [addInceptionDate, setAddInceptionDate] = useState("");
   const [addPositionCode, setAddPositionCode] = useState("");
   const [addUnits, setAddUnits] = useState("");
   const [addHoldingPrice, setAddHoldingPrice] = useState("");
@@ -306,6 +449,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   const [isSavingAdd, setIsSavingAdd] = useState(false);
   const [editPositionExchange, setEditPositionExchange] = useState(exchangeOptions[0]);
   const [editPositionDescription, setEditPositionDescription] = useState("");
+  const [editInceptionDate, setEditInceptionDate] = useState("");
   const [editPositionCode, setEditPositionCode] = useState("");
   const [editUnits, setEditUnits] = useState("");
   const [editHoldingPrice, setEditHoldingPrice] = useState("");
@@ -325,6 +469,19 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   const [desktopBrokerImportError, setDesktopBrokerImportError] = useState<string | null>(null);
   const [isLoadingDesktopBrokerPreview, setIsLoadingDesktopBrokerPreview] = useState(false);
   const [isImportingDesktopBroker, setIsImportingDesktopBroker] = useState(false);
+  const [platformMappings, setPlatformMappings] = useState<ExternalPlatformMapping[]>([]);
+  const [isLoadingPlatformMappings, setIsLoadingPlatformMappings] = useState(false);
+  const [platformMappingsError, setPlatformMappingsError] = useState<string | null>(null);
+  const [isMappingModalOpen, setIsMappingModalOpen] = useState(false);
+  const [editingMapping, setEditingMapping] = useState<ExternalPlatformMapping | null>(null);
+  const [mappingForm, setMappingForm] = useState<PlatformMappingFormState>(createEmptyMappingFormState);
+  const [mappingFormError, setMappingFormError] = useState<string | null>(null);
+  const [isSavingMapping, setIsSavingMapping] = useState(false);
+  const [syncingMappingId, setSyncingMappingId] = useState<string | null>(null);
+  const [historyMapping, setHistoryMapping] = useState<ExternalPlatformMapping | null>(null);
+  const [syncHistory, setSyncHistory] = useState<PortfolioSyncRun[]>([]);
+  const [syncHistoryError, setSyncHistoryError] = useState<string | null>(null);
+  const [isLoadingSyncHistory, setIsLoadingSyncHistory] = useState(false);
 
   const ownerOptions = useMemo(
     () => {
@@ -473,6 +630,20 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     }
   }, [desktopBrokerOwnerId, ownerOptions]);
 
+  useEffect(() => {
+    if (!isMappingModalOpen) {
+      return;
+    }
+
+    if (!mappingForm.ownerId && ownerOptions.length) {
+      const defaultOwner = ownerOptions.find((option) => option.id !== JOINT_OWNER_ID) ?? ownerOptions[0];
+      setMappingForm((current) => ({
+        ...current,
+        ownerId: defaultOwner.id,
+      }));
+    }
+  }, [isMappingModalOpen, mappingForm.ownerId, ownerOptions]);
+
   async function loadPortfolioData() {
     if (useMockFallback || !profile.id) {
       setAccounts([]);
@@ -532,13 +703,51 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     }
   }
 
+  async function loadPlatformMappings() {
+    if (useMockFallback || !clientId) {
+      setPlatformMappings([]);
+      setPlatformMappingsError(null);
+      return;
+    }
+
+    setIsLoadingPlatformMappings(true);
+    setPlatformMappingsError(null);
+
+    try {
+      const response = await fetch(
+        `/api/PlatformIntegrations/Mapping/ClientProfile/${encodeURIComponent(clientId)}`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json().catch(() => null);
+      const result = parseApiResult<ExternalPlatformMapping[]>(payload);
+
+      if (!response.ok) {
+        throw new Error(result.message || `Unable to load platform mappings (${response.status}).`);
+      }
+
+      setPlatformMappings(result.data ?? []);
+    } catch (error) {
+      setPlatformMappings([]);
+      setPlatformMappingsError(
+        error instanceof Error ? error.message : "Unable to load platform mappings.",
+      );
+    } finally {
+      setIsLoadingPlatformMappings(false);
+    }
+  }
+
   useEffect(() => {
     void loadPortfolioData();
   }, [profile.id, useMockFallback]);
 
+  useEffect(() => {
+    void loadPlatformMappings();
+  }, [clientId, useMockFallback]);
+
   function resetHoldingDraft() {
     setPositionExchange(exchangeOptions[0]);
     setPositionDescription("");
+    setInceptionDate("");
     setPositionCode("");
     setUnits("");
     setHoldingPrice("");
@@ -588,6 +797,261 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
     setDesktopBrokerImportError(null);
   }
 
+  function openCreateMappingModal() {
+    setEditingMapping(null);
+    setMappingForm(createEmptyMappingFormState());
+    setMappingFormError(null);
+    setIsSavingMapping(false);
+    setIsMappingModalOpen(true);
+  }
+
+  function openEditMappingModal(mapping: ExternalPlatformMapping) {
+    setEditingMapping(mapping);
+    setMappingForm({
+      provider: mapping.provider ?? "desktop-broker",
+      ownerId: mapping.owner?.id ?? (mapping.jointAccount ? JOINT_OWNER_ID : ""),
+      externalClientId: mapping.externalClientId ?? "",
+      externalAccountId: mapping.externalAccountId ?? "",
+      externalAccountName: mapping.externalAccountName ?? "",
+      accountDescription: mapping.accountDescription ?? mapping.externalRef ?? "",
+      status: normalizeMappingStatus(mapping.status),
+      syncMode: mapping.syncMode ?? "daily-feed",
+    });
+    setMappingFormError(null);
+    setIsSavingMapping(false);
+    setIsMappingModalOpen(true);
+  }
+
+  function closeMappingModal() {
+    if (isSavingMapping) {
+      return;
+    }
+
+    setIsMappingModalOpen(false);
+    setEditingMapping(null);
+    setMappingFormError(null);
+  }
+
+  async function savePlatformMapping() {
+    if (!profile.id) {
+      setMappingFormError("A live client profile is required before saving a platform mapping.");
+      return;
+    }
+
+    if (!mappingForm.externalClientId.trim()) {
+      setMappingFormError("External Client ID is required.");
+      return;
+    }
+
+    if (!mappingForm.externalAccountId.trim()) {
+      setMappingFormError("External Account ID is required.");
+      return;
+    }
+
+    if (!mappingForm.externalAccountName.trim()) {
+      setMappingFormError("Account Name is required.");
+      return;
+    }
+
+    const ownerSelection = resolveOwnerSelection(mappingForm.ownerId);
+
+    if (!ownerSelection) {
+      setMappingFormError("Select an owner for the platform mapping.");
+      return;
+    }
+
+    setIsSavingMapping(true);
+    setMappingFormError(null);
+
+    try {
+      const normalizedStatus = normalizeMappingStatus(mappingForm.status);
+      const isEditing = Boolean(editingMapping?.id);
+      if (isEditing) {
+        const response = await fetch(
+          `/api/client-profiles/${encodeURIComponent(profile.id)}/platform-mappings/${encodeURIComponent(editingMapping?.id ?? "")}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              request: {
+                provider: mappingForm.provider,
+                owner: ownerSelection.owner,
+                jointAccount: ownerSelection.jointAccount,
+                externalClientId: mappingForm.externalClientId.trim(),
+                externalAccountId: mappingForm.externalAccountId.trim() || null,
+                externalAccountName: mappingForm.externalAccountName.trim() || null,
+                externalRef: mappingForm.accountDescription.trim() || null,
+                accountDescription: mappingForm.accountDescription.trim() || null,
+                status: normalizedStatus,
+                syncMode: "daily-feed",
+              },
+            }),
+          },
+        );
+        const payload = await response.json().catch(() => null);
+        const result = parseApiResult<ExternalPlatformMapping>(payload);
+
+        if (!response.ok) {
+          throw new Error(result.message || `Unable to save the platform mapping (${response.status}).`);
+        }
+      } else {
+        const createdAccount = await createPortfolioAccount(
+          mappingForm.ownerId,
+          mappingForm.externalAccountName,
+          mappingForm.accountDescription,
+        );
+        const platformIntegrationOwnerId = resolvePlatformIntegrationOwnerId(
+          mappingForm.ownerId,
+          profile,
+          ownerOptions,
+        );
+
+        if (!createdAccount.id) {
+          throw new Error("The account was created without a valid id.");
+        }
+
+        const nowIso = new Date().toISOString();
+        const integrationResponse = await fetch("/api/PlatformIntegrations/Mapping", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            clientProfileId: clientId,
+            ownerId: platformIntegrationOwnerId,
+            jointAccount: ownerSelection.jointAccount,
+            provider: mappingForm.provider,
+            accountId: createdAccount.id,
+            externalClientId: mappingForm.externalClientId.trim(),
+            externalAccountId: mappingForm.externalAccountId.trim(),
+            externalAccountName: mappingForm.externalAccountName.trim(),
+            status: normalizedStatus,
+            linkedAt: nowIso,
+            lastSyncedAt: "",
+            createdDate: nowIso,
+            modifiedDate: nowIso,
+          }),
+        });
+        const integrationPayload = await integrationResponse.json().catch(() => null);
+        const integrationResult = parseApiResult<ExternalPlatformMapping>(integrationPayload);
+
+        if (!integrationResponse.ok) {
+          throw new Error(
+            integrationResult.message || `Unable to create the platform integration (${integrationResponse.status}).`,
+          );
+        }
+      }
+
+      await Promise.all([loadPlatformMappings(), loadPortfolioData()]);
+      setIsMappingModalOpen(false);
+      setEditingMapping(null);
+    } catch (error) {
+      setMappingFormError(error instanceof Error ? error.message : "Unable to save the platform mapping.");
+    } finally {
+      setIsSavingMapping(false);
+    }
+  }
+
+  async function syncPlatformMapping(mapping: ExternalPlatformMapping) {
+    if (!mapping.id) {
+      return;
+    }
+
+    setSyncingMappingId(mapping.id);
+    setPlatformMappingsError(null);
+
+    try {
+      const response = await fetch("/api/PlatformIntegrations/Mapping/Sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: mapping.id,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      const result = parseApiResult<unknown>(payload);
+
+      if (!response.ok) {
+        throw new Error(result.message || `Unable to sync mapping (${response.status}).`);
+      }
+
+      await Promise.all([loadPlatformMappings(), loadPortfolioData()]);
+    } catch (error) {
+      setPlatformMappingsError(error instanceof Error ? error.message : "Unable to sync platform mapping.");
+    } finally {
+      setSyncingMappingId(null);
+    }
+  }
+
+  async function disconnectPlatformMapping(mapping: ExternalPlatformMapping) {
+    if (!mapping.id) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Disconnect ${getProviderLabel(mapping.provider)} from this client? Existing synced holdings will remain visible until the backend reconciliation updates them.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/api/PlatformIntegrations/Mapping/${encodeURIComponent(mapping.id)}`,
+        {
+          method: "DELETE",
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      const result = parseApiResult<boolean>(payload);
+
+      if (!response.ok) {
+        throw new Error(result.message || `Unable to disconnect mapping (${response.status}).`);
+      }
+
+      await Promise.all([loadPlatformMappings(), loadPortfolioData()]);
+    } catch (error) {
+      setPlatformMappingsError(error instanceof Error ? error.message : "Unable to disconnect platform mapping.");
+    }
+  }
+
+  async function openSyncHistory(mapping: ExternalPlatformMapping) {
+    if (!mapping.id) {
+      return;
+    }
+
+    setHistoryMapping(mapping);
+    setIsLoadingSyncHistory(true);
+    setSyncHistoryError(null);
+    setSyncHistory([]);
+
+    try {
+      const response = await fetch(
+        `/api/PlatformIntegrations/Mapping/${encodeURIComponent(mapping.id)}/PortfolioSyncRun`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json().catch(() => null);
+      const result = parseApiResult<PortfolioSyncRun[]>(payload);
+
+      if (!response.ok) {
+        throw new Error(result.message || `Unable to load sync history (${response.status}).`);
+      }
+
+      setSyncHistory(result.data ?? []);
+    } catch (error) {
+      setSyncHistoryError(error instanceof Error ? error.message : "Unable to load sync history.");
+    } finally {
+      setIsLoadingSyncHistory(false);
+    }
+  }
+
+  function closeSyncHistory() {
+    setHistoryMapping(null);
+    setSyncHistory([]);
+    setSyncHistoryError(null);
+    setIsLoadingSyncHistory(false);
+  }
+
   function resolveOwnerSelection(ownerId: string) {
     const jointSelected = ownerId === JOINT_OWNER_ID;
 
@@ -608,11 +1072,10 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
       : null;
   }
 
-  async function createAccountWithHoldings(
+  async function createPortfolioAccount(
     ownerId: string,
     nextAccountName: string,
     nextAccountDescription: string,
-    holdings: PortfolioDraftHolding[],
   ) {
     if (!profile.id) {
       throw new Error("A live client profile is required before creating a portfolio.");
@@ -647,23 +1110,35 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
       throw new Error(accountResult.message || `Unable to create the portfolio account (${accountResponse.status}).`);
     }
 
+    return accountResult.data;
+  }
+
+  async function createAccountWithHoldings(
+    ownerId: string,
+    nextAccountName: string,
+    nextAccountDescription: string,
+    holdings: PortfolioDraftHolding[],
+  ) {
+    const accountResultData = await createPortfolioAccount(ownerId, nextAccountName, nextAccountDescription);
+
     for (const draftHolding of holdings) {
       const holdingResponse = await fetch(
-        `/api/client-profiles/account/${encodeURIComponent(accountResult.data.id)}/portfolio`,
+        `/api/client-profiles/account/${encodeURIComponent(accountResultData.id ?? "")}/portfolio`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             request: {
               account: {
-                id: accountResult.data.id,
-                accountName: accountResult.data.accountName ?? nextAccountName.trim(),
-                accountDescription: accountResult.data.accountDescription ?? nextAccountDescription.trim(),
+                id: accountResultData.id,
+                accountName: accountResultData.accountName ?? nextAccountName.trim(),
+                accountDescription: accountResultData.accountDescription ?? nextAccountDescription.trim(),
               },
               licenseeName: profile.licensee ?? "",
               practiceName: profile.practice ?? "",
               positionExchange: draftHolding.positionExchange,
               positionDescription: draftHolding.positionDescription,
+              inceptionDate: draftHolding.inceptionDate || null,
               positionCode: draftHolding.positionCode,
               units: Number(draftHolding.units || 0),
               holdingPrice: Number(draftHolding.holdingPrice || 0),
@@ -686,6 +1161,8 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
         );
       }
     }
+
+    return accountResultData;
   }
 
   function addHoldingToDraft() {
@@ -700,6 +1177,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
         id: `${Date.now()}-${current.length}`,
         positionExchange,
         positionDescription: positionDescription.trim(),
+        inceptionDate,
         positionCode: positionCode.trim(),
         units: normalizeNumberInput(units),
         holdingPrice: normalizeCurrencyInput(holdingPrice),
@@ -721,6 +1199,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   function openEditHolding(account: ClientPortfolioAccountRecord, holding: ClientPortfolioRecord) {
     setEditPositionExchange(holding.positionExchange || exchangeOptions[0]);
     setEditPositionDescription(holding.positionDescription || "");
+    setEditInceptionDate(holding.inceptionDate?.slice(0, 10) || "");
     setEditPositionCode(holding.positionCode || "");
     setEditUnits(String(holding.units ?? ""));
     setEditHoldingPrice(String(holding.holdingPrice ?? ""));
@@ -734,6 +1213,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
   function openAddHolding(account: ClientPortfolioAccountRecord) {
     setAddPositionExchange(exchangeOptions[0]);
     setAddPositionDescription("");
+    setAddInceptionDate("");
     setAddPositionCode("");
     setAddUnits("");
     setAddHoldingPrice("");
@@ -793,6 +1273,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
               practiceName: profile.practice ?? "",
               positionExchange: addPositionExchange,
               positionDescription: addPositionDescription.trim(),
+              inceptionDate: addInceptionDate || null,
               positionCode: addPositionCode.trim(),
               units: Number(normalizeNumberInput(addUnits) || 0),
               holdingPrice: Number(normalizeCurrencyInput(addHoldingPrice) || 0),
@@ -854,6 +1335,7 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
               practiceName: editingHolding.holding.practiceName ?? profile.practice ?? "",
               positionExchange: editPositionExchange,
               positionDescription: editPositionDescription.trim(),
+              inceptionDate: editInceptionDate || null,
               positionCode: editPositionCode.trim(),
               units: Number(normalizeNumberInput(editUnits) || 0),
               holdingPrice: Number(normalizeCurrencyInput(editHoldingPrice) || 0),
@@ -1056,7 +1538,10 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
           ) : null}
         </div>
         <div className={styles.sectionHeaderActions}>
-          <button type="button" className={styles.modalSecondary} onClick={openImportModal}>
+          <button type="button" className={styles.modalSecondary} onClick={openCreateMappingModal}>
+            New Mapping
+          </button>
+          <button type="button" hidden aria-hidden="true" tabIndex={-1} onClick={openImportModal}>
             Import Desktop Broker
           </button>
           <button type="button" className={styles.plusButton} aria-label="Add portfolio item" onClick={openCreateModal}>
@@ -1064,6 +1549,145 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
           </button>
         </div>
       </div>
+
+      <section className={styles.platformMappingsSection}>
+        <div className={styles.platformMappingsHeader}>
+          <div>
+            <h2 className={styles.platformMappingsTitle}>Platform Mappings</h2>
+            <p className={styles.platformMappingsIntro}>
+              Manage external portfolio feeds for this client and trigger syncs from the same reusable mapping model.
+            </p>
+          </div>
+          <button type="button" className={styles.modalSecondary} onClick={openCreateMappingModal}>
+            Add mapping
+          </button>
+        </div>
+
+        {platformMappingsError ? <p className={styles.dataNotice}>{platformMappingsError}</p> : null}
+
+        {isLoadingPlatformMappings ? (
+          <div className={styles.emptyStateCard}>Loading platform mappings...</div>
+        ) : platformMappings.length ? (
+          <>
+            <div className={styles.platformMappingsTable}>
+              <div className={styles.platformMappingsTableHeader}>
+                <div>Provider</div>
+                <div>External Ref</div>
+                <div>Status</div>
+                <div>Sync Mode</div>
+                <div>Last Sync</div>
+                <div>Actions</div>
+              </div>
+
+              {platformMappings.map((mapping) => {
+                const isSyncing = syncingMappingId === mapping.id;
+
+                return (
+                  <div key={mapping.id ?? `${mapping.provider}-${resolveMappingReference(mapping)}`} className={styles.platformMappingRow}>
+                    <div>
+                      <span className={styles.providerBadge}>{getProviderLabel(mapping.provider)}</span>
+                    </div>
+                    <div className={styles.platformMappingRefCell}>{resolveMappingReference(mapping)}</div>
+                      <div>
+                        <span className={`${styles.statusChip} ${normalizeMappingStatus(mapping.status) === "active" ? styles.statusChipActive : styles.statusChipMuted}`}>
+                          {getMappingStatusLabel(mapping.status)}
+                        </span>
+                      </div>
+                    <div>
+                      <span className={`${styles.statusChip} ${styles.statusChipOutline}`}>{getSyncModeLabel(mapping.syncMode)}</span>
+                    </div>
+                    <div className={styles.platformMappingTimestamp}>{formatDateTime(mapping.lastSyncedAt)}</div>
+                    <div className={styles.platformMappingActions}>
+                      <button
+                        type="button"
+                        className={styles.rowActionButton}
+                        onClick={() => void syncPlatformMapping(mapping)}
+                        disabled={isSyncing || !mapping.id}
+                      >
+                        {isSyncing ? "Syncing..." : "Sync now"}
+                      </button>
+                      <button type="button" className={styles.rowActionButton} onClick={() => openEditMappingModal(mapping)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.rowActionButton}
+                        onClick={() => void openSyncHistory(mapping)}
+                        disabled={!mapping.id}
+                      >
+                        History
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.rowActionButton} ${styles.rowActionDanger}`}
+                        onClick={() => void disconnectPlatformMapping(mapping)}
+                        disabled={!mapping.id}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className={styles.platformMappingsMobileList}>
+              {platformMappings.map((mapping) => {
+                const isSyncing = syncingMappingId === mapping.id;
+
+                return (
+                  <article key={`mobile-${mapping.id ?? resolveMappingReference(mapping)}`} className={styles.platformMappingCard}>
+                    <div className={styles.platformMappingCardHeader}>
+                      <h3 className={styles.platformMappingCardTitle}>{getProviderLabel(mapping.provider)}</h3>
+                        <div className={styles.platformMappingCardBadges}>
+                          <span className={`${styles.statusChip} ${normalizeMappingStatus(mapping.status) === "active" ? styles.statusChipActive : styles.statusChipMuted}`}>
+                            {getMappingStatusLabel(mapping.status)}
+                          </span>
+                        <span className={`${styles.statusChip} ${styles.statusChipOutline}`}>{getSyncModeLabel(mapping.syncMode)}</span>
+                      </div>
+                    </div>
+                    <p className={styles.platformMappingCardRef}>{resolveMappingReference(mapping)}</p>
+                    <p className={styles.platformMappingCardMeta}>Last sync: {formatDateTime(mapping.lastSyncedAt)}</p>
+                    <div className={styles.platformMappingCardActions}>
+                      <button
+                        type="button"
+                        className={styles.rowActionButton}
+                        onClick={() => void syncPlatformMapping(mapping)}
+                        disabled={isSyncing || !mapping.id}
+                      >
+                        {isSyncing ? "Syncing..." : "Sync now"}
+                      </button>
+                      <button type="button" className={styles.rowActionButton} onClick={() => openEditMappingModal(mapping)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.rowActionButton}
+                        onClick={() => void openSyncHistory(mapping)}
+                        disabled={!mapping.id}
+                      >
+                        History
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.rowActionButton} ${styles.rowActionDanger}`}
+                        onClick={() => void disconnectPlatformMapping(mapping)}
+                        disabled={!mapping.id}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <div className={styles.emptyStateCard}>
+            No platform mappings linked yet. Add a mapping when you are ready to connect a provider-owned portfolio feed.
+          </div>
+        )}
+      </section>
 
       <section className={styles.entitiesSection}>
         {loadError ? <p className={styles.dataNotice}>{loadError}</p> : null}
@@ -1111,12 +1735,35 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                     },
                     { marketValue: 0, costBase: 0, gainLoss: 0 },
                   );
+                  const accountSyncDetails = resolveAccountSyncDetails(account);
 
                   return (
                     <article key={account.id ?? account.accountName} className={styles.portfolioGroup}>
                       <div className={styles.portfolioGroupHeader}>
-                        <div>
+                        <div className={styles.portfolioAccountHeaderBlock}>
                           <h3 className={styles.portfolioAccountTitle}>{account.accountName || "Untitled account"}</h3>
+                          <div className={styles.portfolioAccountBadges}>
+                            {accountSyncDetails.providerLabel ? (
+                              <span className={styles.providerBadge}>{accountSyncDetails.providerLabel}</span>
+                            ) : null}
+                            <span
+                              className={`${styles.statusChip} ${
+                                accountSyncDetails.ownershipLabel === "Synced" ? styles.statusChipActive : styles.statusChipMuted
+                              }`}
+                            >
+                              {accountSyncDetails.ownershipLabel}
+                            </span>
+                            {accountSyncDetails.syncModeLabel ? (
+                              <span className={`${styles.statusChip} ${styles.statusChipOutline}`}>
+                                {accountSyncDetails.syncModeLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className={styles.portfolioAccountSubmeta}>
+                            {accountSyncDetails.lastSyncedAt
+                              ? `Last synced ${formatDateTime(accountSyncDetails.lastSyncedAt)}`
+                              : "Managed manually in iC2"}
+                          </p>
                         </div>
                         <div className={styles.portfolioGroupHeaderRight}>
                           <div className={styles.portfolioAccountMeta}>
@@ -1136,11 +1783,29 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
 
                       {holdings.length ? (
                         <>
-                          {holdings.map((holding) => (
-                            <div key={holding.id ?? `${holding.positionCode}-${holding.positionDescription}`} className={styles.portfolioRow}>
+                          {holdings.map((holding) => {
+                            const holdingSyncDetails = resolveHoldingSyncDetails(holding);
+
+                            return (
+                              <div key={holding.id ?? `${holding.positionCode}-${holding.positionDescription}`} className={styles.portfolioHoldingWrap}>
+                            <div className={styles.portfolioRow}>
                               <div>{holding.positionExchange || "—"}</div>
                               <div>{holding.positionCode || "—"}</div>
-                              <div>{holding.positionDescription || "—"}</div>
+                              <div className={styles.portfolioDescriptionCell}>
+                                <div>{holding.positionDescription || "—"}</div>
+                                {holdingSyncDetails.providerLabel || holdingSyncDetails.syncStatusLabel ? (
+                                  <div className={styles.portfolioHoldingBadges}>
+                                    {holdingSyncDetails.providerLabel ? (
+                                      <span className={styles.providerBadge}>{holdingSyncDetails.providerLabel}</span>
+                                    ) : null}
+                                    {holdingSyncDetails.syncStatusLabel ? (
+                                      <span className={`${styles.statusChip} ${styles.statusChipOutline}`}>
+                                        {holdingSyncDetails.syncStatusLabel}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
                               <div>{formatHoldingNumber(holding.units ?? null)}</div>
                               <div>{holding.nativeCurrency || holding.valueCurrency || "AUD"}</div>
                               <div>{formatMoney(holding.holdingValue ?? null)}</div>
@@ -1170,7 +1835,69 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                                 </button>
                               </div>
                             </div>
-                          ))}
+                                <article className={styles.portfolioHoldingCard}>
+                                  <div className={styles.portfolioHoldingCardHeader}>
+                                    <div>
+                                      <h4 className={styles.portfolioHoldingCardTitle}>{holding.positionDescription || "Unnamed holding"}</h4>
+                                      <p className={styles.portfolioHoldingCardCode}>
+                                        {holding.positionCode || "—"} · {holding.positionExchange || "—"}
+                                      </p>
+                                    </div>
+                                    <div className={styles.portfolioHoldingBadges}>
+                                      {holdingSyncDetails.providerLabel ? (
+                                        <span className={styles.providerBadge}>{holdingSyncDetails.providerLabel}</span>
+                                      ) : null}
+                                      {holdingSyncDetails.syncStatusLabel ? (
+                                        <span className={`${styles.statusChip} ${styles.statusChipOutline}`}>
+                                          {holdingSyncDetails.syncStatusLabel}
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                  <div className={styles.portfolioHoldingCardGrid}>
+                                    <div>
+                                      <span className={styles.portfolioHoldingLabel}>Units</span>
+                                      <span className={styles.portfolioHoldingValue}>{formatHoldingNumber(holding.units ?? null)}</span>
+                                    </div>
+                                    <div>
+                                      <span className={styles.portfolioHoldingLabel}>Currency</span>
+                                      <span className={styles.portfolioHoldingValue}>{holding.nativeCurrency || holding.valueCurrency || "AUD"}</span>
+                                    </div>
+                                    <div>
+                                      <span className={styles.portfolioHoldingLabel}>Holding Value</span>
+                                      <span className={styles.portfolioHoldingValue}>{formatMoney(holding.holdingValue ?? null)}</span>
+                                    </div>
+                                    <div>
+                                      <span className={styles.portfolioHoldingLabel}>Market Value</span>
+                                      <span className={styles.portfolioHoldingValue}>{formatMoney(resolveMarketValue(holding))}</span>
+                                    </div>
+                                    <div>
+                                      <span className={styles.portfolioHoldingLabel}>Cost Base</span>
+                                      <span className={styles.portfolioHoldingValue}>{formatMoney(resolveCostBase(holding))}</span>
+                                    </div>
+                                    <div>
+                                      <span className={styles.portfolioHoldingLabel}>Gain/Loss</span>
+                                      <span className={`${styles.portfolioHoldingValue} ${resolveGainLoss(holding) < 0 ? styles.negativeValue : ""}`.trim()}>
+                                        {formatMoney(resolveGainLoss(holding))}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className={styles.portfolioHoldingCardActions}>
+                                    <button type="button" className={styles.rowActionButton} onClick={() => openEditHolding(account, holding)}>
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`${styles.rowActionButton} ${styles.rowActionDanger}`}
+                                      onClick={() => openDeleteHolding(account, holding)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </article>
+                              </div>
+                            );
+                          })}
 
                           <div className={`${styles.portfolioSummaryRow} ${styles.portfolioSubtotalRow}`}>
                             <div />
@@ -1243,6 +1970,227 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
           </div>
         )}
       </section>
+
+      {isMappingModalOpen ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={closeMappingModal}>
+          <div
+            className={`${styles.modalCard} ${styles.mappingModalCard}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="platform-mapping-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <h2 id="platform-mapping-title" className={styles.modalTitle}>
+                {editingMapping ? "Edit Platform Mapping" : "Add Platform Mapping"}
+              </h2>
+              <button type="button" className={styles.modalClose} onClick={closeMappingModal} aria-label="Close">
+                ×
+              </button>
+            </div>
+
+            <div className={styles.modalGrid}>
+              <label className={styles.modalField}>
+                <span>Provider</span>
+                <select
+                  value={mappingForm.provider}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      provider: event.target.value as ExternalPlatformProvider,
+                    }))
+                  }
+                >
+                  {providerOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.modalField}>
+                <span>Status</span>
+                <select
+                  value={mappingForm.status}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      status: event.target.value as ExternalPlatformMappingStatus,
+                    }))
+                  }
+                >
+                  {mappingStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.modalField}>
+                <span>Owner</span>
+                <select
+                  value={mappingForm.ownerId}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      ownerId: event.target.value,
+                    }))
+                  }
+                >
+                  {ownerOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.modalField}>
+                <span>External Client ID</span>
+                <input
+                  required
+                  value={mappingForm.externalClientId}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      externalClientId: event.target.value,
+                    }))
+                  }
+                  placeholder="e.g. 105143"
+                />
+              </label>
+              <label className={styles.modalField}>
+                <span>External Account ID</span>
+                <input
+                  required
+                  value={mappingForm.externalAccountId}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      externalAccountId: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className={styles.modalField}>
+                <span>Account Name</span>
+                <input
+                  required
+                  value={mappingForm.externalAccountName}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      externalAccountName: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className={`${styles.modalField} ${styles.modalFieldFull}`}>
+                <span>Account Description</span>
+                <textarea
+                  className={styles.modalTextarea}
+                  value={mappingForm.accountDescription}
+                  onChange={(event) =>
+                    setMappingForm((current) => ({
+                      ...current,
+                      accountDescription: event.target.value,
+                    }))
+                  }
+                  placeholder="Description to carry into the linked account record"
+                />
+              </label>
+            </div>
+
+            {mappingFormError ? <p className={styles.modalError}>{mappingFormError}</p> : null}
+
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.modalSecondary} onClick={closeMappingModal} disabled={isSavingMapping}>
+                Cancel
+              </button>
+              <button type="button" className={styles.modalPrimary} onClick={savePlatformMapping} disabled={isSavingMapping}>
+                {isSavingMapping ? "Saving..." : editingMapping ? "Save changes" : "Create mapping"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {historyMapping ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={closeSyncHistory}>
+          <div
+            className={`${styles.modalCard} ${styles.mappingModalCard}`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sync-history-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <h2 id="sync-history-title" className={styles.modalTitle}>
+                Sync History
+              </h2>
+              <button type="button" className={styles.modalClose} onClick={closeSyncHistory} aria-label="Close">
+                ×
+              </button>
+            </div>
+
+            <div className={styles.syncHistoryHeader}>
+              <span className={styles.providerBadge}>{getProviderLabel(historyMapping.provider)}</span>
+              <span className={styles.syncHistoryRef}>{resolveMappingReference(historyMapping)}</span>
+            </div>
+
+            {isLoadingSyncHistory ? (
+              <div className={styles.emptyStateCard}>Loading sync history...</div>
+            ) : syncHistory.length ? (
+              <div className={styles.syncHistoryList}>
+                {syncHistory.map((run) => (
+                  <article key={run.id ?? `${run.startedAt}-${run.status}`} className={styles.syncHistoryCard}>
+                    <div className={styles.syncHistoryCardHeader}>
+                      <div>
+                        <h3 className={styles.syncHistoryCardTitle}>{formatDateTime(run.completedAt || run.startedAt)}</h3>
+                        <p className={styles.syncHistoryCardMeta}>
+                          Started {formatDateTime(run.startedAt)}{run.completedAt ? ` · Completed ${formatDateTime(run.completedAt)}` : ""}
+                        </p>
+                      </div>
+                      <span
+                        className={`${styles.statusChip} ${
+                          run.status === "failed"
+                            ? styles.statusChipDanger
+                            : run.status === "partial"
+                              ? styles.statusChipWarn
+                              : styles.statusChipActive
+                        }`}
+                      >
+                        {run.status ?? "Unknown"}
+                      </span>
+                    </div>
+                    <div className={styles.syncHistoryStats}>
+                      <span>Accounts +{run.createdAccounts ?? 0} / updated {run.updatedAccounts ?? 0}</span>
+                      <span>Holdings +{run.createdHoldings ?? 0} / updated {run.updatedHoldings ?? 0}</span>
+                      <span>Missing {run.missingHoldings ?? 0}</span>
+                    </div>
+                    {run.errors?.length ? (
+                      <ul className={styles.syncHistoryErrors}>
+                        {run.errors.map((error, index) => (
+                          <li key={`${run.id ?? "run"}-${index}`}>{error}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className={styles.emptyStateCard}>No sync history has been recorded for this mapping yet.</div>
+            )}
+
+            {syncHistoryError ? <p className={styles.modalError}>{syncHistoryError}</p> : null}
+
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.modalSecondary} onClick={closeSyncHistory}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isCreateModalOpen ? (
         <div className={styles.modalOverlay} role="presentation" onClick={closeCreateModal}>
@@ -1330,6 +2278,14 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                     <label className={styles.modalField}>
                       <span>Position Description</span>
                       <input value={positionDescription} onChange={(event) => setPositionDescription(event.target.value)} />
+                    </label>
+                    <label className={styles.modalField}>
+                      <span>Inception Date</span>
+                      <input
+                        type="date"
+                        value={inceptionDate}
+                        onChange={(event) => setInceptionDate(event.target.value)}
+                      />
                     </label>
                     <label className={styles.modalField}>
                       <span>Position Code</span>
@@ -1628,6 +2584,14 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                 <input value={editPositionDescription} onChange={(event) => setEditPositionDescription(event.target.value)} />
               </label>
               <label className={styles.modalField}>
+                <span>Inception Date</span>
+                <input
+                  type="date"
+                  value={editInceptionDate}
+                  onChange={(event) => setEditInceptionDate(event.target.value)}
+                />
+              </label>
+              <label className={styles.modalField}>
                 <span>Position Code</span>
                 <input value={editPositionCode} onChange={(event) => setEditPositionCode(event.target.value)} />
               </label>
@@ -1712,6 +2676,15 @@ export function PortfolioSection({ profile, useMockFallback = false }: Portfolio
                   value={addPositionDescription}
                   onChange={(event) => setAddPositionDescription(event.target.value)}
                   placeholder="Enter holding description"
+                />
+              </label>
+
+              <label className={styles.modalField}>
+                <span>Inception Date</span>
+                <input
+                  type="date"
+                  value={addInceptionDate}
+                  onChange={(event) => setAddInceptionDate(event.target.value)}
                 />
               </label>
 
