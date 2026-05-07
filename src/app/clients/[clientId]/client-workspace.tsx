@@ -4,6 +4,7 @@ import { ApiError } from "@/lib/api/client";
 import { getClientProfile, getClientProfileId } from "@/lib/api/clients";
 import { readAuthTokenFromCookies } from "@/lib/auth";
 import { mockClientProfile } from "@/lib/client-mocks";
+import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 import { FinancialRecordsSection } from "./financial-records-section";
 import { ClientDetailsSection } from "./client-details-section";
 import { DependentSection } from "./dependent-section";
@@ -77,7 +78,7 @@ function readStringClaim(payload: Record<string, unknown>, claimNames: string[])
 }
 
 async function resolveCurrentUserPracticeName(token: string) {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+  const apiBaseUrl = getApiBaseUrl();
 
   if (!apiBaseUrl) {
     return null;
@@ -141,7 +142,7 @@ async function resolveCurrentUserPracticeName(token: string) {
 }
 
 async function loadClientProfile(clientId: string) {
-  const mockAuthEnabled = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+  const mockAuthEnabled = isMockAuthEnabled();
 
   if (mockAuthEnabled) {
     return {
@@ -149,15 +150,17 @@ async function loadClientProfile(clientId: string) {
       sourceMessage: "Local mock mode is enabled. Showing sample client profile data.",
       useMockFallback: true,
       forbidden: false,
+      liveError: false,
     };
   }
 
-  if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
+  if (!getApiBaseUrl()) {
     return {
       profile: mockClientProfile,
       sourceMessage: "No live API base URL is configured. Showing sample client profile data.",
       useMockFallback: true,
       forbidden: false,
+      liveError: false,
     };
   }
 
@@ -166,10 +169,11 @@ async function loadClientProfile(clientId: string) {
 
     if (!token) {
       return {
-        profile: mockClientProfile,
-        sourceMessage: "Not signed in yet. Showing sample client profile data.",
-        useMockFallback: true,
+        profile: null,
+        sourceMessage: "You must sign in to load the live client profile.",
+        useMockFallback: false,
         forbidden: false,
+        liveError: true,
       };
     }
 
@@ -187,6 +191,7 @@ async function loadClientProfile(clientId: string) {
           sourceMessage: "You can only view clients from your own practice.",
           useMockFallback: false,
           forbidden: true,
+          liveError: false,
         };
       }
 
@@ -195,6 +200,7 @@ async function loadClientProfile(clientId: string) {
         sourceMessage: "",
         useMockFallback: false,
         forbidden: false,
+        liveError: false,
       };
     } catch (directError) {
       if (!(directError instanceof ApiError) || directError.statusCode !== 404) {
@@ -207,10 +213,11 @@ async function loadClientProfile(clientId: string) {
 
     if (!resolvedProfileId) {
       return {
-        profile: mockClientProfile,
-        sourceMessage: "Profile lookup returned no match. Showing sample data.",
-        useMockFallback: true,
+        profile: null,
+        sourceMessage: "The live API could not resolve a client profile for this client.",
+        useMockFallback: false,
         forbidden: false,
+        liveError: true,
       };
     }
 
@@ -225,6 +232,7 @@ async function loadClientProfile(clientId: string) {
         sourceMessage: "You can only view clients from your own practice.",
         useMockFallback: false,
         forbidden: true,
+        liveError: false,
       };
     }
 
@@ -233,26 +241,28 @@ async function loadClientProfile(clientId: string) {
       sourceMessage: "",
       useMockFallback: false,
       forbidden: false,
+      liveError: false,
     };
   } catch (error) {
     const message =
       error instanceof ApiError
-        ? `Live client profile failed (${error.statusCode}): ${error.message}. Showing sample data.`
+        ? `Live client profile failed (${error.statusCode}): ${error.message}.`
         : error instanceof Error
-          ? `Live client profile failed: ${error.message}. Showing sample data.`
-          : "Unable to load the live client profile yet. Showing sample data.";
+          ? `Live client profile failed: ${error.message}.`
+          : "Unable to load the live client profile yet.";
 
     return {
-      profile: mockClientProfile,
+      profile: null,
       sourceMessage: message,
-      useMockFallback: true,
+      useMockFallback: false,
       forbidden: false,
+      liveError: true,
     };
   }
 }
 
 export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProps) {
-  const { profile, sourceMessage, useMockFallback, forbidden } = await loadClientProfile(clientId);
+  const { profile, sourceMessage, useMockFallback, forbidden, liveError } = await loadClientProfile(clientId);
 
   return (
     <div className={styles.page}>
@@ -271,8 +281,12 @@ export async function ClientWorkspace({ clientId, section }: ClientWorkspaceProp
 
           <main className={styles.content}>
             {sourceMessage ? <p className={styles.dataNotice}>{sourceMessage}</p> : null}
-            {forbidden ? (
+            {liveError ? (
+              <div className={styles.emptyStateCard}>The live client profile is currently unavailable.</div>
+            ) : forbidden ? (
               <div className={styles.emptyStateCard}>This client is outside your practice scope.</div>
+            ) : !profile ? (
+              <div className={styles.emptyStateCard}>No client profile is available.</div>
             ) : section === "details" ? (
               <ClientDetailsSection profile={profile} useMockFallback={useMockFallback} />
             ) : section === "identity-check" ? (

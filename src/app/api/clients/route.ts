@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+import { mockClientSummaries } from "@/lib/client-mocks";
+import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 
 function decodeJwtPayload(token: string) {
   const parts = token.split(".");
@@ -34,6 +34,12 @@ function readStringClaim(payload: Record<string, unknown>, claimNames: string[])
 }
 
 async function resolveCurrentUserPracticeName(token: string) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl) {
+    return null;
+  }
+
   const payload = decodeJwtPayload(token);
   const currentUserId = payload
     ? readStringClaim(payload, [
@@ -55,7 +61,7 @@ async function resolveCurrentUserPracticeName(token: string) {
       ])
     : null;
 
-  const response = await fetch(new URL("/api/Users", API_BASE_URL), {
+  const response = await fetch(new URL("/api/Users", apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -92,15 +98,48 @@ async function resolveCurrentUserPracticeName(token: string) {
 }
 
 export async function GET(request: NextRequest) {
-  if (!API_BASE_URL) {
-    return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
-  }
-
-  const upstreamUrl = new URL("/api/ClientProfiles/SearchClientProfile", API_BASE_URL);
+  const apiBaseUrl = getApiBaseUrl();
   const clientName = request.nextUrl.searchParams.get("search") ?? undefined;
   const adviserName = request.nextUrl.searchParams.get("adviser") ?? undefined;
   const continuationToken = request.nextUrl.searchParams.get("continuationToken") ?? undefined;
   const pageSize = Number(request.nextUrl.searchParams.get("pageSize") ?? "25");
+
+  if (isMockAuthEnabled()) {
+    const normalizedSearch = clientName?.trim().toLowerCase() ?? "";
+    const filteredItems = mockClientSummaries.filter((client) => {
+      const matchesSearch = !normalizedSearch || (client.name ?? "").toLowerCase().includes(normalizedSearch);
+      const matchesAdviser = !adviserName || adviserName === "All advisers" || client.clientAdviserName === adviserName;
+
+      return matchesSearch && matchesAdviser;
+    });
+
+    return NextResponse.json(
+      {
+        data: {
+          items: filteredItems.slice(0, pageSize).map((client) => ({
+            id: client.id,
+            client: { name: client.name },
+            partner: null,
+            adviser: { name: client.clientAdviserName },
+            practice: client.clientAdviserPracticeName,
+            clientAdviserName: client.clientAdviserName,
+            clientAdviserPracticeName: client.clientAdviserPracticeName,
+            category: client.category,
+            clientCategory: client.clientCategory,
+          })),
+          continuationToken: continuationToken ?? null,
+          totalPageCount: Math.max(Math.ceil(filteredItems.length / Math.max(pageSize, 1)), 1),
+        },
+      },
+      { status: 200, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  if (!apiBaseUrl) {
+    return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
+  }
+
+  const upstreamUrl = new URL("/api/ClientProfiles/SearchClientProfile", apiBaseUrl);
 
   try {
     const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;

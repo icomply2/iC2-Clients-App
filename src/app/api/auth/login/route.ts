@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
-const ENABLE_MOCK_AUTH = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 
 function encodeBase64Url(value: unknown) {
   return Buffer.from(JSON.stringify(value))
@@ -36,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: "Invalid login payload." }, { status: 400 });
   }
 
-  if (ENABLE_MOCK_AUTH) {
+  if (isMockAuthEnabled()) {
     const email = typeof payload.email === "string" && payload.email.trim() ? payload.email.trim() : "mock.user@ic2.local";
     const token = createMockToken(email);
     const nextResponse = NextResponse.json(
@@ -60,12 +58,14 @@ export async function POST(request: NextRequest) {
     return nextResponse;
   }
 
-  if (!API_BASE_URL) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl) {
     return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
   }
 
   try {
-    const response = await fetch(new URL("/api/Users/Login", API_BASE_URL), {
+    const response = await fetch(new URL("/api/Users/Login", apiBaseUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

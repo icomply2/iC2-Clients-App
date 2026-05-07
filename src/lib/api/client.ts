@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+import { getApiBaseUrl } from "@/lib/server-runtime";
 
 type RequestOptions = RequestInit & {
   token?: string;
@@ -21,7 +21,9 @@ function shouldRetry(path: string, options: RequestOptions, attempt: number) {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  if (!API_BASE_URL) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl) {
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
   }
 
@@ -37,7 +39,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      response = await fetch(`${API_BASE_URL}${path}`, {
+      response = await fetch(`${apiBaseUrl}${path}`, {
         ...options,
         headers,
         cache: "no-store",
