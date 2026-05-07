@@ -1538,7 +1538,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
           ) : null}
         </div>
         <div className={styles.sectionHeaderActions}>
-          <button type="button" className={styles.modalSecondary} onClick={openCreateMappingModal}>
+          <button type="button" hidden aria-hidden="true" className={styles.modalSecondary} onClick={openCreateMappingModal}>
             New Mapping
           </button>
           <button type="button" hidden aria-hidden="true" tabIndex={-1} onClick={openImportModal}>

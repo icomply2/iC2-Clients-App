@@ -83,7 +83,7 @@ function ClientsPageContent() {
     let isMounted = true;
 
     async function loadClients() {
-      if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
+      if (!process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true") {
         const fallbackRows = getMockClientRows(search, adviser, currentUserScope?.practice?.name);
 
         if (isMounted) {
