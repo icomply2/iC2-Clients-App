@@ -8,6 +8,9 @@ import type {
 type RequestContext = {
   origin?: string | null;
   cookieHeader?: string | null;
+  apiBaseUrl?: string | null;
+  token?: string | null;
+  currentUser?: { id?: string | null; name?: string | null; email?: string | null } | null;
 };
 
 function resolveUrl(path: string, context?: RequestContext) {
@@ -44,26 +47,49 @@ function kindPath(kind: IdentityRelationKind) {
   return kind === "entities" ? "entities" : "dependants";
 }
 
+function upstreamKindPath(kind: IdentityRelationKind) {
+  return kind === "entities" ? "Entities" : "Dependants";
+}
+
+function canWriteDirect(context?: RequestContext) {
+  return Boolean(context?.apiBaseUrl && context.token && context.currentUser?.id);
+}
+
 export async function saveIdentityRelationCollection<K extends IdentityRelationKind>(
   kind: K,
   profileId: string,
   payload: IdentityRelationSavePayload<K>,
   context?: RequestContext,
 ) {
-  const response = await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(profileId)}/${kindPath(kind)}`, context), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(context?.cookieHeader ? { Cookie: context.cookieHeader } : {}),
-    },
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
+  const direct = canWriteDirect(context);
+  const response = direct
+    ? await fetch(new URL(`/api/ClientProfiles/${encodeURIComponent(profileId)}/${upstreamKindPath(kind)}`, context!.apiBaseUrl!), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${context!.token}`,
+        },
+        body: JSON.stringify({
+          ...payload,
+          currentUser: context!.currentUser,
+        }),
+        cache: "no-store",
+      })
+    : await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(profileId)}/${kindPath(kind)}`, context), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(context?.cookieHeader ? { Cookie: context.cookieHeader } : {}),
+        },
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
 
   const responseText = await response.text();
   const result = parseResponseBody<Array<IdentityRelationRecord<K>>>(responseText);
 
-  if (!response.ok) {
+  if (!response.ok || (result && "status" in result && result.status === false)) {
     throw new Error(getErrorMessage(result, responseText, `Unable to save ${kind} right now`, response.status));
   }
 

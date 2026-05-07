@@ -4,8 +4,16 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: [".next/**", "node_modules/**", "next-env.d.ts"],
-  },
+    ignores: [
+      ".azure_deploy_artifact/**",
+      ".deploy_artifact/**",
+      ".next/**",
+    ".next-azure/**",
+    "node_modules/**",
+    "next-env.d.ts",
+    "generated-test-documents/**",
+  ],
+},
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

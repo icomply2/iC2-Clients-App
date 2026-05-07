@@ -8,6 +8,9 @@ import type {
 type RequestContext = {
   origin?: string | null;
   cookieHeader?: string | null;
+  apiBaseUrl?: string | null;
+  token?: string | null;
+  currentUser?: { id?: string | null; name?: string | null; email?: string | null } | null;
 };
 
 const COLLECTION_PATHS: Record<ProfileCollectionKind, string> = {
@@ -20,6 +23,16 @@ const COLLECTION_PATHS: Record<ProfileCollectionKind, string> = {
   insurance: "insurance",
 };
 
+const UPSTREAM_COLLECTION_PATHS: Record<ProfileCollectionKind, string> = {
+  assets: "Assets",
+  liabilities: "Liabilities",
+  income: "Incomes",
+  expenses: "Expenses",
+  superannuation: "SuperAnnuations",
+  "retirement-income": "Pensions",
+  insurance: "Insurance",
+};
+
 function resolveUrl(path: string, context?: RequestContext) {
   return context?.origin ? `${context.origin}${path}` : path;
 }
@@ -29,6 +42,10 @@ function buildHeaders(context?: RequestContext) {
     "Content-Type": "application/json",
     ...(context?.cookieHeader ? { Cookie: context.cookieHeader } : {}),
   };
+}
+
+function canWriteDirect(context?: RequestContext) {
+  return Boolean(context?.apiBaseUrl && context.token && context.currentUser?.id);
 }
 
 function parseResponseBody<T>(responseText: string) {
@@ -65,18 +82,32 @@ export async function saveProfileCollection<K extends ProfileCollectionKind>(
   payload: ProfileCollectionSavePayload<K>,
   context?: RequestContext,
 ) {
-  const path = COLLECTION_PATHS[kind];
-  const response = await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(profileId)}/${path}`, context), {
-    method: "POST",
-    headers: buildHeaders(context),
-    body: JSON.stringify(payload),
-    cache: "no-store",
-  });
+  const direct = canWriteDirect(context);
+  const response = direct
+    ? await fetch(new URL(`/api/ClientProfiles/${encodeURIComponent(profileId)}/${UPSTREAM_COLLECTION_PATHS[kind]}`, context!.apiBaseUrl!), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${context!.token}`,
+        },
+        body: JSON.stringify({
+          ...payload,
+          currentUser: context!.currentUser,
+        }),
+        cache: "no-store",
+      })
+    : await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(profileId)}/${COLLECTION_PATHS[kind]}`, context), {
+        method: "POST",
+        headers: buildHeaders(context),
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
 
   const responseText = await response.text();
   const result = parseResponseBody<ProfileCollectionRecord<K>>(responseText);
 
-  if (!response.ok) {
+  if (!response.ok || (result && "status" in result && result.status === false)) {
     throw new Error(getErrorMessage(result, responseText, `Unable to save ${kind} right now`, response.status));
   }
 

@@ -121,6 +121,25 @@ function firstName(value: string) {
   return value.trim().split(/\s+/)[0] ?? value;
 }
 
+function salutationName(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "Client";
+  }
+
+  const linkedNames = trimmed.split(/\s*(?:&|\band\b)\s*/i).map((name) => name.trim()).filter(Boolean);
+
+  if (linkedNames.length > 1) {
+    const firstNames = linkedNames.map((name) => firstName(name) || name);
+    const uniqueFirstNames = new Set(firstNames.map((name) => name.toLowerCase()));
+
+    return uniqueFirstNames.size === firstNames.length ? firstNames.join(" and ") : linkedNames.join(" and ");
+  }
+
+  return firstName(trimmed) || trimmed;
+}
+
 function getClientName(profile: ClientProfile) {
   const names = [profile.client?.name, profile.partner?.name].map(text).filter(Boolean);
   return names.join(" and ") || "Client";
@@ -133,8 +152,9 @@ function personAddress(person?: PersonRecord | null) {
   const postcode =
     text(person?.postCode) || text(person?.postcode) || text(person?.addressPostCode) || text(person?.address?.postCode) || text(person?.address?.postcode);
   const locality = [suburb, state, postcode].filter(Boolean).join(" ");
+  const lines = [street, locality].filter(Boolean);
 
-  return [street, locality].filter(Boolean);
+  return lines.length ? lines : ["<<address>>", "<<Suburb>> <<State>> <<Postcode>>"];
 }
 
 function parseCurrencyAmount(value?: string | null) {
@@ -249,7 +269,7 @@ function sectionPropertiesXml() {
 
 function buildDocumentXml(profile: ClientProfile, draft: EngagementLetterDocxInput) {
   const clientName = getClientName(profile);
-  const clientFirstName = firstName(text(profile.client?.name) || clientName);
+  const clientSalutationName = salutationName(clientName);
   const adviserName = text(profile.adviser?.name) || "<<adviser.name>>";
   const practiceName = text(profile.adviser?.practice?.name) || text(profile.practice) || "<<practice>>";
   const licenseeName = text(profile.adviser?.licensee?.name) || text(profile.licensee);
@@ -270,7 +290,7 @@ function buildDocumentXml(profile: ClientProfile, draft: EngagementLetterDocxInp
     paragraphXml(formatDate(), { spacingAfter: 160 }),
     paragraphXml(clientName, { bold: true }),
     ...addressLines.map((line) => paragraphXml(line)),
-    paragraphXml(`Dear ${clientFirstName},`, { spacingBefore: 220, spacingAfter: 120 }),
+    paragraphXml(`Dear ${clientSalutationName},`, { spacingBefore: 220, spacingAfter: 120 }),
     headingXml("Engagement Letter", 1),
     headingXml("Terms of Engagement", 2),
     paragraphXml("Further to our meeting and discussions, this document sets out to:", { spacingAfter: 80 }),

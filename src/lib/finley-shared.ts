@@ -12,6 +12,11 @@ export type FinleyChatRequest = {
     role?: "assistant" | "user";
     content?: string | null;
   }> | null;
+  uploadedFiles?: Array<{
+    name?: string | null;
+    tags?: string[] | null;
+    extractedText?: string | null;
+  }> | null;
 };
 
 export const FINLEY_FILE_NOTE_TYPE_OPTIONS = FILE_NOTE_TYPE_OPTIONS;

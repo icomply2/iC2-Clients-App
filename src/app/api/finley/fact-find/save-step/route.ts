@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ApiError } from "@/lib/api/client";
 import { getClientProfile, getClientProfileId } from "@/lib/api/clients";
 import { readAuthTokenFromCookies } from "@/lib/auth";
-import { updateClientDetails, updatePartnerDetails } from "@/lib/services/client-updates";
+import { updateClientDetails, updatePartnerDetails, updatePersonRiskProfile } from "@/lib/services/client-updates";
 
 function parseDateValue(value: string) {
   const trimmed = value.trim();
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const profile = await loadProfile(clientId);
-    const target = record.target === "partner" ? "partner" : "client";
+    const target: "client" | "partner" = stepId === "partner-details" || record.target === "partner" ? "partner" : "client";
     const personId = target === "partner" ? profile.partner?.id?.trim() || "" : profile.client?.id?.trim() || "";
     const profileId = profile.id?.trim() || "";
 
@@ -103,26 +103,28 @@ export async function POST(request: NextRequest) {
       cookieHeader: request.headers.get("cookie"),
     };
 
+    const updateInput = {
+      profileId,
+      personId,
+      person: target === "partner" ? profile.partner ?? null : profile.client ?? null,
+      changes,
+      target,
+    } as const;
+
     if (target === "partner") {
       await updatePartnerDetails(
-        {
-          profileId,
-          personId,
-          person: profile.partner ?? null,
-          changes,
-        },
+        updateInput,
         context,
       );
     } else {
       await updateClientDetails(
-        {
-          profileId,
-          personId,
-          person: profile.client ?? null,
-          changes,
-        },
+        updateInput,
         context,
       );
+    }
+
+    if (typeof record.riskProfile === "string") {
+      await updatePersonRiskProfile(updateInput, record.riskProfile, context);
     }
 
     return NextResponse.json({ ok: true }, { status: 200 });

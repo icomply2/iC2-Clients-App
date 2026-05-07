@@ -714,25 +714,6 @@
   gap: 0.75rem;
 }
 
-.inlineAssistButton {
-  min-height: 1.9rem;
-  padding: 0 0.65rem;
-  border: 1px solid #c7d4e3;
-  border-radius: 999px;
-  background: #fff;
-  color: #113864;
-  font: inherit;
-  font-size: 0.76rem;
-  font-weight: 800;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.inlineAssistButton:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
 .messageGroup {
   display: grid;
   align-content: start;
@@ -1599,6 +1580,12 @@
   box-shadow: 0 24px 48px rgba(15, 46, 87, 0.2);
 }
 
+.factFindImportModal {
+  width: min(58rem, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+}
+
 .modalHeader {
   display: block;
 }
@@ -1648,6 +1635,74 @@
   color: #9b1c1c;
   font-size: 0.84rem;
   line-height: 1.5;
+}
+
+.factFindImportSummaryBlock,
+.factFindImportReviewCard,
+.factFindImportNotice {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem;
+  border: 1px solid #dbe4ef;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+  color: #243b53;
+}
+
+.factFindImportSummaryBlock span,
+.factFindImportCountCard span {
+  color: #6b7c93;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.factFindImportSummaryBlock p,
+.factFindImportReviewCard p {
+  margin: 0;
+}
+
+.factFindImportCountGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.factFindImportCountCard {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.7rem;
+  border: 1px solid #ecd88b;
+  border-radius: 0.75rem;
+  background: #fff8dc;
+}
+
+.factFindImportCountCard strong {
+  color: #113864;
+  font-size: 1.05rem;
+}
+
+.factFindImportReviewStack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.factFindImportReviewCard strong {
+  color: #113864;
+}
+
+.factFindImportReviewCard ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.factFindImportNotice {
+  border-color: #f2c500;
+  background: #fff8dc;
+  font-weight: 700;
 }
 
 .modalHint {

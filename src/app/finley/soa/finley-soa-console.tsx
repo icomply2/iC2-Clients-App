@@ -35,6 +35,7 @@ import type {
 import { parseProductRexReport } from "@/lib/productrex-report-parser";
 import { getPortfolioAccountViews } from "@/lib/soa-portfolio-accounts";
 import type { IntakeAssessmentV1, ProductDraftResponseV1, StrategyDraftResponseV1 } from "@/lib/soa-output-contracts";
+import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
 import type { SoaIntakeResponse } from "@/lib/soa-intake-service";
 import { generateIntakeAssessment, refineIntakeAssessment } from "@/lib/soa-intake-engine";
 import {
@@ -273,6 +274,23 @@ function getIntakeReadinessClassName(status: IntakeAssessmentV1["readinessBySect
 
 function normalizeText(value: string) {
   return value.trim().toLowerCase();
+}
+
+function normalizeAdviceCaseRecommendationLanguage(caseValue: AdviceCaseV1, clientName?: string | null): AdviceCaseV1 {
+  return {
+    ...caseValue,
+    recommendations: {
+      ...caseValue.recommendations,
+      strategic: caseValue.recommendations.strategic.map((recommendation) => ({
+        ...recommendation,
+        recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
+      })),
+      product: caseValue.recommendations.product.map((recommendation) => ({
+        ...recommendation,
+        recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
+      })),
+    },
+  };
 }
 
 function getOutstandingFollowUpQuestions(
@@ -1445,7 +1463,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   }, [activeClientId]);
 
   function hydrateScenarioDraft(draft: SoaScenarioDraftValue) {
-    setAdviceCase(draft.adviceCase);
+    setAdviceCase(normalizeAdviceCaseRecommendationLanguage(draft.adviceCase, activeClient?.name));
     setMessages(draft.messages as Message[]);
     setUploads(draft.uploads as UploadedInput[]);
     setShowReadiness(false);
@@ -1731,6 +1749,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       return;
     }
 
+    const normalizedAdviceCase = normalizeAdviceCaseRecommendationLanguage(adviceCase, activeClient?.name);
     const payload = {
       savedAt: new Date().toISOString(),
       clientId: activeClientId || null,
@@ -1739,7 +1758,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       adviserName: activeClient?.clientAdviserName ?? null,
       practiceName: activeClient?.clientAdviserPracticeName ?? adviceCase.practice.name ?? null,
       practiceAbn: null,
-      adviceCase,
+      adviceCase: normalizedAdviceCase,
       intakeAssessment,
       confirmedSections,
     };
@@ -1758,6 +1777,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       return;
     }
 
+    const normalizedAdviceCase = normalizeAdviceCaseRecommendationLanguage(adviceCase, activeClient?.name);
     const existingScenario = getSoaScenario(activeClientId, activeSoaId);
     const timestamp = new Date().toISOString();
     const nextScenario: SoaScenario = {
@@ -1768,7 +1788,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       updatedAt: timestamp,
       draft: {
         activeSectionId,
-        adviceCase,
+        adviceCase: normalizedAdviceCase,
         messages,
         uploads,
         workflowStarted,
@@ -2022,8 +2042,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     try {
       persistSoaPrintPreview(printPreviewPayload);
       const clientProfile = await loadClientProfileForExport();
+      const normalizedAdviceCase = normalizeAdviceCaseRecommendationLanguage(adviceCase, activeClient?.name);
       const { blob, fileName } = await buildSoaDocx({
-        adviceCase,
+        adviceCase: normalizedAdviceCase,
         clientProfile,
         savedAt: printPreviewPayload.savedAt,
         clientName: activeClient?.name ?? null,
@@ -2546,7 +2567,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       return {
                       recommendationId: makeId("strategy"),
                       type: draft.type || "other",
-                      recommendationText: draft.recommendationText,
+                      recommendationText: normalizeRecommendationLanguage(draft.recommendationText, activeClient?.name),
                       linkedObjectiveIds: linkedObjectiveIds.length ? linkedObjectiveIds : nextObjectiveIds,
                       targetAmount: null,
                       monthlyContribution: null,
@@ -2579,7 +2600,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   : nextAssessment.candidateStrategyRecommendations.map((recommendationText) => ({
                       recommendationId: makeId("strategy"),
                       type: "other",
-                      recommendationText,
+                      recommendationText: normalizeRecommendationLanguage(recommendationText, activeClient?.name),
                       linkedObjectiveIds: nextObjectiveIds,
                       targetAmount: null,
                       monthlyContribution: null,
@@ -2610,7 +2631,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         recommendedProductName: draft.recommendedProductName ?? null,
                         recommendedProvider: draft.recommendedProvider ?? null,
                         linkedObjectiveIds: linkedObjectiveIds.length ? linkedObjectiveIds : nextObjectiveIds,
-                        recommendationText: draft.recommendationText,
+                        recommendationText: normalizeRecommendationLanguage(draft.recommendationText, activeClient?.name),
                         targetAmount: null,
                         transferAmount: null,
                         monthlyFundingAmount: null,
@@ -2651,7 +2672,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         recommendedProductName: null,
                         recommendedProvider: null,
                         linkedObjectiveIds: nextObjectiveIds,
-                        recommendationText: note,
+                        recommendationText: normalizeRecommendationLanguage(note, activeClient?.name),
                         targetAmount: null,
                         transferAmount: null,
                         monthlyFundingAmount: null,

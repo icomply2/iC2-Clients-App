@@ -16,6 +16,10 @@
   gap: 0.75rem;
 }
 
+.topbarRight {
+  gap: 0.35rem;
+}
+
 .homeButton {
   display: inline-flex;
   align-items: center;
@@ -52,29 +56,40 @@
 }
 
 .topLink {
+  --topbar-action-icon-size: 1.65rem;
+
   display: grid;
+  grid-template-rows: var(--topbar-action-icon-size) 0.8rem;
+  align-items: start;
   justify-items: center;
-  gap: 0.18rem;
-  min-width: 2.9rem;
+  gap: 0.15rem;
+  width: 4rem;
+  min-width: 4rem;
+  min-height: 2.65rem;
   color: #fff;
   font-size: 0.62rem;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
 }
 
 .icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.55rem;
-  height: 1.55rem;
+  width: var(--topbar-action-icon-size);
+  height: var(--topbar-action-icon-size);
   border: 1px solid rgba(255, 255, 255, 0.78);
   border-radius: 999px;
   font-size: 0.82rem;
   font-weight: 700;
+  line-height: 1;
 }
 
 .topbarAvatarImage {
-  width: 1.7rem;
-  height: 1.7rem;
+  display: block;
+  width: var(--topbar-action-icon-size);
+  height: var(--topbar-action-icon-size);
   border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 999px;
   object-fit: cover;
@@ -85,14 +100,29 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.9rem;
-  height: 1.9rem;
+  width: var(--topbar-action-icon-size);
+  height: var(--topbar-action-icon-size);
   border-radius: 999px;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.8);
   color: #fff;
-  font-size: 0.76rem;
+  font-size: 0.68rem;
   font-weight: 800;
+  line-height: 1;
+}
+
+.topLabel {
+  display: block;
+  align-self: start;
+  width: 100%;
+  overflow: hidden;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 0.8rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

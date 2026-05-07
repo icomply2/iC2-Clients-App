@@ -298,12 +298,14 @@ export function CreateClientDialog({
           client: {
             name: primaryName,
             status: "Client",
+            accountStatus: "Active",
             clientCategory: "Draft",
           },
           partner: partnerName.trim()
             ? {
                 name: partnerName.trim(),
                 status: "Client",
+                accountStatus: "Active",
                 clientCategory: "Draft",
               }
             : {},

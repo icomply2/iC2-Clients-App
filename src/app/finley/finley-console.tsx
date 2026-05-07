@@ -18,6 +18,7 @@ import {
 } from "@/lib/finley-shared";
 import { cacheFileNoteAttachments } from "@/lib/file-note-attachment-cache";
 import { DEFAULT_SERVICE_AGREEMENT_SERVICES, groupServiceAgreementServices } from "@/lib/documents/document-sections";
+import { getFactFindImportCounts, type FactFindImportCandidate } from "@/lib/fact-find-import";
 import finleyAvatar from "./finley-avatar.png";
 import styles from "./page.module.css";
 
@@ -156,6 +157,30 @@ type ConciergeSuggestedTask = {
     | "summarise_documents";
 };
 
+type FactFindImportResponse = {
+  candidate?: FactFindImportCandidate | null;
+  warning?: string | null;
+  error?: string | null;
+};
+
+type FactFindApplyResponse = {
+  ok?: boolean;
+  applied?: string[];
+  error?: string;
+  routeVersion?: string;
+  profileId?: string;
+  beforeCounts?: Record<string, number>;
+  afterCounts?: Record<string, number>;
+  expectedCounts?: Record<string, number>;
+  audit?: Array<{
+    section?: string;
+    requested?: number;
+    before?: number;
+    after?: number | null;
+    note?: string | null;
+  }>;
+};
+
 function EngagementLetterRender({
   draft,
   clientName,
@@ -178,7 +203,7 @@ function EngagementLetterRender({
   const advicePreparationFee = parseCurrencyAmount(draft.advicePreparationFee);
   const implementationFee = parseCurrencyAmount(draft.implementationFee);
   const totalFee = advicePreparationFee + implementationFee;
-  const clientFirstName = firstName(clientName) || clientName;
+  const clientSalutationName = salutationName(clientName);
   const servicesHtml = stripHtml(draft.servicesHtml)
     ? draft.servicesHtml
     : buildDefaultEngagementServicesHtml(clientName);
@@ -208,11 +233,11 @@ function EngagementLetterRender({
         <div className={styles.engagementDate}>{formatToday()}</div>
         <div className={styles.engagementAddressBlock}>
           <strong>{clientName}</strong>
-          <span>&lt;&lt;client.address&gt;&gt;</span>
-          <span>&lt;&lt;client.suburb&gt;&gt; &lt;&lt;client.state&gt;&gt; &lt;&lt;client.postcode&gt;&gt;</span>
+          <span>&lt;&lt;address&gt;&gt;</span>
+          <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
         </div>
 
-        <p>Dear {clientFirstName},</p>
+        <p>Dear {clientSalutationName},</p>
 
         <h1>Engagement Letter</h1>
 
@@ -339,7 +364,7 @@ function AgreementRender({
   exportError?: string | null;
 }) {
   const isAnnual = agreement.agreementType === "annual";
-  const clientFirstName = firstName(agreement.clientName) || agreement.clientName;
+  const clientSalutationName = salutationName(agreement.clientName);
   const services = agreement.services.length ? agreement.services : DEFAULT_SERVICE_AGREEMENT_SERVICES;
   const serviceGroups = groupServiceAgreementServices(services);
   const title = isAnnual ? "Annual Advice Agreement" : "Ongoing Service Agreement";
@@ -377,7 +402,7 @@ function AgreementRender({
           )}
         </div>
 
-        <p>Dear {clientFirstName},</p>
+        <p>Dear {clientSalutationName},</p>
 
         <h1>{title}</h1>
         {isAnnual ? (
@@ -908,6 +933,212 @@ function getConciergeTagLabel(tag: ConciergeDocumentTag) {
   }
 }
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getUploadsWithTag(uploads: ConciergeUpload[], tag: ConciergeDocumentTag) {
+  return uploads.filter((upload) => upload.tags.includes(tag) && upload.extractedText?.trim());
+}
+
+function buildUploadedDocumentContext(uploads: ConciergeUpload[], tags?: ConciergeDocumentTag[]) {
+  const tagSet = tags?.length ? new Set(tags) : null;
+  return uploads
+    .filter((upload) => upload.extractedText?.trim())
+    .filter((upload) => !tagSet || upload.tags.some((tag) => tagSet.has(tag)))
+    .map((upload) => {
+      const tagLabels = upload.tags.filter((tag) => tag !== "unknown").map(getConciergeTagLabel).join(", ");
+      return [
+        `File: ${upload.name}`,
+        tagLabels ? `Detected: ${tagLabels}` : null,
+        upload.extractedText?.trim().slice(0, 6000),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n---\n\n");
+}
+
+function findFirstMoneyNear(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].replace(/\s/g, "");
+    }
+  }
+
+  return "";
+}
+
+function isInternalUploadedDocumentLine(line: string) {
+  const normalized = line.trim().toLowerCase();
+
+  if (!normalized) return true;
+  if (normalized.startsWith("file:")) return true;
+  if (normalized.startsWith("detected:")) return true;
+  if (normalized.includes(".docx")) return true;
+  if (normalized.includes("soa test case client pack")) return true;
+  if (/^scenario\s+\d+\b/.test(normalized)) return true;
+  if (normalized.includes("fact find detected")) return true;
+  if (normalized.includes("meeting transcript detected")) return true;
+  if (normalized.includes("engagement letter detected")) return true;
+  if (normalized.includes("productrex detected")) return true;
+  if (normalized === "productrex") return true;
+
+  return false;
+}
+
+function buildUploadedClientFacingText(uploads: ConciergeUpload[], tags?: ConciergeDocumentTag[]) {
+  const tagSet = tags?.length ? new Set(tags) : null;
+  return uploads
+    .filter((upload) => upload.extractedText?.trim())
+    .filter((upload) => !tagSet || upload.tags.some((tag) => tagSet.has(tag)))
+    .map((upload) =>
+      upload
+        .extractedText!.split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 2)
+        .filter((line) => !isInternalUploadedDocumentLine(line))
+        .join("\n")
+        .slice(0, 6000),
+    )
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function pickContextLines(text: string, keywords: string[], limit = 5) {
+  const lowerKeywords = keywords.map((keyword) => keyword.toLowerCase());
+  const seen = new Set<string>();
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => !isInternalUploadedDocumentLine(line))
+    .filter((line) => line.length > 12 && line.length < 240)
+    .filter((line) => lowerKeywords.some((keyword) => line.toLowerCase().includes(keyword)))
+    .filter((line) => {
+      const key = line.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function buildClientFacingAdviceServiceBullets(text: string) {
+  const normalized = text.toLowerCase();
+  const bullets: string[] = [];
+  const add = (condition: boolean, sentence: string) => {
+    if (condition && !bullets.includes(sentence)) {
+      bullets.push(sentence);
+    }
+  };
+
+  add(
+    /retirement income|account[-\s]?based pension|pension review|retiree|retirement/.test(normalized),
+    "Review your retirement income arrangements, including your account-based pension, so the strategy remains aligned with your income needs and longer-term objectives.",
+  );
+  add(
+    /centrelink|age pension|aged pension/.test(normalized),
+    "Consider your Centrelink position and explain any relevant implications for your pension entitlements and reporting obligations.",
+  );
+  add(
+    /cash reserve|cashflow|cash flow|emergency fund|liquidity/.test(normalized),
+    "Review your cash reserve and cashflow needs so you have appropriate access to funds for regular spending and unexpected expenses.",
+  );
+  add(
+    /estate planning|will|power of attorney|beneficiar|estate/.test(normalized),
+    "Identify any estate planning matters raised during the advice process and, where appropriate, refer you to a suitably qualified legal professional.",
+  );
+  add(
+    /superannuation|super\b|smsf/.test(normalized),
+    "Review your superannuation arrangements and explain how they support your broader advice strategy.",
+  );
+  add(
+    /investment|portfolio|asset allocation|risk profile/.test(normalized),
+    "Review your investment approach, portfolio settings and risk profile to ensure they remain suitable for your circumstances.",
+  );
+  add(
+    /insurance|life cover|income protection|trauma|tpd/.test(normalized),
+    "Review your personal insurance needs and identify whether any changes should be considered as part of the advice.",
+  );
+
+  return bullets.slice(0, 6);
+}
+
+function buildEngagementDraftFromUploadedContext(
+  clientName: string,
+  adviserName: string | null | undefined,
+  uploads: ConciergeUpload[],
+) {
+  const documentContext = buildUploadedClientFacingText(uploads, [
+    "fact-find",
+    "meeting-transcript",
+    "strategy-paper",
+    "engagement-letter",
+    "service-agreement",
+  ]);
+  const fallback = {
+    reasonsHtml: buildDefaultEngagementReasonsHtml(clientName, adviserName),
+    servicesHtml: buildDefaultEngagementServicesHtml(clientName),
+    advicePreparationFee: "",
+    implementationFee: "",
+  };
+
+  if (!documentContext.trim()) {
+    return fallback;
+  }
+
+  const clientFacingServiceBullets = buildClientFacingAdviceServiceBullets(documentContext);
+  const reasonLines = pickContextLines(documentContext, [
+    "goal",
+    "objective",
+    "retire",
+    "retirement",
+    "advice",
+    "recommend",
+    "scope",
+    "super",
+    "pension",
+    "income",
+  ]);
+
+  return {
+    reasonsHtml: [
+      `<p>Based on our discussions and the information you have provided, we understand you are seeking advice that is relevant to your current circumstances and objectives.</p>`,
+      "<ul>",
+      ...(reasonLines.length
+        ? reasonLines.map((line) => `<li>${escapeHtml(line)}</li>`)
+        : ["<li>Review the client’s current circumstances, retirement position, advice needs, and agreed next steps.</li>"]),
+      "</ul>",
+    ].join(""),
+    servicesHtml: [
+      `<p>We will provide advice and assistance that is tailored to your circumstances. This may include the following services:</p>`,
+      "<ul>",
+      ...(clientFacingServiceBullets.length
+        ? clientFacingServiceBullets.map((line) => `<li>${escapeHtml(line)}</li>`)
+        : [
+            "<li>Review your current financial position, objectives and advice needs.</li>",
+            "<li>Prepare advice documentation that explains our recommendations, the reasons for those recommendations and the costs involved.</li>",
+            "<li>Discuss the advice with you and explain the steps required to implement any recommendations you choose to proceed with.</li>",
+          ]),
+      "</ul>",
+    ].join(""),
+    advicePreparationFee: findFirstMoneyNear(documentContext, [
+      /(?:advice preparation fee|soa fee|advice fee|preparation fee)[^\d$]{0,80}(\$?\s?[\d,]+(?:\.\d{2})?)/i,
+      /(\$?\s?[\d,]+(?:\.\d{2})?)[^\n]{0,80}(?:advice preparation fee|soa fee|advice fee|preparation fee)/i,
+    ]),
+    implementationFee: findFirstMoneyNear(documentContext, [
+      /(?:implementation fee|implementation cost)[^\d$]{0,80}(\$?\s?[\d,]+(?:\.\d{2})?)/i,
+      /(\$?\s?[\d,]+(?:\.\d{2})?)[^\n]{0,80}(?:implementation fee|implementation cost)/i,
+    ]),
+  };
+}
+
 function filterClientSummariesByPractice(
   clients: FinleyClientSummary[],
   practiceName?: string | null,
@@ -1098,20 +1329,26 @@ function buildEditorPayload(editorCard: FinleyEditorCard | FinleyTableEditorCard
     };
   }
 
-  return {
-    record: Object.fromEntries(
-      editorCard.fields.map((field) => [
-        field.key,
-        isCurrencyFieldKey(field.key)
-          ? (parseCurrencyValue(field.value)?.toFixed(2) ?? "")
-          : isPercentFieldKey(field.key)
-            ? (parsePercentValue(field.value)?.toFixed(2) ?? "")
-            : isDateFieldKey(field.key)
-              ? (parseDateValue(field.value) ?? "")
-              : field.value,
-      ]),
-    ),
-  };
+  const record = Object.fromEntries(
+    editorCard.fields.map((field) => [
+      field.key,
+      isCurrencyFieldKey(field.key)
+        ? (parseCurrencyValue(field.value)?.toFixed(2) ?? "")
+        : isPercentFieldKey(field.key)
+          ? (parsePercentValue(field.value)?.toFixed(2) ?? "")
+          : isDateFieldKey(field.key)
+            ? (parseDateValue(field.value) ?? "")
+            : field.value,
+    ]),
+  );
+
+  if (editorCard.toolName === "create_file_note") {
+    const ownerField = editorCard.fields.find((field) => field.key === "ownerId");
+    const ownerName = ownerField?.options?.find((option) => option.value === ownerField.value)?.label ?? "";
+    record.ownerName = ownerName;
+  }
+
+  return { record };
 }
 
 function normalizeFactFindWorkflow(workflow: FinleyFactFindWorkflow | null) {
@@ -1132,6 +1369,25 @@ function stripHtml(value: string) {
 
 function firstName(value?: string | null) {
   return value?.trim().split(/\s+/)[0] ?? "";
+}
+
+function salutationName(value?: string | null) {
+  const trimmed = value?.trim();
+
+  if (!trimmed) {
+    return "Client";
+  }
+
+  const linkedNames = trimmed.split(/\s*(?:&|\band\b)\s*/i).map((name) => name.trim()).filter(Boolean);
+
+  if (linkedNames.length > 1) {
+    const firstNames = linkedNames.map((name) => firstName(name) || name);
+    const uniqueFirstNames = new Set(firstNames.map((name) => name.toLowerCase()));
+
+    return uniqueFirstNames.size === firstNames.length ? firstNames.join(" and ") : linkedNames.join(" and ");
+  }
+
+  return firstName(trimmed) || trimmed;
 }
 
 function formatToday() {
@@ -1357,6 +1613,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [fileNoteAttachmentFiles, setFileNoteAttachmentFiles] = useState<File[]>([]);
   const [conciergeUploads, setConciergeUploads] = useState<ConciergeUpload[]>([]);
   const [isUploadingConciergeFiles, setIsUploadingConciergeFiles] = useState(false);
+  const [isExtractingFactFindImport, setIsExtractingFactFindImport] = useState(false);
+  const [isApplyingFactFindImport, setIsApplyingFactFindImport] = useState(false);
+  const [factFindImportCandidate, setFactFindImportCandidate] = useState<FactFindImportCandidate | null>(null);
+  const [factFindImportSourceFile, setFactFindImportSourceFile] = useState<string | null>(null);
+  const [factFindImportError, setFactFindImportError] = useState<string | null>(null);
+  const [isFactFindImportModalOpen, setIsFactFindImportModalOpen] = useState(false);
   const conciergeUploadInputRef = useRef<HTMLInputElement | null>(null);
   const fileNoteAttachmentInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -1374,6 +1636,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   );
   const conciergeUploadTags = useMemo(
     () => new Set(conciergeUploads.flatMap((upload) => upload.tags)),
+    [conciergeUploads],
+  );
+  const primaryFactFindUpload = useMemo(
+    () => getUploadsWithTag(conciergeUploads, "fact-find")[0] ?? null,
     [conciergeUploads],
   );
   const conciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
@@ -1720,6 +1986,154 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setIsCreateClientOpen(true);
   }
 
+  function notifyWorkflowComplete(content: string) {
+    setMessages((current) => [
+      ...current,
+      {
+        id: `assistant-workflow-complete-${Date.now()}-${crypto.randomUUID()}`,
+        role: "assistant",
+        content,
+      },
+    ]);
+  }
+
+  async function startFactFindWorkflow() {
+    if (!activeClient) return;
+
+    const response = await fetch("/api/finley/fact-find", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        activeClientId: activeClient.id,
+        activeClientName: activeClient.name,
+      }),
+    });
+
+    const body = (await response.json().catch(() => null)) as { workflow?: FinleyFactFindWorkflow | null } | null;
+
+    if (!response.ok || !body?.workflow) {
+      throw new Error("Unable to start the fact find workflow right now.");
+    }
+
+    setMessages([]);
+    setPlanSummary(null);
+    setPlanSteps([]);
+    setWarnings([]);
+    setPendingPlanId(null);
+    setDisplayCard(null);
+    setEditorCard(null);
+    clearLiveRenderOutputs();
+    setFactFindWorkflow(normalizeFactFindWorkflow(body.workflow));
+    setFactFindStepIndex(0);
+    setFactFindWorkflowError(null);
+    setFileNoteSubjectManuallyEdited(false);
+    setFileNoteAttachments([]);
+    setFileNoteAttachmentFiles([]);
+  }
+
+  async function inspectFactFindUpload(upload: ConciergeUpload) {
+    if (!upload.extractedText?.trim()) {
+      setFactFindImportError("Finley could not read text from this fact find. Try uploading the original DOCX or a text-based file rather than a scanned PDF.");
+      setFactFindImportCandidate(null);
+      setIsFactFindImportModalOpen(true);
+      return;
+    }
+
+    setIsExtractingFactFindImport(true);
+    setFactFindImportError(null);
+    setFactFindImportCandidate(null);
+    setFactFindImportSourceFile(upload.name);
+
+    try {
+      const response = await fetch("/api/finley/fact-find/extract-import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fileName: upload.name,
+          extractedText: upload.extractedText,
+          clientName: activeClient?.name ?? null,
+        }),
+      });
+      const body = (await response.json().catch(() => null)) as FactFindImportResponse | null;
+
+      if (!response.ok || !body?.candidate) {
+        throw new Error(body?.error ?? `Unable to inspect fact find right now (status ${response.status}).`);
+      }
+
+      setFactFindImportCandidate(body.candidate);
+      setFactFindImportError(body.warning ?? null);
+      setIsFactFindImportModalOpen(true);
+    } catch (error) {
+      setFactFindImportError(error instanceof Error ? error.message : "Unable to inspect fact find right now.");
+      setIsFactFindImportModalOpen(true);
+    } finally {
+      setIsExtractingFactFindImport(false);
+    }
+  }
+
+  async function applyFactFindImport() {
+    if (!factFindImportCandidate || !activeClient?.id) {
+      return;
+    }
+
+    setIsApplyingFactFindImport(true);
+    setFactFindImportError(null);
+
+    try {
+      const response = await fetch("/api/finley/fact-find/apply-import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          clientId: activeClient.id,
+          candidate: factFindImportCandidate,
+        }),
+      });
+      const body = (await response.json().catch(() => null)) as FactFindApplyResponse | null;
+
+      if (!response.ok || !body?.ok) {
+        const auditLines = body?.audit?.length
+          ? body.audit
+              .map((entry) => `${entry.section}: requested ${entry.requested ?? 0}, before ${entry.before ?? 0}, after ${entry.after ?? 0} (${entry.note ?? "no note"})`)
+              .join("; ")
+          : "";
+        throw new Error(
+          [
+            body?.error ?? `Unable to apply fact find data right now (status ${response.status}).`,
+            body?.routeVersion ? `Route version: ${body.routeVersion}.` : null,
+            body?.profileId ? `Profile id: ${body.profileId}.` : null,
+            auditLines ? `Audit: ${auditLines}.` : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+      }
+
+      setIsFactFindImportModalOpen(false);
+      setFactFindImportCandidate(null);
+      await startFactFindWorkflow();
+      const auditLines = body.audit?.length
+        ? body.audit
+            .map((entry) => `${entry.section}: ${entry.before ?? 0} -> ${entry.after ?? 0}`)
+            .join("; ")
+        : "";
+      setMessages([
+        {
+          id: `assistant-fact-find-applied-${Date.now()}`,
+          role: "assistant",
+          content: body.applied?.length
+            ? `I applied the uploaded fact find data for ${activeClient.name}: ${body.applied.join(", ")}. I verified the profile reload${auditLines ? ` (${auditLines})` : ""} and refreshed the fact find workflow.`
+            : `I reviewed the uploaded fact find for ${activeClient.name}, but there were no new profile records to apply.`,
+        },
+      ]);
+    } catch (error) {
+      setFactFindImportError(error instanceof Error ? error.message : "Unable to apply fact find data right now.");
+    } finally {
+      setIsApplyingFactFindImport(false);
+    }
+  }
+
   async function handleStarterAction(
     action:
       | "fact_find"
@@ -1734,40 +2148,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     if (!activeClient || isSending) return;
 
     if (action === "fact_find") {
+      if (primaryFactFindUpload) {
+        await inspectFactFindUpload(primaryFactFindUpload);
+        return;
+      }
+
       setIsSending(true);
 
       try {
-        const response = await fetch("/api/finley/fact-find", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            activeClientId: activeClient.id,
-            activeClientName: activeClient.name,
-          }),
-        });
-
-        const body = (await response.json().catch(() => null)) as { workflow?: FinleyFactFindWorkflow | null } | null;
-
-        if (!response.ok || !body?.workflow) {
-          throw new Error("Unable to start the fact find workflow right now.");
-        }
-
-        setMessages([]);
-        setPlanSummary(null);
-        setPlanSteps([]);
-        setWarnings([]);
-        setPendingPlanId(null);
-        setDisplayCard(null);
-        setEditorCard(null);
-        clearLiveRenderOutputs();
-        setFactFindWorkflow(normalizeFactFindWorkflow(body.workflow));
-        setFactFindStepIndex(0);
-        setFactFindWorkflowError(null);
-        setFileNoteSubjectManuallyEdited(false);
-        setFileNoteAttachments([]);
-        setFileNoteAttachmentFiles([]);
+        await startFactFindWorkflow();
       } catch (error) {
         setMessages((current) => [
           ...current,
@@ -1881,12 +2270,22 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       if (action === "engagement_letter") {
         const clientName = activeClient.name ?? "this client";
         const adviserName = activeClient.clientAdviserName ?? currentUserScope?.name ?? "";
+        const uploadedDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, conciergeUploads);
+        const usedUploadContext = Boolean(buildUploadedDocumentContext(conciergeUploads, [
+          "fact-find",
+          "meeting-transcript",
+          "strategy-paper",
+          "engagement-letter",
+          "service-agreement",
+        ]).trim());
 
         setMessages([
           {
             id: `assistant-engagement-letter-${Date.now()}`,
             role: "assistant",
-            content: `I’m ready to help draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`,
+            content: usedUploadContext
+              ? `I reviewed the uploaded client pack and used that context to draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`
+              : `I’m ready to help draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`,
           },
         ]);
         setPlanSummary(null);
@@ -1911,12 +2310,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           badge: "Live Render",
           clientName,
           adviserName,
-          value: {
-            reasonsHtml: buildDefaultEngagementReasonsHtml(clientName, adviserName),
-            servicesHtml: buildDefaultEngagementServicesHtml(clientName),
-            advicePreparationFee: "",
-            implementationFee: "",
-          },
+          value: uploadedDraft,
         });
         return;
       }
@@ -2053,7 +2447,17 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
   async function handleConciergeSuggestedTask(task: ConciergeSuggestedTask) {
     if (task.action === "file_note" && conciergeUploadTags.has("meeting-transcript")) {
-      await handleSend("create a file note from the uploaded meeting transcript");
+      const transcriptContext = buildUploadedDocumentContext(conciergeUploads, ["meeting-transcript"]);
+      await handleSend(
+        transcriptContext
+          ? `create a file note from the uploaded meeting transcript:\n\n${transcriptContext}`
+          : "create a file note from the uploaded meeting transcript",
+      );
+      return;
+    }
+
+    if (task.action === "fact_find" && primaryFactFindUpload) {
+      await inspectFactFindUpload(primaryFactFindUpload);
       return;
     }
 
@@ -2063,9 +2467,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
 
     if (task.action === "summarise_documents") {
-      const documentContext = conciergeUploads
-        .map((upload) => `${upload.name}: ${upload.tags.map(getConciergeTagLabel).join(", ")}`)
-        .join("; ");
+      const documentContext = buildUploadedDocumentContext(conciergeUploads)
+        || conciergeUploads
+          .map((upload) => `${upload.name}: ${upload.tags.map(getConciergeTagLabel).join(", ")}`)
+          .join("; ");
       await handleSend(`review the uploaded documents and suggest the next adviser tasks. Uploaded documents: ${documentContext}`);
       return;
     }
@@ -2197,6 +2602,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
+      notifyWorkflowComplete(
+        `Done — I generated the fact find document for ${factFindWorkflow?.clientName ?? activeClient?.name ?? "the selected client"}. The Word file ${fileName} has been downloaded.`,
+      );
     } catch (error) {
       setFactFindWorkflowError(
         error instanceof Error ? error.message : "Unable to generate the fact find document right now.",
@@ -2256,6 +2664,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
+      notifyWorkflowComplete(
+        `Done — I generated the invoice for ${invoicePlaceholderCard.clientName || activeClient?.name || "the selected client"}. The Word file ${fileName} has been downloaded.`,
+      );
     } catch (error) {
       setInvoiceWorkflowError(
         error instanceof Error ? error.message : "Unable to generate the invoice document right now.",
@@ -2300,6 +2711,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
+      notifyWorkflowComplete(
+        `Done — I generated the engagement letter for ${engagementLetterDraftCard.clientName}. The Word file ${fileName} has been downloaded.`,
+      );
     } catch (error) {
       setEngagementLetterWorkflowError(
         error instanceof Error ? error.message : "Unable to generate the engagement letter right now.",
@@ -2350,6 +2764,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
+      notifyWorkflowComplete(
+        `Done — I generated the ${agreementDraftCard.agreementType === "annual" ? "annual advice agreement" : "ongoing service agreement"} for ${agreementDraftCard.clientName}. The Word file ${fileName} has been downloaded.`,
+      );
     } catch (error) {
       setAgreementWorkflowError(error instanceof Error ? error.message : "Unable to generate the agreement right now.");
     } finally {
@@ -2461,6 +2878,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           recentMessages: [...messages.slice(-4), userMessage].map((entry) => ({
             role: entry.role,
             content: entry.content,
+          })),
+          uploadedFiles: conciergeUploads.map((upload) => ({
+            name: upload.name,
+            tags: upload.tags,
+            extractedText: upload.extractedText?.slice(0, 6000) ?? null,
           })),
         }),
       });
@@ -2708,88 +3130,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
   }
 
-  async function handleInlineFileNoteAssist(fieldKey: "subject" | "content", prompt: string) {
-    if (!activeClient || !prompt.trim()) return;
-
-    setIsSending(true);
-
-    try {
-      const currentCard =
-        editorCard && editorCard.kind === "collection_form" && editorCard.toolName === "create_file_note"
-          ? editorCard
-          : null;
-
-      if (!currentCard) return;
-
-      const fieldMap = Object.fromEntries(currentCard.fields.map((field) => [field.key, field.value]));
-      const response = await fetch("/api/finley/assist-field", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          fieldKey,
-          message: prompt,
-          activeClientName: activeClient.name,
-          currentSubject: typeof fieldMap.subject === "string" ? fieldMap.subject : "",
-          currentContent: typeof fieldMap.content === "string" ? fieldMap.content : "",
-          type: typeof fieldMap.type === "string" ? fieldMap.type : "",
-          subType: typeof fieldMap.subType === "string" ? fieldMap.subType : "",
-        }),
-      });
-
-      const body = (await response.json().catch(() => null)) as
-        | {
-            assistantMessage?: string;
-            updates?: Record<string, string>;
-          }
-        | null;
-
-      if (!response.ok || !body?.updates) {
-        throw new Error("Unable to draft that file note field right now.");
-      }
-
-      setEditorCard((current) =>
-        current && current.kind === "collection_form" && current.toolName === "create_file_note"
-          ? {
-              ...current,
-              fields: current.fields.map((field) =>
-                field.key in body.updates! &&
-                (field.key !== "subject" || !fileNoteSubjectManuallyEdited || !field.value.trim())
-                  ? {
-                      ...field,
-                      value:
-                        field.key === "serviceDate"
-                          ? formatDateValue(body.updates![field.key] ?? field.value)
-                          : body.updates![field.key] ?? field.value,
-                    }
-                  : field,
-              ),
-            }
-          : current,
-      );
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-inline-file-note-assist-${Date.now()}`,
-          role: "assistant",
-          content: body.assistantMessage ?? "I updated the selected file note field.",
-        },
-      ]);
-    } catch (error) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `assistant-inline-file-note-assist-error-${Date.now()}`,
-          role: "assistant",
-          content: error instanceof Error ? error.message : "Unable to draft that file note field right now.",
-        },
-      ]);
-    } finally {
-      setIsSending(false);
-    }
-  }
-
   function handleFileNoteAttachmentsSelected(files: FileList | null) {
     if (!files?.length) return;
 
@@ -2873,6 +3213,22 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         : current,
     );
   }
+
+  const factFindImportCounts = factFindImportCandidate ? getFactFindImportCounts(factFindImportCandidate) : null;
+  const factFindImportTotalRecords = factFindImportCounts
+    ? Object.values(factFindImportCounts).reduce((total, count) => total + count, 0)
+    : 0;
+  const factFindImportRecordGroups = factFindImportCandidate
+    ? [
+        { label: "Income", records: factFindImportCandidate.income },
+        { label: "Expenses", records: factFindImportCandidate.expenses },
+        { label: "Assets", records: factFindImportCandidate.assets },
+        { label: "Liabilities", records: factFindImportCandidate.liabilities },
+        { label: "Superannuation", records: factFindImportCandidate.superannuation },
+        { label: "Pensions", records: factFindImportCandidate.pensions },
+        { label: "Insurance", records: factFindImportCandidate.insurance },
+      ]
+    : [];
 
   return (
     <main className={styles.workspace}>
@@ -3815,28 +4171,17 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                                 ))}
                               </div>
                             </div>
-                          ) : editorCard.fields.map((field) => (
+                         ) : editorCard.fields.map((field) => (
                             <label
                               key={field.key}
-                              className={`${styles.confirmationField} ${field.input === "textarea" ? styles.confirmationFieldFull : ""}`.trim()}
+                              className={`${styles.confirmationField} ${
+                                field.input === "textarea" || (editorCard.toolName === "create_file_note" && field.key === "subject")
+                                  ? styles.confirmationFieldFull
+                                  : ""
+                              }`.trim()}
                             >
                               <span className={styles.fieldHeader}>
                                 <span className={styles.planPreviewLabel}>{field.label}</span>
-                                {editorCard.toolName === "create_file_note" && field.key === "content" ? (
-                                  <button
-                                    type="button"
-                                    className={styles.inlineAssistButton}
-                                    onClick={() =>
-                                      void handleInlineFileNoteAssist(
-                                        "content",
-                                        field.value,
-                                      )
-                                    }
-                                    disabled={isSending || !field.value.trim()}
-                                  >
-                                    Generate with Finley
-                                  </button>
-                                ) : null}
                               </span>
                               {field.input === "select" ? (
                                 <select
@@ -3877,6 +4222,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                                                 };
                                               }
 
+                                              if (
+                                                current.toolName === "create_file_note" &&
+                                                field.key === "ownerId" &&
+                                                entry.key === "ownerName"
+                                              ) {
+                                                const ownerLabel = field.options?.find((option) => option.value === event.target.value)?.label ?? "";
+                                                return { ...entry, value: ownerLabel };
+                                              }
+
                                               return entry;
                                             }),
                                           }
@@ -3904,11 +4258,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                                         : null,
                                     )
                                   }
-                                  onBlur={(event) => {
-                                    if (editorCard.toolName === "create_file_note" && field.key === "content") {
-                                      void handleInlineFileNoteAssist("content", event.target.value);
-                                    }
-                                  }}
                                   onChange={(event) =>
                                     setEditorCard((current) =>
                                       current
@@ -3947,11 +4296,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                                         : null,
                                     )
                                   }
-                                  onBlur={(event) => {
-                                    if (editorCard.toolName === "create_file_note" && field.key === "subject") {
-                                      void handleInlineFileNoteAssist("subject", event.target.value);
-                                    }
-                                  }}
                                   onChange={(event) =>
                                     (field.key === "subject" && setFileNoteSubjectManuallyEdited(true),
                                     setEditorCard((current) =>
@@ -4105,6 +4449,166 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
         </div>
       </aside>
+
+      {isFactFindImportModalOpen ? (
+        <div
+          className={styles.modalOverlay}
+          role="presentation"
+          onClick={() => {
+            if (!isApplyingFactFindImport) {
+              setIsFactFindImportModalOpen(false);
+            }
+          }}
+        >
+          <div
+            className={`${styles.modalCard} ${styles.factFindImportModal}`.trim()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="finley-fact-find-import-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <h2 id="finley-fact-find-import-title" className={styles.modalTitle}>
+                Review Fact Find Mapping
+              </h2>
+            </div>
+
+            <div className={styles.modalBody}>
+              {factFindImportError ? <div className={styles.modalError}>{factFindImportError}</div> : null}
+
+              {factFindImportCandidate ? (
+                <>
+                  <div className={styles.factFindImportSummaryBlock}>
+                    <span>Source file</span>
+                    <strong>{factFindImportCandidate.sourceFileName}</strong>
+                  </div>
+                  <div className={styles.factFindImportSummaryBlock}>
+                    <span>Finley&apos;s read</span>
+                    <p>{factFindImportCandidate.summary}</p>
+                  </div>
+
+                  <div className={styles.factFindImportCountGrid}>
+                    {factFindImportCounts
+                      ? Object.entries(factFindImportCounts).map(([label, count]) => (
+                          <div key={label} className={styles.factFindImportCountCard}>
+                            <span>{label.replace(/([A-Z])/g, " $1")}</span>
+                            <strong>{count}</strong>
+                          </div>
+                        ))
+                      : null}
+                  </div>
+
+                  <div className={styles.factFindImportReviewStack}>
+                    <div className={styles.factFindImportReviewCard}>
+                      <strong>People</strong>
+                      {factFindImportCandidate.people.length ? (
+                        <ul>
+                          {factFindImportCandidate.people.map((person, index) => (
+                            <li key={`${person.target}-${person.name ?? index}`}>
+                              {[person.target === "partner" ? "Partner" : "Client", person.name, person.dateOfBirth, person.email, person.riskProfile]
+                                .filter(Boolean)
+                                .join(" | ")}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>No client or partner details were extracted.</p>
+                      )}
+                    </div>
+
+                    {factFindImportRecordGroups.map((group) =>
+                      group.records.length ? (
+                        <div key={group.label} className={styles.factFindImportReviewCard}>
+                          <strong>{group.label}</strong>
+                          <ul>
+                            {group.records.slice(0, 5).map((record, index) => (
+                              <li key={`${group.label}-${record.ownerName ?? "owner"}-${record.description ?? record.provider ?? index}`}>
+                                {[record.ownerName, record.description ?? record.provider ?? record.type, record.amount ?? record.frequency]
+                                  .filter(Boolean)
+                                  .join(" | ")}
+                              </li>
+                            ))}
+                          </ul>
+                          {group.records.length > 5 ? <p>Plus {group.records.length - 5} more records.</p> : null}
+                        </div>
+                      ) : null,
+                    )}
+
+                    {factFindImportCandidate.dependants.length || factFindImportCandidate.entities.length ? (
+                      <div className={styles.factFindImportReviewCard}>
+                        <strong>Dependants and entities</strong>
+                        <ul>
+                          {factFindImportCandidate.dependants.map((dependant, index) => (
+                            <li key={`dependant-${dependant.name ?? index}`}>
+                              Dependant: {[dependant.name, dependant.birthday, dependant.ownerName].filter(Boolean).join(" | ")}
+                            </li>
+                          ))}
+                          {factFindImportCandidate.entities.map((entity, index) => (
+                            <li key={`entity-${entity.name ?? index}`}>
+                              Entity: {[entity.name, entity.type, entity.ownerName].filter(Boolean).join(" | ")}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {factFindImportCandidate.confirmationsRequired.length ? (
+                      <div className={styles.factFindImportReviewCard}>
+                        <strong>Confirm before applying</strong>
+                        <ul>
+                          {factFindImportCandidate.confirmationsRequired.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {factFindImportCandidate.warnings.length ? (
+                      <div className={styles.factFindImportReviewCard}>
+                        <strong>Warnings</strong>
+                        <ul>
+                          {factFindImportCandidate.warnings.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className={styles.factFindImportNotice}>
+                    Finley found {factFindImportTotalRecords} profile records. Applying this will update {activeClient?.name ?? "the client"}&apos;s profile and refresh the fact find workflow.
+                  </div>
+                </>
+              ) : (
+                <div className={styles.outputEmptyText}>
+                  {isExtractingFactFindImport
+                    ? `Inspecting ${factFindImportSourceFile ?? "the uploaded fact find"}...`
+                    : "Finley could not prepare a fact find mapping for review yet."}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                className={styles.planCancelButton}
+                disabled={isApplyingFactFindImport}
+                onClick={() => setIsFactFindImportModalOpen(false)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className={styles.planApproveButton}
+                disabled={!factFindImportCandidate || isApplyingFactFindImport}
+                onClick={() => void applyFactFindImport()}
+              >
+                {isApplyingFactFindImport ? "Applying..." : "Apply to client profile"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <CreateClientDialog
         isOpen={isCreateClientOpen}

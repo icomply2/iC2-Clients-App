@@ -38,19 +38,19 @@ export function AppTopbar({ finleyHref = "/finley" }: AppTopbarProps) {
           aria-label="Add new client"
         >
           <span className={styles.icon}>+</span>
-          <span>Add New</span>
+          <span className={styles.topLabel}>Add New</span>
         </Link>
         <Link href={finleyHref} className={styles.topLink}>
           <Image src={finleyAvatar} alt="Finley avatar" className={styles.topbarAvatarImage} />
-          <span>Finley</span>
+          <span className={styles.topLabel}>Finley</span>
         </Link>
         <Link href="/profile" className={styles.topLink}>
           <UserInitialsAvatar className={styles.avatar} />
-          <span>Me</span>
+          <span className={styles.topLabel}>Me</span>
         </Link>
         <Link href="/" className={styles.topLink}>
           <span className={styles.icon}>→</span>
-          <span>Sign Out</span>
+          <span className={styles.topLabel}>Sign Out</span>
         </Link>
       </div>
     </header>

@@ -3,11 +3,9 @@ import { ApiError } from "@/lib/api/client";
 import { getClientProfile, getClientProfileId } from "@/lib/api/clients";
 import { readAuthTokenFromCookies } from "@/lib/auth";
 import {
-  buildFactFindDocmosisModel,
   buildFactFindOutputName,
-  DOCMOSIS_FACT_FIND_TEMPLATE_NAME,
-  renderDocmosisDocx,
-} from "@/lib/services/docmosis";
+  renderFactFindDocx,
+} from "@/lib/fact-find-docx-export";
 
 async function loadProfile(clientId: string) {
   const token = await readAuthTokenFromCookies();
@@ -42,13 +40,8 @@ export async function POST(request: NextRequest) {
 
   try {
     const profile = await loadProfile(clientId);
-    const model = buildFactFindDocmosisModel(profile);
     const outputName = buildFactFindOutputName(profile);
-    const buffer = await renderDocmosisDocx({
-      templateName: DOCMOSIS_FACT_FIND_TEMPLATE_NAME,
-      outputName,
-      data: model,
-    });
+    const buffer = await renderFactFindDocx(profile);
 
     return new NextResponse(buffer, {
       status: 200,

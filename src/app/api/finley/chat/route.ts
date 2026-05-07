@@ -12,6 +12,11 @@ export async function POST(request: NextRequest) {
           role?: "assistant" | "user";
           content?: string;
         }>;
+        uploadedFiles?: Array<{
+          name?: string | null;
+          tags?: string[] | null;
+          extractedText?: string | null;
+        }>;
       }
     | null;
 
@@ -27,6 +32,7 @@ export async function POST(request: NextRequest) {
     activeClientName: payload?.activeClientName ?? null,
     threadId: payload?.threadId ?? null,
     recentMessages: payload?.recentMessages ?? null,
+    uploadedFiles: payload?.uploadedFiles ?? null,
   });
 
   return NextResponse.json(result);

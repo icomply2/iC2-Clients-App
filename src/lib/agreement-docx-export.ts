@@ -107,6 +107,25 @@ function firstName(value: string) {
   return value.trim().split(/\s+/)[0] ?? value;
 }
 
+function salutationName(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "Client";
+  }
+
+  const linkedNames = trimmed.split(/\s*(?:&|\band\b)\s*/i).map((name) => name.trim()).filter(Boolean);
+
+  if (linkedNames.length > 1) {
+    const firstNames = linkedNames.map((name) => firstName(name) || name);
+    const uniqueFirstNames = new Set(firstNames.map((name) => name.toLowerCase()));
+
+    return uniqueFirstNames.size === firstNames.length ? firstNames.join(" and ") : linkedNames.join(" and ");
+  }
+
+  return firstName(trimmed) || trimmed;
+}
+
 function personAddressLines(person?: PersonRecord | null) {
   const street = text(person?.street) || text(person?.addressStreet) || text(person?.address?.street) || text(person?.address?.line1);
   const suburb = text(person?.suburb) || text(person?.addressSuburb) || text(person?.address?.suburb) || text(person?.address?.city);
@@ -232,7 +251,7 @@ function signatureTableXml(names: string[], adviserName: string) {
 
 function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocxInput = {}) {
   const clientName = personName(profile);
-  const clientFirstName = firstName(profile.client?.name || clientName);
+  const clientSalutationName = salutationName(clientName);
   const agreementType = input.agreementType === "annual" ? "annual" : "ongoing";
   const title = agreementType === "annual" ? "Annual Advice Agreement" : "Ongoing Service Agreement";
   const adviserName = text(input.adviserName) || text(profile.adviser?.name) || "<<adviser.name>>";
@@ -258,7 +277,7 @@ function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocx
     paragraphXml(formatToday(), { spacingAfter: 220 }),
     paragraphXml(clientName, { bold: true, spacingAfter: 0 }),
     ...addressLines.map((line) => paragraphXml(line, { spacingAfter: 0 })),
-    paragraphXml(`Dear ${clientFirstName},`, { spacingAfter: 180 }),
+    paragraphXml(`Dear ${clientSalutationName},`, { spacingAfter: 180 }),
     headingXml(title),
     ...opening.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
     headingXml(agreementType === "annual" ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive", 2),

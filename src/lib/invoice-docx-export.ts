@@ -408,7 +408,7 @@ function paymentAdviceTableXml({
   amountDue: string;
   dueDate: string;
 }) {
-  return `<w:tbl><w:tblPr><w:tblW w:w="2600" w:type="pct"/><w:tblBorders><w:bottom w:val="single" w:sz="4" w:color="D7E0EC"/><w:insideH w:val="single" w:sz="4" w:color="D7E0EC"/></w:tblBorders></w:tblPr>
+  return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:bottom w:val="single" w:sz="4" w:color="D7E0EC"/><w:insideH w:val="single" w:sz="4" w:color="D7E0EC"/></w:tblBorders></w:tblPr>
     ${tableRowXml(tableCellXml("Customer", { widthPct: 42 }) + tableCellXml(clientName, { widthPct: 58 }))}
     ${tableRowXml(tableCellXml("Invoice Number", { widthPct: 42 }) + tableCellXml(invoiceNumber || "<<invnumber>>", { widthPct: 58 }))}
     ${tableRowXml(tableCellXml("Amount Due", { widthPct: 42 }) + tableCellXml(amountDue, { widthPct: 58 }))}
@@ -433,21 +433,26 @@ function paymentAdviceXml({
   licenseeAddress: string;
   licenseeLocality: string;
 }) {
-  const addressBlock = [
+  const licenseeDetailsBlock = [
     paragraphXml("To:", { spacingAfter: 0 }),
     paragraphXml(licenseeName || "<<licensee>>", { spacingAfter: 0 }),
     paragraphXml(licenseeAddress || "<<licenseeaddress>>", { spacingAfter: 0 }),
     licenseeLocality ? paragraphXml(licenseeLocality, { spacingAfter: 0 }) : "",
   ].join("");
+  const invoiceDetailsBlock = [
+    paymentAdviceTableXml({ clientName, invoiceNumber, amountDue, dueDate }),
+    paragraphXml("Thank you for your business.", { align: "center", spacingBefore: 120 }),
+  ].join("");
 
   return [
     paragraphXml("- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -", {
-      spacingBefore: 280,
-      spacingAfter: 120,
+      spacingBefore: 220,
+      spacingAfter: 80,
     }),
-    paragraphXml("PAYMENT ADVICE", { fontSize: 48, color: "000000", spacingAfter: 120 }),
-    addressBlock,
-    paymentAdviceTableXml({ clientName, invoiceNumber, amountDue, dueDate }),
+    paragraphXml("PAYMENT ADVICE", { fontSize: 36, color: `#${activeHeadingColor()}`, spacingAfter: 80 }),
+    `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/></w:tblPr>${tableRowXml(
+      tableCellBlockXml(licenseeDetailsBlock, { widthPct: 43 }) + tableCellBlockXml(invoiceDetailsBlock, { widthPct: 57 }),
+    )}</w:tbl>`,
   ].join("");
 }
 
@@ -503,7 +508,6 @@ function buildDocumentXml(profile: ClientProfile, input: InvoiceDocxInput, hasLo
       licenseeAddress: text(input.licenseeAddress),
       licenseeLocality,
     }),
-    paragraphXml("Thank you for your business.", { spacingBefore: 260 }),
   ].join("");
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
