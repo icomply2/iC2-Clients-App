@@ -26,6 +26,8 @@ type FinleyConsoleProps = {
   initialClientId?: string;
 };
 
+const isMockAuthEnabled = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+
 type Message = {
   id: string;
   role: "assistant" | "user";
@@ -1577,7 +1579,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [serverClients, setServerClients] = useState<FinleyClientSummary[]>(mockClientSummaries);
+  const [serverClients, setServerClients] = useState<FinleyClientSummary[]>(
+    isMockAuthEnabled ? mockClientSummaries : [],
+  );
   const [clientSearch, setClientSearch] = useState("");
   const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [composerValue, setComposerValue] = useState("");
@@ -1796,12 +1800,16 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             clientAdviserLicenseeName: item.licensee,
           })) ?? [];
 
-        if (!cancelled && nextClients.length) {
+        if (!cancelled) {
           setServerClients(filterClientSummariesByPractice(nextClients, currentUserScope?.practice?.name));
         }
       } catch {
         if (!cancelled) {
-          setServerClients(filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name));
+          setServerClients(
+            isMockAuthEnabled
+              ? filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name)
+              : [],
+          );
         }
       } finally {
         if (!cancelled) {
