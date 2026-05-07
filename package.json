@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "package:azure": "powershell -ExecutionPolicy Bypass -File ./scripts/package-azure.ps1"
+    "package:azure": "node ./scripts/package-azure.mjs"
   },
   "dependencies": {
     "jszip": "^3.10.1",
