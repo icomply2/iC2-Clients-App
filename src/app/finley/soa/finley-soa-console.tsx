@@ -54,6 +54,8 @@ type FinleySoaConsoleProps = {
   initialSoaId?: string;
 };
 
+const isMockAuthEnabled = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+
 type FinleyClientSummary = ClientSummary;
 
 type ClientProfileResponse = {
@@ -1341,7 +1343,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
-  const [serverClients, setServerClients] = useState<FinleyClientSummary[]>(mockClientSummaries);
+  const [serverClients, setServerClients] = useState<FinleyClientSummary[]>(
+    isMockAuthEnabled ? mockClientSummaries : [],
+  );
   const [activeClientProfile, setActiveClientProfile] = useState<ClientProfile | null>(null);
   const [clientSearch, setClientSearch] = useState("");
   const [isLoadingClients, setIsLoadingClients] = useState(false);
@@ -1542,7 +1546,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   }, [soaRenderStyle]);
 
   useEffect(() => {
-    setServerClients(filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name));
+    if (isMockAuthEnabled) {
+      setServerClients(filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name));
+    }
   }, [currentUserScope?.practice?.name]);
 
   useEffect(() => {
@@ -1592,15 +1598,15 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           })) ?? [];
 
         if (!cancelled) {
-          setServerClients(
-            nextClients.length
-              ? filterClientSummariesByPractice(nextClients, currentUserScope?.practice?.name)
-              : filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name),
-          );
+          setServerClients(filterClientSummariesByPractice(nextClients, currentUserScope?.practice?.name));
         }
       } catch {
         if (!cancelled) {
-          setServerClients(filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name));
+          setServerClients(
+            isMockAuthEnabled
+              ? filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name)
+              : [],
+          );
         }
       } finally {
         if (!cancelled) {
