@@ -223,6 +223,8 @@ export type PersonRecord = {
     employer?: string | null;
     salary?: string | null;
     primaryEmployment?: boolean | null;
+    startDate?: string | null;
+    endDate?: string | null;
     owner?: {
       id?: string | null;
       name?: string | null;
@@ -408,6 +410,29 @@ export type ClientPensionRecord = {
   } | null;
 };
 
+export type ClientEmploymentRecord = {
+  id?: string | null;
+  jobTitle?: string | null;
+  job_title?: string | null;
+  status?: string | null;
+  employer?: string | null;
+  salary?: string | null;
+  frequency?:
+    | {
+        type?: string | null;
+        value?: string | null;
+      }
+    | string
+    | null;
+  primaryEmployment?: boolean | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  owner?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+};
+
 export type ClientAccountRecord = {
   id?: string | null;
   accountName?: string | null;
@@ -559,6 +584,7 @@ export type ClientProfile = {
   entities?: ClientEntityRecord[] | null;
   assets?: ClientAssetRecord[] | null;
   liabilities?: ClientLiabilityRecord[] | null;
+  employment?: ClientEmploymentRecord[] | null;
   income?: ClientIncomeRecord[] | null;
   expense?: ClientExpenseRecord[] | null;
   superannuation?: ClientSuperannuationRecord[] | null;

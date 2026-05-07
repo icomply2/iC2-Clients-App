@@ -10,7 +10,7 @@ import {
   updatePersonRiskProfile,
   upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
-import type { ClientAdviserRecord, ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
+import type { ClientAdviserRecord, ClientEmploymentRecord, ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
 import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
@@ -69,7 +69,12 @@ type EmploymentDraft = {
   employer: string;
   salary: string;
   frequency: string;
+  primaryEmployment: string;
+  startDate: string;
+  endDate: string;
 };
+
+type EmploymentSourceRecord = NonNullable<PersonRecord["employment"]>[number] | ClientEmploymentRecord;
 
 type EditStepKey = "overview" | "personal" | "contact" | "health" | "employment" | "agreement";
 
@@ -86,7 +91,7 @@ const TITLE_OPTIONS = ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof"];
 const STATUS_OPTIONS = ["Prospect", "Client", "Archived", "Deceased"];
 const CLIENT_CATEGORY_OPTIONS = ["Annual Agreement", "Fee For Service", "Ongoing", "Risk Only", "Whoesale"];
 const RISK_PROFILE_OPTIONS = ["Cash", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"];
-const AGREEMENT_TYPE_OPTIONS = ["Annual Agreement", "Ongoing Agreement"];
+const AGREEMENT_TYPE_OPTIONS = ["Fixed-Term Agreement", "Ongoing Agreement"];
 const EMPLOYMENT_STATUS_OPTIONS = ["Full-time", "Part-time", "Casual", "Contract", "Self-employed", "Retired", "Unemployed"];
 const FREQUENCY_OPTIONS = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"];
 const HEALTH_STATUS_OPTIONS = ["Excellent", "Good", "Average", "Poor", "Pre-existing condition", "Under review"];
@@ -157,12 +162,16 @@ function getFirstNonEmptyValue(...candidates: Array<string | null | undefined>) 
   return "";
 }
 
-function createDraft(person?: PersonRecord | null, profileId?: string | null, adviserName?: string | null): EditDraft {
+function normalizeLookupValue(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function createDraft(person?: PersonRecord | null, profile?: ClientProfile | null, adviserName?: string | null): EditDraft {
   const record = (person ?? {}) as PersonRecord & Record<string, unknown>;
-  const employment = Array.isArray(record.employment) ? record.employment : [];
+  const employment = getEmploymentRecordsForPerson(person, profile ?? ({} as ClientProfile));
 
   return {
-    clientId: getFirstNonEmptyValue(profileId, person?.ic2AppId, person?.id),
+    clientId: getFirstNonEmptyValue(profile?.id, person?.ic2AppId, person?.id),
     title: person?.title ?? "",
     name: person?.name ?? "",
     status: getRecordValue(record, ["status", "clientStatus", "accountStatus"]) || "Client",
@@ -184,10 +193,10 @@ function createDraft(person?: PersonRecord | null, profileId?: string | null, ad
       status: item?.status ?? "",
       employer: item?.employer ?? "",
       salary: item?.salary ?? "",
-      frequency:
-        typeof item?.frequency === "string"
-          ? item.frequency
-          : item?.frequency?.value ?? item?.frequency?.type ?? "",
+      frequency: getEmploymentFrequency(item),
+      primaryEmployment: item.primaryEmployment === true ? "Yes" : item.primaryEmployment === false ? "No" : "",
+      startDate: toInputDate(item.startDate),
+      endDate: toInputDate(item.endDate),
     })),
     street:
       getNestedRecordValue(record, "address", ["street", "line1"]) || getRecordValue(record, ["street", "addressStreet"]),
@@ -214,6 +223,14 @@ function createDraft(person?: PersonRecord | null, profileId?: string | null, ad
 
 function getDisplayedClientId(person: PersonRecord | null, profile: ClientProfile) {
   return getFirstNonEmptyValue(profile.id, person?.ic2AppId, person?.id);
+}
+
+function getEditablePersonId(target: EditablePerson, person: PersonRecord | null, profile: ClientProfile) {
+  if (target === "client") {
+    return getDisplayedClientId(person, profile);
+  }
+
+  return getFirstNonEmptyValue(person?.id, person?.ic2AppId);
 }
 
 function hasMeaningfulPerson(person: PersonRecord | null | undefined) {
@@ -278,6 +295,34 @@ function getAge(value?: string | null) {
   return `${age}`;
 }
 
+function getEmploymentFrequency(item: EmploymentSourceRecord) {
+  return typeof item.frequency === "string"
+    ? item.frequency
+    : item.frequency?.value ?? item.frequency?.type ?? "";
+}
+
+function employmentBelongsToPerson(item: ClientEmploymentRecord, person: PersonRecord | null | undefined) {
+  const ownerId = normalizeLookupValue(item.owner?.id);
+  const ownerName = normalizeLookupValue(item.owner?.name);
+  const personIds = [person?.id, person?.ic2AppId].map(normalizeLookupValue).filter(Boolean);
+  const personName = normalizeLookupValue(person?.name);
+
+  return Boolean(
+    (ownerId && personIds.includes(ownerId)) ||
+      (ownerName && personName && ownerName === personName),
+  );
+}
+
+function getEmploymentRecordsForPerson(person: PersonRecord | null | undefined, profile: ClientProfile) {
+  const profileEmployment = profile.employment?.filter((item) => employmentBelongsToPerson(item, person)) ?? [];
+
+  if (profileEmployment.length > 0) {
+    return profileEmployment;
+  }
+
+  return Array.isArray(person?.employment) ? person.employment : [];
+}
+
 function ReadOnlyField({ field }: { field: DisplayField }) {
   return (
     <label className={styles.profileField}>
@@ -315,6 +360,9 @@ function createEmploymentDraft(): EmploymentDraft {
     employer: "",
     salary: "",
     frequency: "",
+    primaryEmployment: "",
+    startDate: "",
+    endDate: "",
   };
 }
 
@@ -343,7 +391,7 @@ function EmploymentSection({ records }: { records: EmploymentDisplayRecord[] }) 
 function buildProfileSections(person: PersonRecord | null, profile: ClientProfile, adviserName: string) {
   const record = (person ?? {}) as PersonRecord & Record<string, unknown>;
   const riskDisplay = person?.riskProfileResponse?.resultDisplay ?? "";
-  const employment = Array.isArray(record.employment) ? record.employment : [];
+  const employment = getEmploymentRecordsForPerson(person, profile);
 
   const overview: DisplayField[] = [
     { label: "Name", value: person?.name ?? "", placeholder: "Name" },
@@ -442,10 +490,7 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
 
   const employmentRecords: EmploymentDisplayRecord[] = employment
     .map((item, index) => {
-      const frequency =
-        typeof item?.frequency === "string"
-          ? item.frequency
-          : item?.frequency?.value ?? item?.frequency?.type ?? "";
+      const frequency = getEmploymentFrequency(item);
       const fields: DisplayField[] = [
         {
           label: "Job Title",
@@ -472,6 +517,21 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
           value: frequency,
           placeholder: "Frequency",
         },
+        {
+          label: "Primary Employment",
+          value: item.primaryEmployment === true ? "Yes" : item.primaryEmployment === false ? "No" : "",
+          placeholder: "Primary Employment",
+        },
+        {
+          label: "Start Date",
+          value: formatDate(item.startDate),
+          placeholder: "Start Date",
+        },
+        {
+          label: "End Date",
+          value: formatDate(item.endDate),
+          placeholder: "End Date",
+        },
       ].filter((field) => field.value.trim().length > 0);
 
       if (!fields.length) {
@@ -479,7 +539,7 @@ function buildProfileSections(person: PersonRecord | null, profile: ClientProfil
       }
 
       return {
-        id: `employment-${index}`,
+        id: item.id ?? `employment-${index}`,
         title: fields.find((field) => field.label === "Job Title")?.value || `Employment ${index + 1}`,
         fields,
       };
@@ -496,7 +556,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
   const [partner, setPartner] = useState<PersonRecord | null>(profile.partner ?? null);
   const [selectedPerson, setSelectedPerson] = useState<EditablePerson>("client");
   const [editing, setEditing] = useState<EditablePerson | null>(null);
-  const [draft, setDraft] = useState<EditDraft>(createDraft(profile.client, profile.id, profile.adviser?.name));
+  const [draft, setDraft] = useState<EditDraft>(createDraft(profile.client, profile, profile.adviser?.name));
   const [editStep, setEditStep] = useState<EditStepKey>("overview");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -597,7 +657,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
 
   function openEditor(target: EditablePerson) {
     const person = target === "client" ? client : partner;
-    setDraft(createDraft(person, profile.id, adviserName || profile.adviser?.name));
+    setDraft(createDraft(person, profile, adviserName || profile.adviser?.name));
     setEditStep("overview");
     setSaveError(null);
     setRemovedEmploymentIds([]);
@@ -610,8 +670,9 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     }
 
     const person = editing === "client" ? client : partner;
+    const editablePersonId = getEditablePersonId(editing, person, profile);
 
-    if (!person?.id) {
+    if (!person || !editablePersonId) {
       setSaveError("This person record does not have an editable identifier yet.");
       return;
     }
@@ -669,28 +730,32 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
       if (editing === "client") {
         await updateClientDetails({
           profileId: profile.id,
-          personId: person.id,
+          personId: editablePersonId,
           person,
           changes,
         });
       } else {
         await updatePartnerDetails({
           profileId: profile.id,
-          personId: person.id,
+          personId: editablePersonId,
           person,
           changes,
         });
       }
 
-      const savedRiskProfile = await updatePersonRiskProfile(
-        {
-          profileId: profile.id,
-          personId: person.id,
-          target: editing,
-          changes: {},
-        },
-        draft.riskProfile,
-      );
+      const currentRiskProfile = person.riskProfileResponse?.resultDisplay ?? "";
+      const riskProfileChanged = draft.riskProfile.trim() !== currentRiskProfile.trim();
+      const savedRiskProfile = riskProfileChanged
+        ? await updatePersonRiskProfile(
+            {
+              profileId: profile.id,
+              personId: editablePersonId,
+              target: editing,
+              changes: {},
+            },
+            draft.riskProfile,
+          )
+        : person.riskProfileResponse ?? null;
 
       for (const employmentId of removedEmploymentIds) {
         await deleteEmploymentRecord(profile.id, employmentId);
@@ -703,6 +768,9 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         employer: item.employer,
         salary: item.salary.replace(/[^0-9.-]/g, ""),
         frequency: item.frequency,
+        primaryEmployment: item.primaryEmployment,
+        startDate: item.startDate,
+        endDate: item.endDate,
       }));
 
       const savedEmployment =
@@ -710,7 +778,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
           ? await upsertEmploymentRecords({
               profileId: profile.id,
               owner: {
-                id: person.id,
+                id: editablePersonId,
                 name: draft.name || person.name || "",
               },
               request: employmentRequest,
@@ -763,6 +831,14 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
             typeof item === "object" && item && "salary" in item ? ((item as { salary?: string | null }).salary ?? "") : "",
           frequency:
             typeof item === "object" && item && "frequency" in item ? ((item as { frequency?: string | null }).frequency ?? "") : "",
+          primaryEmployment:
+            typeof item === "object" && item && "primaryEmployment" in item
+              ? ((item as { primaryEmployment?: boolean | null }).primaryEmployment ?? null)
+              : null,
+          startDate:
+            typeof item === "object" && item && "startDate" in item ? ((item as { startDate?: string | null }).startDate ?? null) : null,
+          endDate:
+            typeof item === "object" && item && "endDate" in item ? ((item as { endDate?: string | null }).endDate ?? null) : null,
           owner:
             typeof item === "object" && item && "owner" in item
               ? ((item as { owner?: { id?: string | null; name?: string | null } | null }).owner ?? null)
@@ -1141,6 +1217,36 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
                               </option>
                             ))}
                           </select>
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>Primary Employment</span>
+                          <select
+                            value={item.primaryEmployment}
+                            onChange={(event) => updateEmploymentRow(item.id, "primaryEmployment", event.target.value)}
+                          >
+                            <option value="">Select an option</option>
+                            {BOOLEAN_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>Start Date</span>
+                          <input
+                            type="date"
+                            value={item.startDate}
+                            onChange={(event) => updateEmploymentRow(item.id, "startDate", event.target.value)}
+                          />
+                        </label>
+                        <label className={styles.modalField}>
+                          <span>End Date</span>
+                          <input
+                            type="date"
+                            value={item.endDate}
+                            onChange={(event) => updateEmploymentRow(item.id, "endDate", event.target.value)}
+                          />
                         </label>
                       </div>
                     </div>

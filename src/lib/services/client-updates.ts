@@ -5,6 +5,9 @@ import { updatePersonDetails } from "@/lib/api/adapters/client-updates";
 type RequestContext = {
   origin?: string | null;
   cookieHeader?: string | null;
+  apiBaseUrl?: string | null;
+  token?: string | null;
+  currentUser?: { id?: string | null; name?: string | null; email?: string | null } | null;
 };
 
 type MutablePersonRecord = PersonRecord & Record<string, unknown>;
@@ -22,6 +25,9 @@ type EmploymentUpsertInput = {
     employer?: string;
     salary?: string;
     frequency?: string;
+    primaryEmployment?: string;
+    startDate?: string;
+    endDate?: string;
   }[];
 };
 
@@ -34,6 +40,25 @@ function getStringValue(record: Record<string, unknown>, keys: string[]) {
   }
 
   return "";
+}
+
+function getStringCandidate(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>();
+
+  return values.filter((value) => {
+    const normalized = value.trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function parseBooleanValue(value: unknown) {
@@ -78,26 +103,55 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
     typeof changes.adviceAgreementRequired === "string" && changes.adviceAgreementRequired.trim()
       ? changes.adviceAgreementRequired
       : current.fdsAnnualAgreementRequired ?? current.annualAgreementRequired ?? current.fdsRequired ?? null;
+  const adviceAgreementValue = parseBooleanValue(adviceAgreementRaw);
+  const agreementTypeValue =
+    typeof changes.agreementType === "string" && changes.agreementType.trim()
+      ? changes.agreementType.trim()
+      : getStringValue(current, ["agreementType", "annualAgreementStatus"]);
+  const nextAnniversaryDateValue =
+    typeof changes.nextAnniversaryDate === "string" && changes.nextAnniversaryDate.trim()
+      ? changes.nextAnniversaryDate.trim()
+      : getStringValue(current, ["nextAnniversaryDate"]);
+  const currentAnnualAgreement =
+    current.annualAgreement && typeof current.annualAgreement === "object"
+      ? (current.annualAgreement as Record<string, unknown>)
+      : {};
+  const riskProfileResponse =
+    typeof changes.riskProfile === "string"
+      ? {
+          ...(current.riskProfileResponse && typeof current.riskProfileResponse === "object"
+            ? (current.riskProfileResponse as Record<string, unknown>)
+            : {}),
+          resultDisplay: changes.riskProfile.trim(),
+        }
+      : current.riskProfileResponse ?? null;
 
   const payload: Record<string, unknown> = {
     id: input.personId,
     ic2AppId: current.ic2AppId ?? null,
     declaration: typeof current.declaration === "boolean" ? current.declaration : null,
     picture: typeof current.picture === "string" ? current.picture : null,
-    fdsAnnualAgreementRequired: parseBooleanValue(adviceAgreementRaw),
-    annualAgreementStatus:
-      typeof changes.agreementType === "string" && changes.agreementType.trim()
-        ? changes.agreementType.trim()
-        : getStringValue(current, ["annualAgreementStatus", "agreementType"]),
-    nextAnniversaryDate:
-      typeof changes.nextAnniversaryDate === "string" && changes.nextAnniversaryDate.trim()
-        ? changes.nextAnniversaryDate.trim()
-        : getStringValue(current, ["nextAnniversaryDate"]),
+    fdsAnnualAgreementRequired: adviceAgreementValue,
+    annualAgreementRequired: adviceAgreementValue,
+    fdsRequired: adviceAgreementValue,
+    annualAgreementStatus: agreementTypeValue || null,
+    agreementType: agreementTypeValue || null,
+    nextAnniversaryDate: nextAnniversaryDateValue || null,
+    annualAgreement: {
+      ...currentAnnualAgreement,
+      type: agreementTypeValue || null,
+      agreementType: agreementTypeValue || null,
+      nextDueDate: nextAnniversaryDateValue || null,
+      nextAnniversaryDate: nextAnniversaryDateValue || null,
+    },
     category: categoryValue || null,
+    clientCategory: categoryValue || null,
     preferredPhone: preferredPhoneValue || null,
     entityId: typeof current.entityId === "string" ? current.entityId : null,
     sharedWith: Array.isArray(current.sharedWith) ? current.sharedWith : [],
     accountStatus: statusValue || null,
+    status: statusValue || null,
+    clientStatus: statusValue || null,
     onboardingStatus: current.onboardingStatus ?? null,
     title:
       typeof changes.title === "string"
@@ -174,14 +228,51 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
       typeof changes.smoker === "string"
         ? changes.smoker.trim() || null
         : getStringValue(current, ["smoker"]) || null,
-    riskProfileResponse: current.riskProfileResponse ?? null,
+    riskProfileResponse,
   };
 
   return payload;
 }
 
 export async function updateClientDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
-  return updatePersonDetails({ ...input, target: "client" }, buildClientPersonPayload(input), context);
+  const personRecord = ((input.person ?? {}) as MutablePersonRecord) || {};
+  const candidateIds = uniqueStrings([
+    input.personId,
+    getStringCandidate(personRecord.id),
+    getStringCandidate(personRecord.ic2AppId),
+    getStringCandidate(personRecord.entityId),
+    input.profileId,
+  ]);
+  let lastClientNotFoundError: unknown = null;
+
+  for (const candidateId of candidateIds) {
+    const candidateInput = { ...input, target: "client" as const, personId: candidateId };
+    const payload = buildClientPersonPayload(candidateInput);
+
+    try {
+      return await updatePersonDetails(candidateInput, payload, context);
+    } catch (error) {
+      if (!(error instanceof Error) || !/client\s+id\b.*was not found/i.test(error.message)) {
+        throw error;
+      }
+
+      lastClientNotFoundError = error;
+    }
+  }
+
+  try {
+    return await patchClientOnProfile(
+      { ...input, target: "client", personId: candidateIds[0] ?? input.personId },
+      buildClientPersonPayload({ ...input, target: "client", personId: candidateIds[0] ?? input.personId }),
+      context,
+    );
+  } catch (error) {
+    if (lastClientNotFoundError instanceof Error && error instanceof Error && /client\s+id\b.*was not found/i.test(error.message)) {
+      throw lastClientNotFoundError;
+    }
+
+    throw error;
+  }
 }
 
 export async function updatePartnerDetails(input: UpdateClientDetailsInput, context?: RequestContext) {
@@ -234,24 +325,92 @@ function buildHeaders(context?: RequestContext) {
   };
 }
 
+function canWriteDirect(context?: RequestContext) {
+  return Boolean(context?.apiBaseUrl && context.token && context.currentUser?.id);
+}
+
+function canPatchDirect(context?: RequestContext) {
+  return Boolean(context?.apiBaseUrl && context.token);
+}
+
+async function patchClientOnProfile(
+  input: UpdateClientDetailsInput,
+  payload: Record<string, unknown>,
+  context?: RequestContext,
+) {
+  const profilePatch = {
+    client: payload,
+  };
+  const response = canPatchDirect(context)
+    ? await fetch(new URL(`/api/ClientProfiles/${encodeURIComponent(input.profileId)}`, context!.apiBaseUrl!), {
+        method: "PATCH",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${context!.token}`,
+        },
+        body: JSON.stringify(profilePatch),
+        cache: "no-store",
+      })
+    : await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(input.profileId)}`, context), {
+        method: "PATCH",
+        headers: buildHeaders(context),
+        body: JSON.stringify(profilePatch),
+        cache: "no-store",
+      });
+
+  const text = await response.text().catch(() => "");
+  const body = (() => {
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as { message?: string | null; status?: boolean | null; data?: boolean | Record<string, unknown> | null };
+    } catch {
+      return null;
+    }
+  })();
+
+  if (!response.ok || (body && body.status === false)) {
+    throw new Error(body?.message ?? (text.trim() || "Unable to save changes."));
+  }
+
+  return body;
+}
+
 export async function upsertEmploymentRecords(input: EmploymentUpsertInput, context?: RequestContext) {
-  const response = await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(input.profileId)}/employments`, context), {
-    method: "POST",
-    headers: buildHeaders(context),
-    body: JSON.stringify({
-      request: input.request.map((item, index) => ({
-        id: item.id || null,
-        jobTitle: item.jobTitle ?? "",
-        status: item.status ?? "",
-        employer: item.employer ?? "",
-        salary: item.salary ?? "",
-        frequency: item.frequency ?? "",
-        primaryEmployment: index === 0,
-        owner: input.owner,
-      })),
-    }),
-    cache: "no-store",
-  });
+  const payload = {
+    request: input.request.map((item, index) => ({
+      id: item.id || null,
+      jobTitle: item.jobTitle ?? "",
+      status: item.status ?? "",
+      employer: item.employer ?? "",
+      salary: item.salary ?? "",
+      frequency: item.frequency ?? "",
+      primaryEmployment: item.primaryEmployment ? item.primaryEmployment === "Yes" : index === 0,
+      startDate: item.startDate || null,
+      endDate: item.endDate || null,
+      owner: input.owner,
+    })),
+  };
+  const response = canWriteDirect(context)
+    ? await fetch(new URL(`/api/ClientProfiles/${encodeURIComponent(input.profileId)}/Employments`, context!.apiBaseUrl!), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${context!.token}`,
+        },
+        body: JSON.stringify({
+          ...payload,
+          currentUser: context!.currentUser,
+        }),
+        cache: "no-store",
+      })
+    : await fetch(resolveUrl(`/api/client-profiles/${encodeURIComponent(input.profileId)}/employments`, context), {
+        method: "POST",
+        headers: buildHeaders(context),
+        body: JSON.stringify(payload),
+        cache: "no-store",
+      });
 
   const text = await response.text().catch(() => "");
   const body = (() => {
@@ -303,24 +462,45 @@ export async function updatePersonRiskProfile(
   context?: RequestContext,
 ) {
   const target = input.target === "partner" ? "partner" : "client";
-  const response = await fetch(
-    resolveUrl(
-      `/api/client-profiles/${encodeURIComponent(input.profileId)}/${target}/${encodeURIComponent(input.personId)}/risk-profile`,
-      context,
-    ),
-    {
-      method: "PUT",
-      headers: buildHeaders(context),
-      body: JSON.stringify({
-        request: riskProfile.trim()
-          ? {
-              resultDisplay: riskProfile,
-            }
-          : {},
-      }),
-      cache: "no-store",
-    },
-  );
+  const payload = {
+    request: riskProfile.trim()
+      ? {
+          resultDisplay: riskProfile,
+        }
+      : {},
+  };
+  const response = context?.apiBaseUrl && context.token
+    ? await fetch(
+        new URL(
+          `/api/ClientProfiles/${encodeURIComponent(input.profileId)}/${target === "partner" ? "Partner" : "Client"}/${encodeURIComponent(input.personId)}/RiskProfile`,
+          context.apiBaseUrl,
+        ),
+        {
+          method: "PUT",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${context.token}`,
+          },
+          body: JSON.stringify({
+            ...payload,
+            currentUser: context.currentUser,
+          }),
+          cache: "no-store",
+        },
+      )
+    : await fetch(
+        resolveUrl(
+          `/api/client-profiles/${encodeURIComponent(input.profileId)}/${target}/${encodeURIComponent(input.personId)}/risk-profile`,
+          context,
+        ),
+        {
+          method: "PUT",
+          headers: buildHeaders(context),
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        },
+      );
 
   const text = await response.text().catch(() => "");
   const body = (() => {

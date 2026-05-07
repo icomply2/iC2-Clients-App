@@ -5,6 +5,7 @@ import {
   refineIntakeAssessment,
   type IntakeEngineInput,
 } from "@/lib/soa-intake-engine";
+import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
 
 export type SoaIntakeRequest = {
   clientName?: string | null;
@@ -581,7 +582,7 @@ function fallbackAssessment(request: SoaIntakeRequest, warning?: string | null):
     : generateIntakeAssessment(engineInput);
 
   return {
-    assessment,
+    assessment: normalizeAssessmentRecommendationCandidates(assessment, request.clientName),
     source: "fallback",
     model: null,
     warning: warning ?? "LLM intake is not configured or unavailable, so Finley is using the local intake engine.",
@@ -823,7 +824,22 @@ function normalizeInsurancePremiumType(
     : "unknown";
 }
 
-function normalizeAssessment(value: unknown): IntakeAssessmentV1 | null {
+function normalizeAssessmentRecommendationCandidates(
+  assessment: IntakeAssessmentV1,
+  clientName?: string | null,
+): IntakeAssessmentV1 {
+  return {
+    ...assessment,
+    candidateStrategyRecommendations: assessment.candidateStrategyRecommendations.map((item) =>
+      normalizeRecommendationLanguage(item, clientName),
+    ),
+    candidateProductReviewNotes: assessment.candidateProductReviewNotes.map((item) =>
+      normalizeRecommendationLanguage(item, clientName),
+    ),
+  };
+}
+
+function normalizeAssessment(value: unknown, clientName?: string | null): IntakeAssessmentV1 | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -1048,8 +1064,12 @@ function normalizeAssessment(value: unknown): IntakeAssessmentV1 | null {
     candidateStrategies,
     candidateScopeInclusions: normalizeStringArray(record.candidateScopeInclusions),
     candidateScopeExclusions: normalizeStringArray(record.candidateScopeExclusions),
-    candidateStrategyRecommendations: normalizeStringArray(record.candidateStrategyRecommendations),
-    candidateProductReviewNotes: normalizeStringArray(record.candidateProductReviewNotes),
+    candidateStrategyRecommendations: normalizeStringArray(record.candidateStrategyRecommendations).map((item) =>
+      normalizeRecommendationLanguage(item, clientName),
+    ),
+    candidateProductReviewNotes: normalizeStringArray(record.candidateProductReviewNotes).map((item) =>
+      normalizeRecommendationLanguage(item, clientName),
+    ),
     candidateInsuranceReviewNotes: normalizeStringArray(record.candidateInsuranceReviewNotes),
     candidateInsuranceNeedsAnalyses,
     candidateInsurancePolicyRecommendations,
@@ -1103,6 +1123,7 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
               "When drafting candidate objectives, write them in a client-specific way that reflects this client's goals, priorities, timing, and personal circumstances where the evidence supports that.",
               "Do not produce generic objective wording that could apply to any client.",
               "When drafting candidateStrategyRecommendations, candidateProductReviewNotes, candidateInsuranceReviewNotes, or candidateProjectionNotes, use second-person client-facing wording with 'you' and 'your' wherever the text may flow into the SOA workflow.",
+              "For candidateStrategyRecommendations and candidateProductReviewNotes, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'. Do not use 'you should', 'you need to', or 'you must'.",
               "Avoid third-person phrasing such as 'the client', 'Guy's', 'their objectives', 'he', 'she', or 'they' in candidate recommendation wording unless a name is strictly needed to identify account ownership or who takes a specific action.",
               "For insurance needs analysis documents, populate candidateInsuranceNeedsAnalyses with one entry per insured person and cover type. Extract calculated and agreed sums insured, existing cover, cover gaps, policy ownership, waiting and benefit periods, annual income, liabilities, super balances, education or dependant support costs, living expenses, and the rationale for the recommended cover level. Preserve adviser overrides where the agreed cover differs from the calculated amount.",
               "For insurance quote documents, populate candidateInsurancePolicyRecommendations with one recommendation per insured person and insurer/product package where the evidence supports it. Extract insurer name, product or policy name, ownership/funding structure, cover types, sum insured or monthly benefit, premium type, waiting period, benefit period, premium amount and frequency, annualised premiums, optional benefits, premium breakdown, underwriting notes, and replacement or retention notes.",
@@ -1172,7 +1193,7 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
     throw new Error("OpenAI intake response did not include message content.");
   }
 
-  return normalizeAssessment(parseJsonObject(content));
+  return normalizeAssessment(parseJsonObject(content), request.clientName);
 }
 
 export async function generateSoaIntakeAssessment(request: SoaIntakeRequest): Promise<SoaIntakeResponse> {

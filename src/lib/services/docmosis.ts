@@ -3,6 +3,7 @@ import "server-only";
 import type {
   ClientAssetRecord,
   ClientDependantRecord,
+  ClientEmploymentRecord,
   ClientInsuranceRecord,
   ClientLiabilityRecord,
   ClientPensionRecord,
@@ -34,6 +35,8 @@ type EmploymentRow = {
   salary: string;
   frequency: string;
 };
+
+type EmploymentSourceRecord = NonNullable<PersonRecord["employment"]>[number] | ClientEmploymentRecord;
 
 type DependantRow = {
   name: string;
@@ -252,6 +255,19 @@ function firstName(value: unknown) {
   return name.split(/\s+/)[0] ?? "";
 }
 
+function salutationFirstNames(clientName: unknown, partnerName: unknown) {
+  const names = [text(clientName), text(partnerName)].filter(Boolean);
+
+  if (names.length <= 1) {
+    return firstName(names[0]) || names[0] || "";
+  }
+
+  const firstNames = names.map((name) => firstName(name) || name);
+  const uniqueFirstNames = new Set(firstNames.map((name) => name.toLowerCase()));
+
+  return uniqueFirstNames.size === firstNames.length ? firstNames.join(" and ") : names.join(" and ");
+}
+
 function numberValue(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -324,8 +340,25 @@ function readContacts(person: PersonRecord | null | undefined): ContactRow[] {
   }));
 }
 
-function readEmployment(person: PersonRecord | null | undefined): EmploymentRow[] {
-  const source = readArray<Record<string, unknown>>(readObject(person)?.employment);
+function normalizeLookupValue(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function employmentBelongsToPerson(item: ClientEmploymentRecord, person: PersonRecord | null | undefined) {
+  const ownerId = normalizeLookupValue(item.owner?.id);
+  const ownerName = normalizeLookupValue(item.owner?.name);
+  const personIds = [person?.id, person?.ic2AppId].map(normalizeLookupValue).filter(Boolean);
+  const personName = normalizeLookupValue(person?.name);
+
+  return Boolean((ownerId && personIds.includes(ownerId)) || (ownerName && personName && ownerName === personName));
+}
+
+function readEmployment(person: PersonRecord | null | undefined, profile: ClientProfile): EmploymentRow[] {
+  const profileEmployment = profile.employment?.filter((entry) => employmentBelongsToPerson(entry, person)) ?? [];
+  const source: EmploymentSourceRecord[] = profileEmployment.length
+    ? profileEmployment
+    : readArray<EmploymentSourceRecord>(readObject(person)?.employment);
+
   return source.map((entry) => ({
     job_title: text(entry.job_title ?? entry.jobTitle),
     status: text(entry.status),
@@ -336,10 +369,16 @@ function readEmployment(person: PersonRecord | null | undefined): EmploymentRow[
 }
 
 function buildAddress(person: PersonRecord | null | undefined) {
-  const line = text(person?.street ?? person?.address?.street ?? person?.address?.line1);
-  const suburb = text(person?.suburb ?? person?.address?.suburb ?? person?.address?.city);
-  const state = text(person?.state ?? person?.address?.state ?? person?.address?.region);
-  const postCode = text(person?.postCode ?? person?.postcode ?? person?.address?.postCode ?? person?.address?.postcode ?? person?.address?.zipCode);
+  const line = text(person?.address?.street) || text(person?.address?.line1) || text(person?.street) || text(person?.addressStreet);
+  const suburb = text(person?.address?.suburb) || text(person?.address?.city) || text(person?.suburb) || text(person?.addressSuburb);
+  const state = text(person?.address?.state) || text(person?.address?.region) || text(person?.state) || text(person?.addressState);
+  const postCode =
+    text(person?.address?.postCode) ||
+    text(person?.address?.postcode) ||
+    text(person?.address?.zipCode) ||
+    text(person?.postCode) ||
+    text(person?.postcode) ||
+    text(person?.addressPostCode);
   const parts = [line, suburb, state, postCode].filter(Boolean);
 
   return {
@@ -357,7 +396,7 @@ function maybeCurrency(value: number) {
   }).format(value);
 }
 
-function buildPersonBlock(person: PersonRecord | null | undefined) {
+function buildPersonBlock(person: PersonRecord | null | undefined, profile: ClientProfile) {
   const address = buildAddress(person);
 
   return {
@@ -375,7 +414,7 @@ function buildPersonBlock(person: PersonRecord | null | undefined) {
     smoker: text(readObject(person)?.smoker),
     health_insurance: text(readObject(person)?.health_insurance ?? readObject(person)?.healthInsurance),
     contacts: readContacts(person),
-    employment: readEmployment(person),
+    employment: readEmployment(person, profile),
   };
 }
 
@@ -522,8 +561,8 @@ function buildRiskProfileBlock(person: PersonRecord | null | undefined): RiskPro
 export function buildFactFindDocmosisModel(profile: ClientProfile): FactFindDocmosisModel {
   const client = profile.client ?? null;
   const partner = profile.partner ?? null;
-  const clientBlock = buildPersonBlock(client);
-  const partnerBlock = buildPersonBlock(partner);
+  const clientBlock = buildPersonBlock(client, profile);
+  const partnerBlock = buildPersonBlock(partner, profile);
 
   const dependants = profile.dependants ?? [];
   const clientDependants = groupDependantsByOwner(dependants, clientBlock.name, client?.id);
@@ -697,7 +736,7 @@ export function buildEngagementLetterDocmosisModel(
     addresssuburb: address.suburb,
     addressstate: address.state,
     addresspostcode: address.postCode,
-    clientfirstname: firstName(client?.name),
+    clientfirstname: salutationFirstNames(client?.name, partner?.name),
     partnerfirstname: firstName(partner?.name),
     keyreasons: text(input.reasonsHtml),
     preparation: text(input.advicePreparationFee),

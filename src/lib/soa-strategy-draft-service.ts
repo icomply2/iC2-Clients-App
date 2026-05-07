@@ -4,6 +4,7 @@ import type {
   StrategyDraftResponseV1,
   StrategyRecommendationDraftV1,
 } from "@/lib/soa-output-contracts";
+import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
 
 export type SoaStrategyDraftRequest = {
   clientName?: string | null;
@@ -92,7 +93,7 @@ function normalizeStringArray(value: unknown) {
     .filter(Boolean);
 }
 
-function normalizeStrategyDrafts(value: unknown): StrategyRecommendationDraftV1[] | null {
+function normalizeStrategyDrafts(value: unknown, clientName?: string | null): StrategyRecommendationDraftV1[] | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -109,7 +110,10 @@ function normalizeStrategyDrafts(value: unknown): StrategyRecommendationDraftV1[
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
     .map((entry) => ({
       type: typeof entry.type === "string" ? entry.type.trim() : "other",
-      recommendationText: typeof entry.recommendationText === "string" ? entry.recommendationText.trim() : "",
+      recommendationText:
+        typeof entry.recommendationText === "string"
+          ? normalizeRecommendationLanguage(entry.recommendationText, clientName)
+          : "",
       linkedObjectiveTexts: normalizeStringArray(entry.linkedObjectiveTexts),
       clientBenefits: normalizeStringArray(entry.clientBenefits),
       consequences: normalizeStringArray(entry.consequences),
@@ -166,7 +170,7 @@ function buildFallbackStrategyDrafts(request: SoaStrategyDraftRequest): Strategy
 
   return recommendationTexts.map((recommendationText) => ({
     type: "other",
-    recommendationText,
+    recommendationText: normalizeRecommendationLanguage(recommendationText, request.clientName),
     linkedObjectiveTexts: request.objectives.map((objective) => objective.text).filter(Boolean),
     clientBenefits: [],
     consequences: [],
@@ -206,11 +210,13 @@ async function requestOpenAiStrategyDrafts(
               "Draft strategy recommendations only and return JSON matching the provided schema.",
               "Write as an adviser-assistant reasoning about this specific client, not as a generic planning template.",
               "Write all recommendationText, clientBenefits, rationale, consequences, and alternativesConsidered in second person, addressed directly to the client using 'you' and 'your'.",
+              "For recommendationText, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'.",
+              "Do not use 'you should', 'you need to', or 'you must' in recommendationText because that reads as opinion or instruction rather than advice.",
               "Do not write about the client in third person using wording such as 'Guy's retirement savings', 'their objectives', 'the client will benefit', 'he', 'she', or 'they'.",
               "For joint clients, use 'you' and 'your' as the collective addressee. Use names only where needed to identify who owns an account or who will take a specific action, then return to second-person wording.",
               "Every recommendation must clearly reflect the client's personal circumstances, timing, constraints, and stated objectives where the evidence supports that.",
               "For each recommendation:",
-              "- explain what should be done in concrete terms",
+              "- explain the recommended action in concrete terms",
               "- link it to the client's relevant goals",
               "- explain why it is suitable in the client's circumstances",
               "- explain how it advances the client's objectives",
@@ -275,7 +281,7 @@ async function requestOpenAiStrategyDrafts(
     throw new Error("OpenAI strategy draft response did not include message content.");
   }
 
-  return normalizeStrategyDrafts(parseJsonObject(content));
+  return normalizeStrategyDrafts(parseJsonObject(content), request.clientName);
 }
 
 export async function generateSoaStrategyDrafts(

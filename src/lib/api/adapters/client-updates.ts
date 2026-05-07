@@ -3,6 +3,8 @@ import type { UpdateClientDetailsInput } from "@/lib/api/contracts/client-update
 type RequestContext = {
   origin?: string | null;
   cookieHeader?: string | null;
+  apiBaseUrl?: string | null;
+  token?: string | null;
 };
 
 function resolveUrl(path: string, context?: RequestContext) {
@@ -16,21 +18,42 @@ function buildHeaders(context?: RequestContext) {
   };
 }
 
+function canWriteDirect(context?: RequestContext) {
+  return Boolean(context?.apiBaseUrl && context.token);
+}
+
 export async function updatePersonDetails(
   input: UpdateClientDetailsInput,
   payload: Record<string, unknown>,
   context?: RequestContext,
 ) {
   const target = input.target === "partner" ? "partner" : "client";
-  const response = await fetch(
-    resolveUrl(`/api/client-profiles/${encodeURIComponent(input.profileId)}/${target}/${encodeURIComponent(input.personId)}`, context),
-    {
-      method: "PUT",
-      headers: buildHeaders(context),
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    },
-  );
+  const response = canWriteDirect(context)
+    ? await fetch(
+        new URL(
+          `/api/ClientProfiles/${encodeURIComponent(input.profileId)}/${target === "partner" ? "Partner" : "Client"}/${encodeURIComponent(input.personId)}`,
+          context!.apiBaseUrl!,
+        ),
+        {
+          method: "PUT",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${context!.token}`,
+          },
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        },
+      )
+    : await fetch(
+        resolveUrl(`/api/client-profiles/${encodeURIComponent(input.profileId)}/${target}/${encodeURIComponent(input.personId)}`, context),
+        {
+          method: "PUT",
+          headers: buildHeaders(context),
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        },
+      );
 
   const text = await response.text().catch(() => "");
   const body = (() => {

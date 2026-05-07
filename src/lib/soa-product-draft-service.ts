@@ -4,6 +4,7 @@ import type {
   ProductDraftResponseV1,
   ProductRecommendationDraftV1,
 } from "@/lib/soa-output-contracts";
+import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
 
 export type SoaProductDraftRequest = {
   clientName?: string | null;
@@ -160,7 +161,7 @@ function summarizeRecentMessages(recentMessages: SoaProductDraftRequest["recentM
     }));
 }
 
-function normalizeProductDrafts(value: unknown): ProductRecommendationDraftV1[] | null {
+function normalizeProductDrafts(value: unknown, clientName?: string | null): ProductRecommendationDraftV1[] | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -196,7 +197,10 @@ function normalizeProductDrafts(value: unknown): ProductRecommendationDraftV1[] 
           ? entry.productType
           : "other"
       ) as ProductRecommendationDraftV1["productType"],
-      recommendationText: typeof entry.recommendationText === "string" ? entry.recommendationText.trim() : "",
+      recommendationText:
+        typeof entry.recommendationText === "string"
+          ? normalizeRecommendationLanguage(entry.recommendationText, clientName)
+          : "",
       linkedObjectiveTexts: normalizeStringArray(entry.linkedObjectiveTexts),
       currentProductName: typeof entry.currentProductName === "string" ? entry.currentProductName.trim() : null,
       currentProvider: typeof entry.currentProvider === "string" ? entry.currentProvider.trim() : null,
@@ -226,7 +230,7 @@ function buildFallbackProductDrafts(request: SoaProductDraftRequest): ProductRec
   return (request.intakeAssessment?.candidateProductReviewNotes ?? []).map((note) => ({
     action: "retain",
     productType: "other",
-    recommendationText: note,
+    recommendationText: normalizeRecommendationLanguage(note, request.clientName),
     linkedObjectiveTexts: request.objectives.map((objective) => objective.text).filter(Boolean),
     currentProductName: null,
     currentProvider: null,
@@ -269,6 +273,8 @@ async function requestOpenAiProductDrafts(
             "Draft product recommendations only and return JSON matching the provided schema.",
             "Write as an adviser-assistant reasoning about this specific client and their likely product needs, not as a generic product marketing template.",
             "Write all recommendationText, clientBenefits, suitabilityRationale, consequences, and alternativesConsidered.reasonDiscounted in second person, addressed directly to the client using 'you' and 'your'.",
+            "For recommendationText, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'.",
+            "Do not use 'you should', 'you need to', or 'you must' in recommendationText because that reads as opinion or instruction rather than advice.",
             "Do not write about the client in third person using wording such as 'Guy's superannuation', 'their objectives', 'the client will benefit', 'he', 'she', or 'they'.",
             "For joint clients, use 'you' and 'your' as the collective addressee. Use names only where needed to identify account ownership, policy ownership, or which person will take a specific action, then return to second-person wording.",
             "Every recommendation must explain the current position where known, the proposed product direction, and why the recommendation is suitable for this client's goals and circumstances.",
@@ -336,7 +342,7 @@ async function requestOpenAiProductDrafts(
     throw new Error("OpenAI product draft response did not include message content.");
   }
 
-  return normalizeProductDrafts(parseJsonObject(content));
+  return normalizeProductDrafts(parseJsonObject(content), request.clientName);
 }
 
 export async function generateSoaProductDrafts(

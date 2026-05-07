@@ -3,6 +3,7 @@ import type {
   ClientAssetRecord,
   ClientDependantRecord,
   ClientEntityRecord,
+  ClientEmploymentRecord,
   ClientExpenseRecord,
   ClientIncomeRecord,
   ClientInsuranceRecord,
@@ -53,6 +54,8 @@ type LiveContext = {
   resolvedClientId?: string;
   resolvedClientName?: string;
 };
+
+type EmploymentSourceRecord = NonNullable<PersonRecord["employment"]>[number] | ClientEmploymentRecord;
 
 type StoredPlan = {
   planId: string;
@@ -140,7 +143,7 @@ const RESIDENT_STATUS_OPTIONS = ["Resident", "Non-Resident", "Temporary Resident
 const GENDER_OPTIONS = ["Male", "Female", "Non-Binary", "Other", "Prefer not to say"] as const;
 const RISK_PROFILE_OPTIONS = ["Conservative", "Moderately Conservative", "Balanced", "Growth", "High Growth"] as const;
 const ADVICE_AGREEMENT_REQUIRED_OPTIONS = ["Yes", "No"] as const;
-const AGREEMENT_TYPE_OPTIONS = ["Annual Agreement", "Ongoing Fee Arrangement", "One Off Advice"] as const;
+const AGREEMENT_TYPE_OPTIONS = ["Fixed-Term Agreement", "Ongoing Agreement"] as const;
 
 type CollectionIntentResult = {
   kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
@@ -295,16 +298,21 @@ function buildClientUpdateEditorCard(
   target: "client" | "partner",
   changes: Record<string, unknown>,
   allowedTargets: ReadonlyArray<"client" | "partner"> = CLIENT_UPDATE_TARGET_OPTIONS,
+  options: { includeAllCoreFields?: boolean; includeTargetField?: boolean } = {},
 ) {
-  const fields: FinleyEditorCard["fields"] = [
-    {
+  const includeAllCoreFields = options.includeAllCoreFields === true;
+  const includeTargetField = options.includeTargetField !== false;
+  const fields: FinleyEditorCard["fields"] = [];
+
+  if (includeTargetField) {
+    fields.push({
       key: "target",
       label: "Target",
       input: "select",
       value: target,
       options: allowedTargets.map((value) => ({ label: value === "partner" ? "Partner" : "Client", value })),
-    },
-  ];
+    });
+  }
 
   const pushTextField = (key: string, label: string, defaultValue = "") => {
     fields.push({
@@ -348,27 +356,27 @@ function buildClientUpdateEditorCard(
     ].includes(key),
   );
 
-  if (changes.name || !hasKnownField) pushTextField("name", "Name");
-  if (changes.email || !hasKnownField) pushTextField("email", "Email");
-  if (changes.preferredPhone || !hasKnownField) pushTextField("preferredPhone", "Preferred Phone");
-  if (changes.dateOfBirth || !hasKnownField) pushTextField("dateOfBirth", "Date Of Birth");
-  if (includesAddressField || !hasKnownField) {
+  if (includeAllCoreFields || changes.name || !hasKnownField) pushTextField("name", "Name");
+  if (includeAllCoreFields || changes.email || !hasKnownField) pushTextField("email", "Email");
+  if (includeAllCoreFields || changes.preferredPhone || !hasKnownField) pushTextField("preferredPhone", "Preferred Phone");
+  if (includeAllCoreFields || changes.dateOfBirth || !hasKnownField) pushTextField("dateOfBirth", "Date Of Birth");
+  if (includeAllCoreFields || includesAddressField || !hasKnownField) {
     pushTextField("street", "Street");
     pushTextField("suburb", "Suburb");
     pushTextField("state", "State");
     pushTextField("postCode", "Post Code");
   }
-  if (changes.maritalStatus || !hasKnownField) pushSelectField("maritalStatus", "Marital Status", MARITAL_STATUS_OPTIONS);
-  if (changes.residentStatus || !hasKnownField) pushSelectField("residentStatus", "Resident Status", RESIDENT_STATUS_OPTIONS);
-  if (changes.gender || !hasKnownField) pushSelectField("gender", "Gender", GENDER_OPTIONS);
-  if (changes.status) pushSelectField("status", "Status", CLIENT_STATUS_OPTIONS);
-  if (changes.clientCategory) pushSelectField("clientCategory", "Client Category", CLIENT_CATEGORY_OPTIONS);
-  if (changes.riskProfile || !hasKnownField) pushSelectField("riskProfile", "Risk Profile", RISK_PROFILE_OPTIONS);
-  if (changes.adviceAgreementRequired) {
+  if (includeAllCoreFields || changes.maritalStatus || !hasKnownField) pushSelectField("maritalStatus", "Marital Status", MARITAL_STATUS_OPTIONS);
+  if (includeAllCoreFields || changes.residentStatus || !hasKnownField) pushSelectField("residentStatus", "Resident Status", RESIDENT_STATUS_OPTIONS);
+  if (includeAllCoreFields || changes.gender || !hasKnownField) pushSelectField("gender", "Gender", GENDER_OPTIONS);
+  if (includeAllCoreFields || changes.status) pushSelectField("status", "Status", CLIENT_STATUS_OPTIONS);
+  if (includeAllCoreFields || changes.clientCategory) pushSelectField("clientCategory", "Client Category", CLIENT_CATEGORY_OPTIONS);
+  if (includeAllCoreFields || changes.riskProfile || !hasKnownField) pushSelectField("riskProfile", "Risk Profile", RISK_PROFILE_OPTIONS);
+  if (includeAllCoreFields || changes.adviceAgreementRequired) {
     pushSelectField("adviceAgreementRequired", "Advice Agreement Required", ADVICE_AGREEMENT_REQUIRED_OPTIONS);
   }
-  if (changes.agreementType) pushSelectField("agreementType", "Agreement Type", AGREEMENT_TYPE_OPTIONS);
-  if (changes.nextAnniversaryDate) pushTextField("nextAnniversaryDate", "Next Anniversary Date");
+  if (includeAllCoreFields || changes.agreementType) pushSelectField("agreementType", "Agreement Type", AGREEMENT_TYPE_OPTIONS);
+  if (includeAllCoreFields || changes.nextAnniversaryDate) pushTextField("nextAnniversaryDate", "Next Anniversary Date");
 
   return {
     kind: "collection_form" as const,
@@ -380,26 +388,31 @@ function buildClientUpdateEditorCard(
 
 function buildCurrentPersonChanges(person: PersonRecord | null | undefined): Record<string, unknown> {
   if (!person) return {};
+  const address = readPersonAddress(person);
+  const record = person as PersonRecord & Record<string, unknown>;
 
   return {
     name: person.name ?? "",
     email: person.email ?? "",
-    preferredPhone: person.preferredPhone ?? person.phone ?? person.mobile ?? person.mobilePhone ?? person.contact?.preferredPhone ?? person.contact?.phone ?? "",
-    dateOfBirth: person.dob ?? "",
-    street: person.street ?? person.address?.street ?? person.address?.line1 ?? "",
-    suburb: person.suburb ?? person.address?.suburb ?? person.address?.city ?? "",
-    state: person.state ?? person.address?.state ?? person.address?.region ?? "",
-    postCode: person.postCode ?? person.postcode ?? person.address?.postCode ?? person.address?.postcode ?? person.address?.zipCode ?? "",
+    preferredPhone: readPersonPhone(person),
+    dateOfBirth: formatPersonDateForInput(person.dob),
+    street: address.street,
+    suburb: address.suburb,
+    state: address.state,
+    postCode: address.postCode,
     maritalStatus: person.maritalStatus ?? "",
     residentStatus: person.residentStatus ?? "",
     gender: person.gender ?? "",
-    status: person.status ?? person.clientStatus ?? "",
+    status: person.status ?? person.clientStatus ?? person.accountStatus ?? "",
     clientCategory: person.clientCategory ?? person.category ?? "",
     riskProfile: person.riskProfileResponse?.resultDisplay ?? "",
     adviceAgreementRequired:
-      person.fdsAnnualAgreementRequired ?? person.annualAgreementRequired ?? person.fdsRequired ?? "",
-    agreementType: person.agreementType ?? person.annualAgreement?.agreementType ?? person.annualAgreement?.type ?? "",
-    nextAnniversaryDate: person.nextAnniversaryDate ?? person.annualAgreement?.nextAnniversaryDate ?? person.annualAgreement?.nextDueDate ?? "",
+      formatYesNoValue(record.fdsAnnualAgreementRequired ?? record.annualAgreementRequired ?? record.fdsRequired),
+    agreementType:
+      person.agreementType ?? textValue(record.annualAgreementStatus) ?? person.annualAgreement?.agreementType ?? person.annualAgreement?.type ?? "",
+    nextAnniversaryDate: formatPersonDateForInput(
+      person.nextAnniversaryDate ?? person.annualAgreement?.nextAnniversaryDate ?? person.annualAgreement?.nextDueDate,
+    ),
   };
 }
 
@@ -497,7 +510,26 @@ function applyFileNoteOverrides(plan: StoredPlan, overrides?: PlanExecutionOverr
 
   if (recordOverride) {
     Object.assign(payload, recordOverride);
+    if (typeof recordOverride.clientId === "string" && recordOverride.clientId.trim()) {
+      payload.clientId = recordOverride.clientId.trim();
+    }
+    if (typeof recordOverride.ownerId === "string" && recordOverride.ownerId.trim()) {
+      payload.owner = {
+        id: recordOverride.ownerId.trim(),
+        name:
+          typeof recordOverride.ownerName === "string" && recordOverride.ownerName.trim()
+            ? recordOverride.ownerName.trim()
+            : typeof recordOverride.ownerLabel === "string" && recordOverride.ownerLabel.trim()
+              ? recordOverride.ownerLabel.trim()
+              : typeof payload.owner === "object" && payload.owner && "name" in payload.owner && typeof payload.owner.name === "string"
+                ? payload.owner.name
+                : "",
+      };
+    }
     Object.assign(inputsPreview, {
+      clientId: typeof recordOverride.clientId === "string" ? recordOverride.clientId : inputsPreview.clientId,
+      ownerId: typeof recordOverride.ownerId === "string" ? recordOverride.ownerId : inputsPreview.ownerId,
+      ownerName: typeof recordOverride.ownerName === "string" ? recordOverride.ownerName : inputsPreview.ownerName,
       subject: typeof recordOverride.subject === "string" ? recordOverride.subject : inputsPreview.subject,
       content: typeof recordOverride.content === "string" ? recordOverride.content : inputsPreview.content,
       serviceDate: typeof recordOverride.serviceDate === "string" ? recordOverride.serviceDate : inputsPreview.serviceDate,
@@ -548,6 +580,118 @@ async function loadCurrentUser(token: string): Promise<UserSummary | null> {
   } catch {
     return null;
   }
+}
+
+function firstTextValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function textValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function formatYesNoValue(value: unknown) {
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return "Yes";
+    if (normalized === "false") return "No";
+    return value.trim();
+  }
+
+  return "";
+}
+
+function readPersonAddress(person: PersonRecord | null | undefined) {
+  return {
+    street: firstTextValue(person?.address?.street, person?.address?.line1, person?.street, person?.addressStreet),
+    suburb: firstTextValue(person?.address?.suburb, person?.address?.city, person?.suburb, person?.addressSuburb),
+    state: firstTextValue(person?.address?.state, person?.address?.region, person?.state, person?.addressState),
+    postCode: firstTextValue(
+      person?.address?.postCode,
+      person?.address?.postcode,
+      person?.address?.zipCode,
+      person?.postCode,
+      person?.postcode,
+      person?.addressPostCode,
+    ),
+  };
+}
+
+function readPersonPhone(person: PersonRecord | null | undefined) {
+  return firstTextValue(
+    person?.preferredPhone,
+    person?.contact?.preferredPhone,
+    person?.mobile,
+    person?.mobilePhone,
+    person?.phone,
+    person?.contact?.phone,
+  );
+}
+
+function getEmploymentFrequency(item: EmploymentSourceRecord) {
+  return typeof item.frequency === "string"
+    ? item.frequency
+    : item.frequency?.value ?? item.frequency?.type ?? "";
+}
+
+function getAllEmploymentRecords(profile: ClientProfile | null) {
+  if (!profile) return [];
+
+  const profileEmployment = profile.employment ?? [];
+  const nestedEmployment: EmploymentSourceRecord[] = [
+    ...(profile.client?.employment ?? []),
+    ...(profile.partner?.employment ?? []),
+  ];
+
+  return profileEmployment.length > 0 ? profileEmployment : nestedEmployment;
+}
+
+function getEmploymentOwnerName(item: EmploymentSourceRecord, profile: ClientProfile | null) {
+  if (item.owner?.name?.trim()) {
+    return item.owner.name.trim();
+  }
+
+  if (profile?.client?.employment?.some((entry) => entry === item)) {
+    return profile.client.name?.trim() ?? "";
+  }
+
+  if (profile?.partner?.employment?.some((entry) => entry === item)) {
+    return profile.partner.name?.trim() ?? "";
+  }
+
+  return "";
+}
+
+function formatPersonDateForInput(value?: string | null) {
+  if (!value?.trim()) return "";
+
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+  }
+
+  const slashMatch = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+  if (slashMatch) {
+    const day = slashMatch[1].padStart(2, "0");
+    const month = slashMatch[2].padStart(2, "0");
+    const year =
+      slashMatch[3].length === 2
+        ? `${Number(slashMatch[3]) >= 50 ? "19" : "20"}${slashMatch[3]}`
+        : slashMatch[3];
+    return `${day}/${month}/${year}`;
+  }
+
+  return value.trim();
 }
 
 async function loadFileNotes(token: string, clientId?: string | null) {
@@ -613,18 +757,14 @@ function countMissingFields(profile: ClientProfile | null) {
 
   const missing: string[] = [];
   const client = profile.client;
-  const record = client as ClientProfile["client"] & Record<string, unknown>;
-  const address = (record.address ?? null) as Record<string, unknown> | null;
-  const street = typeof address?.street === "string" ? address.street : client.street;
-  const suburb = typeof address?.suburb === "string" ? address.suburb : client.suburb;
-  const postCode = typeof address?.postCode === "string" ? address.postCode : client.postCode;
+  const address = readPersonAddress(client);
 
   if (!client.email?.trim()) missing.push("email");
-  if (!(client.mobile ?? client.phone ?? client.preferredPhone)?.trim()) missing.push("preferred phone");
   if (!client.dob?.trim()) missing.push("date of birth");
-  if (!street?.trim()) missing.push("street");
-  if (!suburb?.trim()) missing.push("suburb");
-  if (!postCode?.trim()) missing.push("post code");
+  if (!address.street) missing.push("street");
+  if (!address.suburb) missing.push("suburb");
+  if (!address.state) missing.push("state");
+  if (!address.postCode) missing.push("post code");
 
   return missing;
 }
@@ -655,12 +795,13 @@ function buildProfileReadAnswer(message: string, context: LiveContext) {
     };
   }
 
-  const addressStreet = person.address?.street ?? person.address?.line1 ?? person.street ?? null;
-  const addressSuburb = person.address?.suburb ?? person.address?.city ?? person.suburb ?? null;
-  const addressState = person.address?.state ?? person.address?.region ?? person.state ?? null;
-  const addressPostCode = person.address?.postCode ?? person.address?.postcode ?? person.address?.zipCode ?? person.postCode ?? person.postcode ?? null;
-  const addressValue = [addressStreet, addressSuburb, [addressState, addressPostCode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-  const phoneValue = person.preferredPhone ?? person.contact?.preferredPhone ?? person.mobile ?? person.mobilePhone ?? person.phone ?? person.contact?.phone ?? null;
+  const address = readPersonAddress(person);
+  const addressValue = [
+    address.street,
+    address.suburb,
+    [address.state, address.postCode].filter(Boolean).join(" "),
+  ].filter(Boolean).join(", ");
+  const phoneValue = readPersonPhone(person);
   const dobValue = person.dob ?? null;
   const displayDob = formatDateForDisplay(dobValue);
   const summaryRequested =
@@ -893,6 +1034,45 @@ function buildCollectionReadAnswer(message: string, context: LiveContext) {
             formatCurrencyDisplay(item.repaymentAmount),
           ],
           editAction: item.id ? { kind: "liabilities", recordId: item.id, label: "Edit" } : null,
+        })),
+        footer: null,
+      } satisfies FinleyDisplayCard,
+    };
+  }
+
+  if (lower.includes("employment") || lower.includes("job")) {
+    const employment = getAllEmploymentRecords(context.profile);
+
+    if (!employment.length) {
+      return {
+        matched: true,
+        assistantMessage: `I couldn't find any employment records for ${clientName}.`,
+        missingInformation: [],
+        warnings: [],
+        displayCard: null,
+      };
+    }
+
+    return {
+      matched: true,
+      assistantMessage: `${clientName} has ${employment.length} employment record${employment.length === 1 ? "" : "s"}.`,
+      missingInformation: [],
+      warnings: [],
+      displayCard: {
+        kind: "collection_summary",
+        title: `${clientName} Employment`,
+        columns: ["Owner", "Job Title", "Status", "Employer", "Salary", "Frequency"],
+        rows: employment.map((item, index) => ({
+          id: item.id ?? `employment-${index}`,
+          cells: [
+            getEmploymentOwnerName(item, context.profile),
+            item.jobTitle ?? item.job_title ?? "",
+            item.status ?? "",
+            item.employer ?? "",
+            formatCurrencyDisplay(item.salary),
+            getEmploymentFrequency(item),
+          ],
+          editAction: null,
         })),
         footer: null,
       } satisfies FinleyDisplayCard,
@@ -1420,10 +1600,23 @@ function toCardOptions(options: readonly string[]) {
   return [...options].map((option) => ({ label: option, value: option }));
 }
 
+function getPersonOption(person: PersonRecord | null | undefined, fallbackValue?: string | null) {
+  const value = person?.id ?? person?.ic2AppId ?? person?.entityId ?? fallbackValue ?? "";
+  const label = person?.name ?? "";
+
+  return value && label ? { label, value } : null;
+}
+
+function getPersonOwnerOptions(profile: ClientProfile | null, options?: { useProfileClientFallback?: boolean }) {
+  return [
+    getPersonOption(profile?.client, options?.useProfileClientFallback ? profile?.id : null),
+    getPersonOption(profile?.partner),
+  ].filter((entry): entry is { label: string; value: string } => Boolean(entry));
+}
+
 function getOwnerOptions(profile: ClientProfile | null) {
   return [
-    profile?.client?.id && profile.client.name ? { label: profile.client.name, value: profile.client.id } : null,
-    profile?.partner?.id && profile.partner.name ? { label: profile.partner.name, value: profile.partner.id } : null,
+    ...getPersonOwnerOptions(profile),
     ...((profile?.entities ?? [])
       .filter((entity) => entity.id && entity.name)
       .map((entity) => ({ label: entity.name!, value: entity.id! }))),
@@ -3546,17 +3739,18 @@ export async function prepareFinleyFactFindWorkflow(input: {
   const steps: FinleyFactFindStep[] = [
     {
       id: "household-details",
-      title: "Household Details",
-      description: `Review the core client details for ${clientName}.`,
+      title: "Client Details",
+      description: `Review the primary client details for ${liveContext.profile?.client?.name ?? clientName}.`,
       guidance: missingFields.length
         ? `Missing fields currently detected: ${missingFields.join(", ")}.`
-        : "Core client details are loaded. Update anything that changed before moving on.",
+        : "Primary client details are loaded. Update anything that changed before moving on.",
       displayCard: null,
       editorCard: buildClientUpdateEditorCard(
         "update_client_person_details",
         "client",
         buildCurrentPersonChanges(liveContext.profile?.client),
-        hasPartner ? CLIENT_UPDATE_TARGET_OPTIONS : ["client"],
+        ["client"],
+        { includeAllCoreFields: true, includeTargetField: false },
       ),
     },
   ];
@@ -3572,6 +3766,8 @@ export async function prepareFinleyFactFindWorkflow(input: {
         "update_partner_person_details",
         "partner",
         buildCurrentPersonChanges(liveContext.profile.partner),
+        ["partner"],
+        { includeAllCoreFields: true, includeTargetField: false },
       ),
     });
   }
@@ -3603,6 +3799,13 @@ export async function prepareFinleyFactFindWorkflow(input: {
       "Liabilities",
       "Review lending and other liabilities for the household.",
       "what liabilities does this client have",
+      liveContext,
+    ),
+    buildFactFindCollectionStep(
+      "employment",
+      "Employment",
+      "Review current employment records for the client and partner.",
+      "what employment does this client have",
       liveContext,
     ),
     buildFactFindCollectionStep(
@@ -3667,23 +3870,56 @@ export function cancelStoredPlan(planId: string) {
 
 async function executeFileNotePlan(plan: StoredPlan, origin?: string | null, cookieHeader?: string | null) {
   const payload = plan.execution.payload;
-  const owner =
+  let owner =
     payload.owner && typeof payload.owner === "object"
       ? (payload.owner as { id?: string | null; name?: string | null })
       : null;
+  let clientId = typeof payload.clientId === "string" ? payload.clientId : null;
+
+  if ((!clientId || !owner?.id || !owner.name) && (plan.profileId || plan.clientId)) {
+    const token = await readAuthTokenFromCookies().catch(() => null);
+    let profile: ClientProfile | null = null;
+
+    if (token && plan.profileId) {
+      profile = await getClientProfile(plan.profileId, token).then((result) => result.data ?? null).catch(() => null);
+    }
+
+    if (token && !profile && plan.clientId) {
+      profile = await getClientProfile(plan.clientId, token).then((result) => result.data ?? null).catch(() => null);
+    }
+
+    if (token && !profile && plan.clientId) {
+      const profileIdResult = await getClientProfileId(plan.clientId, token).catch(() => null);
+      const resolvedProfileId = profileIdResult?.data ?? null;
+      if (resolvedProfileId) {
+        profile = await getClientProfile(resolvedProfileId, token).then((result) => result.data ?? null).catch(() => null);
+      }
+    }
+
+    clientId = clientId || profile?.id || plan.profileId || plan.clientId || null;
+    owner =
+      owner?.id && owner.name
+        ? owner
+        : profile?.client?.id
+          ? {
+              id: profile.client.id,
+              name: profile.client.name ?? plan.clientName ?? "Client",
+            }
+          : owner;
+  }
   const adviser =
     payload.adviser && typeof payload.adviser === "object"
       ? (payload.adviser as { name?: string | null; email?: string | null })
       : null;
 
-  if (!payload.clientId || !owner?.id || !owner.name) {
+  if (!clientId || !owner?.id || !owner.name) {
     throw new Error("Finley could not determine the client and owner needed to create this file note.");
   }
 
   await createFileNoteAction(
     {
       id: typeof payload.id === "string" ? payload.id : null,
-      clientId: String(payload.clientId),
+      clientId,
       ownerId: owner.id,
       ownerName: owner.name,
       joint: typeof payload.joint === "boolean" ? payload.joint : false,
@@ -4175,6 +4411,55 @@ export async function approveStoredPlan(
   }
 }
 
+function normalizeUploadedFiles(files?: FinleyChatRequest["uploadedFiles"]) {
+  return (files ?? [])
+    .filter((file) => file?.name?.trim() && file.extractedText?.trim())
+    .map((file) => ({
+      name: file.name!.trim(),
+      tags: Array.isArray(file.tags) ? file.tags.filter((tag): tag is string => typeof tag === "string" && Boolean(tag.trim())) : [],
+      extractedText: file.extractedText!.trim(),
+    }));
+}
+
+function summarizeUploadedFilesForAdviser(files?: FinleyChatRequest["uploadedFiles"]) {
+  const uploads = normalizeUploadedFiles(files);
+  if (!uploads.length) return null;
+
+  return uploads
+    .map((upload) => {
+      const lines = upload.extractedText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 16 && line.length < 240)
+        .slice(0, 10);
+      const detected = upload.tags.length ? ` (${upload.tags.join(", ")})` : "";
+      return [`${upload.name}${detected}`, ...lines.map((line) => `- ${line}`)].join("\n");
+    })
+    .join("\n\n");
+}
+
+function buildFileNoteTextFromUploadedFiles(message: string, files?: FinleyChatRequest["uploadedFiles"]) {
+  const uploads = normalizeUploadedFiles(files);
+  if (!uploads.length) return normalizeFileNoteText(message);
+
+  const lower = message.toLowerCase();
+  const relevantUploads = lower.includes("transcript") || lower.includes("meeting")
+    ? uploads.filter((upload) => upload.tags.includes("meeting-transcript") || /transcript|meeting/i.test(upload.name))
+    : uploads;
+  const selectedUploads = relevantUploads.length ? relevantUploads : uploads;
+
+  return selectedUploads
+    .map((upload) => {
+      const lines = upload.extractedText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 10)
+        .slice(0, 45);
+      return [`Source: ${upload.name}`, ...lines].join("\n");
+    })
+    .join("\n\n");
+}
+
 export async function handleFinleyChat(request: FinleyChatRequest): Promise<FinleyChatResponse> {
   const message = request.message.trim();
   const liveContext = await loadLiveContext(request.activeClientId, request.activeClientName);
@@ -4263,6 +4548,23 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
     lower.startsWith("get ");
 
   if (looksLikeReadQuestion) {
+    if ((lower.includes("uploaded") || lower.includes("document")) && normalizeUploadedFiles(request.uploadedFiles).length) {
+      return {
+        ...base,
+        status: "completed",
+        responseMode: "inform",
+        assistantMessage: `I reviewed the uploaded document text for ${clientName}. Here are the useful adviser-facing details I can see:\n\n${summarizeUploadedFilesForAdviser(request.uploadedFiles)}`,
+        plan: null,
+        results: [],
+        missingInformation: [],
+        warnings: [],
+        errors: [],
+        displayCard: null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
     const readAnswer = buildProfileReadAnswer(message, liveContext);
 
     if (readAnswer.matched) {
@@ -4305,16 +4607,36 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
   if (lower.includes("file note") || lower.includes("note")) {
     const planId = makeId("plan");
     const stepId = makeId("step");
-    const noteText = normalizeFileNoteText(message);
+    const noteText = buildFileNoteTextFromUploadedFiles(message, request.uploadedFiles);
     const subject = noteText.slice(0, 80);
     const noteKind = getFinleyFileNoteType(message);
+    const fileNoteClientId = liveContext.profile?.id ?? liveContext.resolvedClientId ?? request.activeClientId ?? "";
+    const fileNoteClientName =
+      [liveContext.profile?.client?.name, liveContext.profile?.partner?.name].filter(Boolean).join(" & ")
+      || liveContext.resolvedClientName
+      || clientName;
+    const fileNotePersonOptions = getPersonOwnerOptions(liveContext.profile, { useProfileClientFallback: true });
+    const fallbackClientOption =
+      fileNoteClientId && clientName
+        ? {
+            label: liveContext.profile?.client?.name ?? clientName,
+            value: fileNoteClientId,
+          }
+        : null;
+    const ownerOptions =
+      fileNotePersonOptions.length
+        ? fileNotePersonOptions
+        : fallbackClientOption
+          ? [fallbackClientOption]
+          : getOwnerOptions(liveContext.profile);
+    const defaultOwner = ownerOptions[0] ?? null;
     const payload = {
       id: null,
-      clientId: liveContext.resolvedClientId,
-      owner: liveContext.profile?.client?.id
+      clientId: fileNoteClientId,
+      owner: defaultOwner
         ? {
-            id: liveContext.profile.client.id,
-            name: liveContext.profile.client.name ?? liveContext.resolvedClientName ?? "",
+            id: defaultOwner.value,
+            name: defaultOwner.label,
           }
         : null,
       joint: false,
@@ -4349,7 +4671,10 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
       stepId,
       description: "Save a new file note on the selected client record with the supplied meeting summary.",
       inputsPreview: {
-        clientId: liveContext.resolvedClientId,
+        clientId: fileNoteClientId,
+        clientName: fileNoteClientName,
+        ownerId: defaultOwner?.value ?? "",
+        ownerName: defaultOwner?.label ?? "",
         subject,
         content: noteText,
         serviceDate: payload.serviceDate,
@@ -4373,16 +4698,17 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         toolName: "create_file_note",
         fields: [
           {
+            key: "ownerId",
+            label: "Client",
+            input: "select",
+            value: defaultOwner?.value ?? "",
+            options: ownerOptions,
+          },
+          {
             key: "serviceDate",
             label: "Service Date",
             input: "text",
             value: payload.serviceDate,
-          },
-          {
-            key: "subject",
-            label: "Subject",
-            input: "text",
-            value: subject,
           },
           {
             key: "type",
@@ -4397,6 +4723,12 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
             input: "select",
             value: noteKind.subType,
             options: toCardOptions(FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[noteKind.type] ?? []),
+          },
+          {
+            key: "subject",
+            label: "Subject",
+            input: "text",
+            value: subject,
           },
           {
             key: "content",
@@ -4418,7 +4750,10 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
             status: "pending",
             description: "Save a new file note on the selected client record with the supplied meeting summary.",
             inputsPreview: {
-              clientId: liveContext.resolvedClientId,
+              clientId: fileNoteClientId,
+              clientName: fileNoteClientName,
+              ownerId: defaultOwner?.value ?? "",
+              ownerName: defaultOwner?.label ?? "",
               subject,
               content: noteText,
               serviceDate: payload.serviceDate,

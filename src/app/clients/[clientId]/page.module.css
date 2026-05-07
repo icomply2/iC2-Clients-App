@@ -606,6 +606,50 @@
   white-space: nowrap;
 }
 
+.factFindHeaderActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.factFindAddButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0 0.85rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: #102a56;
+  color: #fff;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.factFindAddButton span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.factFindAddButton[aria-disabled="true"],
+.factFindAddButton:disabled {
+  opacity: 0.58;
+  cursor: not-allowed;
+}
+
 .factFindStepper {
   display: flex;
   gap: 0.5rem;
@@ -647,6 +691,25 @@
 .factFindDataTitle {
   color: #163a61;
   font-size: 1rem;
+  font-weight: 800;
+}
+
+.factFindDetailSections {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.factFindDetailSection {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.factFindDetailSectionTitle {
+  min-height: 2.35rem;
+  padding: 0.62rem 0.8rem;
+  background: #fff7dc;
+  color: #102a56;
+  font-size: 0.98rem;
   font-weight: 800;
 }
 
@@ -746,10 +809,34 @@
   color: #9aa9bc;
 }
 
-.factFindEditHint {
-  color: #6b7c93;
-  font-size: 0.8rem;
-  font-weight: 700;
+.factFindEditButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #d7dee7;
+  border-radius: 0.4rem;
+  background: #fff;
+  color: #102a56;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+}
+
+.factFindEditButton:hover {
+  border-color: #102a56;
+  background: #f8fafc;
+}
+
+.factFindEditButton svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .factFindFooter {
