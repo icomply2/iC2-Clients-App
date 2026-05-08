@@ -1021,6 +1021,15 @@ export function SoaPrintPreview() {
     ownerPersonId && adviceCase.clientGroup.clients.some((person) => person.personId === ownerPersonId)
       ? ownerPersonId
       : adviceCase.clientGroup.clients[0]?.personId ?? "client";
+  const getRecommendationAudience = (ownerPersonIds?: string[] | null) => {
+    const ids = ownerPersonIds?.length ? ownerPersonIds : adviceCase.clientGroup.clients.map((person) => person.personId);
+    const names = adviceCase.clientGroup.clients
+      .filter((person) => ids.includes(person.personId))
+      .map((person) => person.fullName)
+      .filter(Boolean);
+
+    return names.length ? names.join(" and ") : addresseeLine;
+  };
   const getCommissionUpfrontPercentage = (commission: AdviceCaseV1["fees"]["commissions"][number]) =>
     commission.upfrontPercentage ?? (commission.type === "upfront" ? commission.percentage : null) ?? DEFAULT_UPFRONT_COMMISSION_PERCENTAGE;
   const getCommissionUpfrontAmount = (commission: AdviceCaseV1["fees"]["commissions"][number]) =>
@@ -1845,6 +1854,9 @@ export function SoaPrintPreview() {
               ) : null}
               <div className={styles.recommendationBlock}>
                 <h3>{`Recommendation ${index + 1}`}</h3>
+                <p className={styles.recommendationText}>
+                  <strong>Recommended for:</strong> {getRecommendationAudience(recommendation.ownerPersonIds)}
+                </p>
                 <p className={styles.recommendationText}>{recommendation.recommendationText || "Draft recommendation not yet written."}</p>
                 <div className={styles.recommendationDetailStack}>
                   <div className={styles.card}>
@@ -1893,6 +1905,9 @@ export function SoaPrintPreview() {
               <h2 className={styles.sectionHeading}>Product Recommendations</h2>
               <div className={styles.recommendationBlock}>
                 <h3>{`Product Recommendation ${index + 1}`}</h3>
+                <p className={styles.metaLine}>
+                  <strong>Recommended for:</strong> {getRecommendationAudience(recommendation.ownerPersonIds)}
+                </p>
                 <p className={styles.recommendationText}>{recommendation.recommendationText || "Draft product recommendation not yet written."}</p>
                 <div className={styles.recommendationDetailStack}>
                   <div className={styles.card}>

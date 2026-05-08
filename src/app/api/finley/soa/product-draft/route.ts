@@ -14,6 +14,10 @@ export async function POST(request: NextRequest) {
         scope?: AdviceScopeV1 | null;
         riskProfile?: RiskProfileV1 | null;
         intakeAssessment?: IntakeAssessmentV1 | null;
+        clientPeople?: Array<{
+          name?: string | null;
+          role?: "client" | "partner" | null;
+        }> | null;
         uploadedFiles?: Array<{
           name?: string;
           kind?: string | null;
@@ -46,6 +50,13 @@ export async function POST(request: NextRequest) {
     scope: payload?.scope ?? null,
     riskProfile: payload?.riskProfile ?? null,
     intakeAssessment: payload?.intakeAssessment ?? null,
+    clientPeople:
+      payload?.clientPeople
+        ?.filter((person): person is { name: string; role?: "client" | "partner" | null } => Boolean(person?.name?.trim()))
+        .map((person) => ({
+          name: person.name.trim(),
+          role: person.role === "partner" ? "partner" : "client",
+        })) ?? [],
     uploadedFiles:
       payload?.uploadedFiles
         ?.filter((file): file is { name: string; kind?: string | null; extractedText?: string | null } => Boolean(file?.name?.trim()))

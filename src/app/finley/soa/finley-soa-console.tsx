@@ -276,17 +276,85 @@ function normalizeText(value: string) {
   return value.trim().toLowerCase();
 }
 
+function resolvePersonIdsFromNames(
+  names: string[] | null | undefined,
+  people: AdviceCaseV1["clientGroup"]["clients"],
+) {
+  if (!names?.length) {
+    return people.map((person) => person.personId);
+  }
+
+  const requestedNames = names.map(normalizeText).filter(Boolean);
+  const matchedIds = people
+    .filter((person) => {
+      const fullName = normalizeText(person.fullName);
+      const firstName = normalizeText(person.fullName.split(/\s+/)[0] ?? "");
+      const role = normalizeText(person.role);
+
+      return requestedNames.some(
+        (name) =>
+          name === "both" ||
+          name === "joint" ||
+          name === "jointly" ||
+          name === "client and partner" ||
+          name === "both clients" ||
+          fullName === name ||
+          fullName.includes(name) ||
+          name.includes(fullName) ||
+          (firstName && firstName === name) ||
+          role === name,
+      );
+    })
+    .map((person) => person.personId);
+
+  return matchedIds.length ? matchedIds : people.map((person) => person.personId);
+}
+
+function formatRecommendationAudience(ownerPersonIds: string[] | null | undefined, people: AdviceCaseV1["clientGroup"]["clients"]) {
+  const ids = ownerPersonIds?.length ? ownerPersonIds : people.map((person) => person.personId);
+  const names = people.filter((person) => ids.includes(person.personId)).map((person) => person.fullName).filter(Boolean);
+
+  return names.length ? names.join(" and ") : "Client and partner";
+}
+
+function getRecommendationAudienceSelectValue(
+  ownerPersonIds: string[] | null | undefined,
+  people: AdviceCaseV1["clientGroup"]["clients"],
+) {
+  const ids = ownerPersonIds?.length ? ownerPersonIds : people.map((person) => person.personId);
+
+  if (people.length > 1 && ids.length >= people.length) {
+    return "joint";
+  }
+
+  return ids[0] ?? people[0]?.personId ?? "joint";
+}
+
+function resolveRecommendationAudienceSelectValue(value: string, people: AdviceCaseV1["clientGroup"]["clients"]) {
+  if (value === "joint") {
+    return people.map((person) => person.personId);
+  }
+
+  return people.some((person) => person.personId === value)
+    ? [value]
+    : people.map((person) => person.personId);
+}
+
 function normalizeAdviceCaseRecommendationLanguage(caseValue: AdviceCaseV1, clientName?: string | null): AdviceCaseV1 {
+  const allPersonIds = caseValue.clientGroup.clients.map((client) => client.personId);
+
   return {
     ...caseValue,
     recommendations: {
       ...caseValue.recommendations,
       strategic: caseValue.recommendations.strategic.map((recommendation) => ({
         ...recommendation,
+        ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
         recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
       })),
       product: caseValue.recommendations.product.map((recommendation) => ({
         ...recommendation,
+        ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
         recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
       })),
     },
@@ -680,12 +748,20 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     replacementJustification: report.replacementReasons.join(" "),
   };
 
+  const ownerPeople = matchOwnerPeople(report, current.clientGroup.clients);
+  const ownerName =
+    report.ownerName?.trim() ||
+    ownerPeople.map((person) => person.fullName).filter(Boolean).join(" & ") ||
+    current.clientGroup.clients.map((person) => person.fullName).filter(Boolean).join(" & ") ||
+    null;
+
   const nextProductRecommendation = {
     recommendationId: makeId("product"),
     action: isProductRexConsolidation(report) ? ("consolidate" as const) : ("replace" as const),
     productType: "investment" as const,
     recommendedProductName: report.recommendedPlatform ?? null,
     recommendedProvider: report.recommendedPlatform ?? null,
+    ownerPersonIds: ownerPeople.map((person) => person.personId),
     linkedObjectiveIds: current.objectives.map((objective) => objective.objectiveId),
     recommendationText: report.replacementReasons[0] ?? `Replace ${report.currentPlatform ?? "the current platform"} with ${report.recommendedPlatform ?? "the recommended platform"}.`,
     targetAmount: null,
@@ -767,12 +843,6 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     ? current.recommendations.replacement
     : [...current.recommendations.replacement, nextReplacementRecommendation];
   const productRexPortfolioHoldings = buildProductRexPortfolioHoldings(report);
-  const ownerPeople = matchOwnerPeople(report, current.clientGroup.clients);
-  const ownerName =
-    report.ownerName?.trim() ||
-    ownerPeople.map((person) => person.fullName).filter(Boolean).join(" & ") ||
-    current.clientGroup.clients.map((person) => person.fullName).filter(Boolean).join(" & ") ||
-    null;
   const existingPortfolioAccounts = (current.recommendations.portfolio?.accounts ?? []).filter(
     (account) => account.sourceFileName !== report.sourceFileName && account.productRexReportId !== report.reportId,
   );
@@ -1054,8 +1124,16 @@ function getSectionStatusLabel(status: SectionStatus) {
 function splitNonEmptyLines(value: string) {
   return value
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*•\d.)\s]+/, "").trim())
     .filter(Boolean);
+}
+
+function formatBulletTextarea(items: string[]) {
+  return items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => `• ${item}`)
+    .join("\n");
 }
 
 type SectionChatEditMode = "append" | "replace" | "remove";
@@ -2348,6 +2426,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         },
         riskProfile: adviceCase.riskProfile ?? null,
         intakeAssessment: nextAssessment,
+        clientPeople: adviceCase.clientGroup.clients.map((person) => ({
+          name: person.fullName,
+          role: person.role,
+        })),
         uploadedFiles: uploads.map((upload) => ({
           name: upload.name,
           kind: upload.kind,
@@ -2386,6 +2468,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         },
         riskProfile: adviceCase.riskProfile ?? null,
         intakeAssessment: nextAssessment,
+        clientPeople: adviceCase.clientGroup.clients.map((person) => ({
+          name: person.fullName,
+          role: person.role,
+        })),
         uploadedFiles: uploads.map((upload) => ({
           name: upload.name,
           kind: upload.kind,
@@ -2567,6 +2653,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       return {
                       recommendationId: makeId("strategy"),
                       type: draft.type || "other",
+                      ownerPersonIds: resolvePersonIdsFromNames(draft.recommendedFor, current.clientGroup.clients),
                       recommendationText: normalizeRecommendationLanguage(draft.recommendationText, activeClient?.name),
                       linkedObjectiveIds: linkedObjectiveIds.length ? linkedObjectiveIds : nextObjectiveIds,
                       targetAmount: null,
@@ -2600,6 +2687,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   : nextAssessment.candidateStrategyRecommendations.map((recommendationText) => ({
                       recommendationId: makeId("strategy"),
                       type: "other",
+                      ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                       recommendationText: normalizeRecommendationLanguage(recommendationText, activeClient?.name),
                       linkedObjectiveIds: nextObjectiveIds,
                       targetAmount: null,
@@ -2630,6 +2718,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         productType: draft.productType,
                         recommendedProductName: draft.recommendedProductName ?? null,
                         recommendedProvider: draft.recommendedProvider ?? null,
+                        ownerPersonIds: resolvePersonIdsFromNames(draft.recommendedFor, current.clientGroup.clients),
                         linkedObjectiveIds: linkedObjectiveIds.length ? linkedObjectiveIds : nextObjectiveIds,
                         recommendationText: normalizeRecommendationLanguage(draft.recommendationText, activeClient?.name),
                         targetAmount: null,
@@ -2671,6 +2760,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         productType: "other" as const,
                         recommendedProductName: null,
                         recommendedProvider: null,
+                        ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                         linkedObjectiveIds: nextObjectiveIds,
                         recommendationText: normalizeRecommendationLanguage(note, activeClient?.name),
                         targetAmount: null,
@@ -4133,6 +4223,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         </div>
                         {collapsedStrategyRecommendations[recommendation.recommendationId] ? (
                           <div className={styles.workflowDraftPreview}>
+                            <strong>For {formatRecommendationAudience(recommendation.ownerPersonIds, adviceCase.clientGroup.clients)}:</strong>{" "}
                             {recommendation.recommendationText?.trim() || "No recommendation text yet."}
                           </div>
                         ) : (
@@ -4207,6 +4298,42 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                           if (activeTab === "recommendation") {
                             return (
                               <div className={styles.workflowDraftSubcard}>
+                                <div className={styles.workflowDraftLabel}>Recommendation is for</div>
+                                <select
+                                  className={finleyStyles.clientSearch}
+                                  value={getRecommendationAudienceSelectValue(
+                                    recommendation.ownerPersonIds,
+                                    adviceCase.clientGroup.clients,
+                                  )}
+                                  onChange={(event) => {
+                                    setAdviceCase((current) => ({
+                                      ...current,
+                                      recommendations: {
+                                        ...current.recommendations,
+                                        strategic: current.recommendations.strategic.map((entry) =>
+                                          entry.recommendationId === recommendation.recommendationId
+                                            ? {
+                                                ...entry,
+                                                ownerPersonIds: resolveRecommendationAudienceSelectValue(
+                                                  event.target.value,
+                                                  current.clientGroup.clients,
+                                                ),
+                                              }
+                                            : entry,
+                                        ),
+                                      },
+                                      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+                                    }));
+                                    setConfirmedSections((current) => ({ ...current, "strategy-recommendations": false }));
+                                  }}
+                                >
+                                  {adviceCase.clientGroup.clients.map((person) => (
+                                    <option key={person.personId} value={person.personId}>
+                                      {person.fullName || (person.role === "partner" ? "Partner" : "Client")}
+                                    </option>
+                                  ))}
+                                  {adviceCase.clientGroup.clients.length > 1 ? <option value="joint">Joint</option> : null}
+                                </select>
                                 <div className={styles.workflowDraftLabel}>Recommendation</div>
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
@@ -4239,12 +4366,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One benefit or rationale point per line"
-                                  value={[
+                                  value={formatBulletTextarea([
                                     ...recommendation.clientBenefits.map((benefit) => benefit.text),
                                     recommendation.rationale ?? "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join("\n")}
+                                  ])}
                                   onChange={(event) => {
                                     const nextBenefits = splitNonEmptyLines(event.target.value).map((text) => ({
                                       benefitId: makeId("benefit"),
@@ -4277,7 +4402,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One consequence or trade-off per line"
-                                  value={recommendation.consequences.map((consequence) => consequence.text).join("\n")}
+                                  value={formatBulletTextarea(recommendation.consequences.map((consequence) => consequence.text))}
                                   onChange={(event) => {
                                     const nextConsequences = splitNonEmptyLines(event.target.value).map((text) => ({
                                       consequenceId: makeId("consequence"),
@@ -4309,7 +4434,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               <textarea
                                 className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                 placeholder="One alternative per line"
-                                value={recommendation.alternativesConsidered.map((alternative) => alternative.optionText).join("\n")}
+                                value={formatBulletTextarea(recommendation.alternativesConsidered.map((alternative) => alternative.optionText))}
                                 onChange={(event) => {
                                   const nextAlternatives = splitNonEmptyLines(event.target.value).map((text) => ({
                                     alternativeId: makeId("alternative"),
@@ -4353,6 +4478,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               {
                                 recommendationId: makeId("strategy"),
                                 type: "other",
+                                ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                                 recommendationText: "",
                                 linkedObjectiveIds: [],
                                 targetAmount: null,
@@ -4429,6 +4555,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         </div>
                         {collapsedProductRecommendations[recommendation.recommendationId] ? (
                           <div className={styles.workflowDraftPreview}>
+                            <strong>For {formatRecommendationAudience(recommendation.ownerPersonIds, adviceCase.clientGroup.clients)}:</strong>{" "}
                             {recommendation.recommendationText?.trim() ||
                               recommendation.recommendedProductName?.trim() ||
                               "No product recommendation text yet."}
@@ -4436,6 +4563,44 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         ) : (
                           <>
                         <div className={styles.sectionGridCompact}>
+                          <div className={styles.workflowDraftSubcard}>
+                            <div className={styles.workflowDraftLabel}>Recommendation is for</div>
+                            <select
+                              className={finleyStyles.clientSearch}
+                              value={getRecommendationAudienceSelectValue(
+                                recommendation.ownerPersonIds,
+                                adviceCase.clientGroup.clients,
+                              )}
+                              onChange={(event) => {
+                                setAdviceCase((current) => ({
+                                  ...current,
+                                  recommendations: {
+                                    ...current.recommendations,
+                                    product: current.recommendations.product.map((entry) =>
+                                      entry.recommendationId === recommendation.recommendationId
+                                        ? {
+                                            ...entry,
+                                            ownerPersonIds: resolveRecommendationAudienceSelectValue(
+                                              event.target.value,
+                                              current.clientGroup.clients,
+                                            ),
+                                          }
+                                        : entry,
+                                    ),
+                                  },
+                                  metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+                                }));
+                                setConfirmedSections((current) => ({ ...current, "product-recommendations": false }));
+                              }}
+                            >
+                              {adviceCase.clientGroup.clients.map((person) => (
+                                <option key={person.personId} value={person.personId}>
+                                  {person.fullName || (person.role === "partner" ? "Partner" : "Client")}
+                                </option>
+                              ))}
+                              {adviceCase.clientGroup.clients.length > 1 ? <option value="joint">Joint</option> : null}
+                            </select>
+                          </div>
                           <div className={styles.workflowDraftSubcard}>
                             <div className={styles.workflowDraftLabel}>Action</div>
                             <select
@@ -4642,12 +4807,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One benefit or suitability point per line"
-                                  value={[
+                                  value={formatBulletTextarea([
                                     ...recommendation.clientBenefits.map((benefit) => benefit.text),
                                     recommendation.suitabilityRationale ?? "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join("\n")}
+                                  ])}
                                   onChange={(event) => {
                                     const nextBenefits = splitNonEmptyLines(event.target.value).map((text) => ({
                                       benefitId: makeId("benefit"),
@@ -4680,7 +4843,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One consequence or trade-off per line"
-                                  value={recommendation.consequences.map((consequence) => consequence.text).join("\n")}
+                                  value={formatBulletTextarea(recommendation.consequences.map((consequence) => consequence.text))}
                                   onChange={(event) => {
                                     const nextConsequences = splitNonEmptyLines(event.target.value).map((text) => ({
                                       consequenceId: makeId("consequence"),
@@ -4712,10 +4875,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               <textarea
                                 className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                 placeholder="One alternative per line"
-                                value={recommendation.alternativesConsidered
+                                value={formatBulletTextarea(recommendation.alternativesConsidered
                                   .map((alternative) => alternative.productName ?? alternative.provider ?? "")
-                                  .filter(Boolean)
-                                  .join("\n")}
+                                  .filter(Boolean))}
                                 onChange={(event) => {
                                   const nextAlternatives = splitNonEmptyLines(event.target.value).map((text) => ({
                                     alternativeId: makeId("product-alternative"),
@@ -4763,6 +4925,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 productType: "other",
                                 recommendedProductName: null,
                                 recommendedProvider: null,
+                                ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                                 linkedObjectiveIds: [],
                                 recommendationText: "",
                                 targetAmount: null,

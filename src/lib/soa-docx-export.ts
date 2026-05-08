@@ -448,6 +448,16 @@ function getOwnerName(adviceCase: AdviceCaseV1, ownerPersonId?: string | null) {
   return adviceCase.clientGroup.clients.find((client) => client.personId === ownerPersonId)?.fullName ?? "Client";
 }
 
+function getRecommendationAudience(adviceCase: AdviceCaseV1, ownerPersonIds?: string[] | null) {
+  const ids = ownerPersonIds?.length ? ownerPersonIds : adviceCase.clientGroup.clients.map((client) => client.personId);
+  const names = adviceCase.clientGroup.clients
+    .filter((client) => ids.includes(client.personId))
+    .map((client) => client.fullName)
+    .filter(Boolean);
+
+  return names.length ? names.join(" and ") : getClientNames(adviceCase);
+}
+
 function getCommissionUpfrontPercentage(commission: CommissionItemV1) {
   return commission.upfrontPercentage ?? (commission.type === "upfront" ? commission.percentage : null);
 }
@@ -1417,6 +1427,7 @@ function buildStrategyRecommendations(input: SoaDocxExportInput, fontFamily: str
         index === 0 ? sectionTitle("Strategy Recommendations", fontFamily) : pageBreak(),
         index === 0 ? normal(STRATEGY_RECOMMENDATIONS_INTRO, fontFamily, textColor) : "",
         heading(`Recommendation ${index + 1}`, 2, fontFamily),
+        normal(`Recommended for: ${getRecommendationAudience(input.adviceCase, recommendation.ownerPersonIds)}`, fontFamily, textColor),
         normal(recommendation.recommendationText || "Draft recommendation not yet written.", fontFamily, textColor),
         heading("Benefits", 2, fontFamily),
         ...(benefits.length ? benefits.map((benefit) => bullet(benefit, fontFamily, textColor)) : [normal("No benefits have been drafted.", fontFamily, textColor)]),
@@ -1478,6 +1489,7 @@ function buildProductRecommendations(
         index === 0 ? sectionTitle("Product Recommendations", fontFamily) : pageBreak(),
         heading(`Product Recommendation ${index + 1}`, 2, fontFamily),
         table(summaryRows, fontFamily, textColor),
+        normal(`Recommended for: ${getRecommendationAudience(input.adviceCase, recommendation.ownerPersonIds)}`, fontFamily, textColor),
         normal(recommendation.recommendationText || "Draft product recommendation not yet written.", fontFamily, textColor),
         heading("Benefits", 2, fontFamily),
         ...(benefits.length ? benefits.map((benefit) => bullet(benefit, fontFamily, textColor)) : [normal("No benefits have been drafted.", fontFamily, textColor)]),

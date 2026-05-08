@@ -8,6 +8,10 @@ import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-langua
 
 export type SoaProductDraftRequest = {
   clientName?: string | null;
+  clientPeople?: Array<{
+    name: string;
+    role: "client" | "partner";
+  }> | null;
   objectives: Array<{
     text: string;
     priority?: "high" | "medium" | "low" | "unknown" | null;
@@ -50,6 +54,10 @@ const productDraftJsonSchema = {
             productType: {
               type: "string",
               enum: ["super", "pension", "investment", "annuity", "insurance", "other"],
+            },
+            recommendedFor: {
+              type: "array",
+              items: { type: "string" },
             },
             recommendationText: { type: "string" },
             linkedObjectiveTexts: {
@@ -102,6 +110,7 @@ const productDraftJsonSchema = {
           required: [
             "action",
             "productType",
+            "recommendedFor",
             "recommendationText",
             "linkedObjectiveTexts",
             "currentProductName",
@@ -197,6 +206,7 @@ function normalizeProductDrafts(value: unknown, clientName?: string | null): Pro
           ? entry.productType
           : "other"
       ) as ProductRecommendationDraftV1["productType"],
+      recommendedFor: normalizeStringArray(entry.recommendedFor),
       recommendationText:
         typeof entry.recommendationText === "string"
           ? normalizeRecommendationLanguage(entry.recommendationText, clientName)
@@ -230,6 +240,7 @@ function buildFallbackProductDrafts(request: SoaProductDraftRequest): ProductRec
   return (request.intakeAssessment?.candidateProductReviewNotes ?? []).map((note) => ({
     action: "retain",
     productType: "other",
+    recommendedFor: (request.clientPeople?.length ? request.clientPeople.map((person) => person.name) : [request.clientName ?? "Client"]).filter(Boolean),
     recommendationText: normalizeRecommendationLanguage(note, request.clientName),
     linkedObjectiveTexts: request.objectives.map((objective) => objective.text).filter(Boolean),
     currentProductName: null,
@@ -264,13 +275,19 @@ async function requestOpenAiProductDrafts(
     },
     body: JSON.stringify({
       model: OPENAI_SOA_INTAKE_MODEL,
-      temperature: 0.2,
       messages: [
         {
           role: "system",
           content: [
             "You are Finley, an AI assistant helping an Australian financial adviser prepare a Statement of Advice.",
             "Draft product recommendations only and return JSON matching the provided schema.",
+            "Product Recommendations are the correct home for advice to retain, replace, rollover, consolidate, establish, commence, switch, dispose of, or alter any superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial product.",
+            "Product Recommendations are also the correct home for investment portfolio advice, asset allocation implementation, model portfolio recommendations, risk profile implementation, product/platform administration, product fee comparisons, product retention, and product establishment.",
+            "Every product recommendation must explicitly identify who the product recommendation is for. Populate recommendedFor with one or more names from clientPeople.",
+            "If the product recommendation applies only to the primary client, address that person by name in recommendationText.",
+            "If it applies only to the partner, address that person by name in recommendationText.",
+            "If it applies to both members of the household, populate recommendedFor with both names and write the recommendation jointly.",
+            "Do not leave the word 'you' ambiguous where clientPeople contains both a client and partner.",
             "Write as an adviser-assistant reasoning about this specific client and their likely product needs, not as a generic product marketing template.",
             "Write all recommendationText, clientBenefits, suitabilityRationale, consequences, and alternativesConsidered.reasonDiscounted in second person, addressed directly to the client using 'you' and 'your'.",
             "For recommendationText, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'.",
@@ -295,9 +312,11 @@ async function requestOpenAiProductDrafts(
           content: JSON.stringify({
             task: "Draft structured product recommendations for the current SOA matter.",
             clientName: request.clientName ?? null,
+            clientPeople: request.clientPeople ?? [],
             draftingRequirements: {
               audience: "Australian financial adviser reviewing a Finley draft",
               focus: [
+                "explicit client or partner product owner/audience",
                 "client-specific product suitability",
                 "current versus proposed reasoning",
                 "objective linkage",

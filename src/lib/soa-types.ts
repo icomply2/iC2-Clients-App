@@ -109,6 +109,7 @@ export type AlternativeConsideredV1 = {
 export type StrategicRecommendationV1 = {
   recommendationId: string;
   type: string;
+  ownerPersonIds: string[];
   recommendationText: string;
   linkedObjectiveIds: string[];
   targetAmount?: number | null;
@@ -182,6 +183,7 @@ export type ProductRecommendationV1 = {
   productType: "super" | "pension" | "investment" | "annuity" | "insurance" | "other";
   recommendedProductName?: string | null;
   recommendedProvider?: string | null;
+  ownerPersonIds: string[];
   linkedObjectiveIds: string[];
   recommendationText: string;
   targetAmount?: number | null;

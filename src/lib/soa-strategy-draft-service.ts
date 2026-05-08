@@ -8,6 +8,10 @@ import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-langua
 
 export type SoaStrategyDraftRequest = {
   clientName?: string | null;
+  clientPeople?: Array<{
+    name: string;
+    role: "client" | "partner";
+  }> | null;
   objectives: Array<{
     text: string;
     priority?: "high" | "medium" | "low" | "unknown" | null;
@@ -44,6 +48,10 @@ const strategyDraftJsonSchema = {
           additionalProperties: false,
           properties: {
             type: { type: "string" },
+            recommendedFor: {
+              type: "array",
+              items: { type: "string" },
+            },
             recommendationText: { type: "string" },
             linkedObjectiveTexts: {
               type: "array",
@@ -67,6 +75,7 @@ const strategyDraftJsonSchema = {
           },
           required: [
             "type",
+            "recommendedFor",
             "recommendationText",
             "linkedObjectiveTexts",
             "clientBenefits",
@@ -93,6 +102,16 @@ function normalizeStringArray(value: unknown) {
     .filter(Boolean);
 }
 
+function looksLikeProductAdvice(text: string) {
+  const normalized = text.toLowerCase();
+  const productActionPattern =
+    /\b(retain|replace|roll(?:\s|-)?over|consolidat(?:e|ion)|establish|commence|switch|dispose|transfer|platform|wrap|managed account|model portfolio|asset allocation|portfolio|investment approach|risk profile implementation|product fee|fee comparison)\b/;
+  const productNounPattern =
+    /\b(superannuation|super\b|pension|account[-\s]?based pension|investment product|managed fund|investment portfolio|platform|wrap|hub24|north|mynorth|aware|amp|colonial|netwealth|macquarie|australian retirement trust|art\b|insignia|mlc|ioof|bt panorama)\b/;
+
+  return productActionPattern.test(normalized) && productNounPattern.test(normalized);
+}
+
 function normalizeStrategyDrafts(value: unknown, clientName?: string | null): StrategyRecommendationDraftV1[] | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -110,6 +129,7 @@ function normalizeStrategyDrafts(value: unknown, clientName?: string | null): St
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
     .map((entry) => ({
       type: typeof entry.type === "string" ? entry.type.trim() : "other",
+      recommendedFor: normalizeStringArray(entry.recommendedFor),
       recommendationText:
         typeof entry.recommendationText === "string"
           ? normalizeRecommendationLanguage(entry.recommendationText, clientName)
@@ -120,7 +140,7 @@ function normalizeStrategyDrafts(value: unknown, clientName?: string | null): St
       alternativesConsidered: normalizeStringArray(entry.alternativesConsidered),
       rationale: typeof entry.rationale === "string" ? entry.rationale.trim() : null,
     }))
-    .filter((entry) => entry.recommendationText);
+    .filter((entry) => entry.recommendationText && !looksLikeProductAdvice(entry.recommendationText));
 
   return normalized.length ? normalized : null;
 }
@@ -170,13 +190,14 @@ function buildFallbackStrategyDrafts(request: SoaStrategyDraftRequest): Strategy
 
   return recommendationTexts.map((recommendationText) => ({
     type: "other",
+    recommendedFor: (request.clientPeople?.length ? request.clientPeople.map((person) => person.name) : [request.clientName ?? "Client"]).filter(Boolean),
     recommendationText: normalizeRecommendationLanguage(recommendationText, request.clientName),
     linkedObjectiveTexts: request.objectives.map((objective) => objective.text).filter(Boolean),
     clientBenefits: [],
     consequences: [],
     alternativesConsidered: [],
     rationale: null,
-  }));
+  })).filter((recommendation) => !looksLikeProductAdvice(recommendation.recommendationText));
 }
 
 function fallbackStrategyDrafts(request: SoaStrategyDraftRequest, warning?: string | null): StrategyDraftResponseV1 {
@@ -200,7 +221,6 @@ async function requestOpenAiStrategyDrafts(
     },
     body: JSON.stringify({
       model: OPENAI_SOA_INTAKE_MODEL,
-      temperature: 0.2,
       messages: [
         {
           role: "system",
@@ -208,6 +228,17 @@ async function requestOpenAiStrategyDrafts(
             [
               "You are Finley, an AI assistant helping an Australian financial adviser prepare a Statement of Advice.",
               "Draft strategy recommendations only and return JSON matching the provided schema.",
+              "Strategy recommendations are non-product strategy advice only.",
+              "Do not include advice to retain, replace, rollover, consolidate, establish, commence, switch, dispose of, or alter any superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial product.",
+              "Do not include investment portfolio construction, asset allocation, model portfolio, risk profile implementation, platform administration, or product-fee comparison recommendations in strategy recommendations.",
+              "If a potential recommendation depends on a specific product, provider, account, platform, portfolio, rollover, retention, establishment, consolidation, or replacement action, exclude it from this response. It belongs in Product Recommendations, Portfolio Allocation, Replacement Analysis, or another product-specific section.",
+              "Examples that are NOT strategy recommendations: retain AMP MyNorth Pension, rollover Aware Super, establish an account-based pension, consolidate super accounts, retain a conservative/balanced pension portfolio, change portfolio asset allocation, implement a managed portfolio, or compare product/platform fees.",
+              "Examples that CAN be strategy recommendations: salary sacrifice as a contribution strategy, commence retirement income planning at a high level without naming a product, manage cashflow/reserves, Centrelink strategy, contribution timing, tax strategy, debt repayment strategy, estate planning referral, or projection/scenario analysis.",
+              "Every strategy recommendation must explicitly identify who the strategy is for. Populate recommendedFor with one or more names from clientPeople.",
+              "If the strategy applies only to the primary client, address that person by name in recommendationText, for example '<first name>, we recommend you ...'.",
+              "If the strategy applies only to the partner, address that person by name in recommendationText.",
+              "If the strategy applies to both members of the household, populate recommendedFor with both names and write the recommendation jointly, for example 'Michael and Kimberly, we recommend you ...' or 'We recommend you jointly ...'.",
+              "Do not leave the word 'you' ambiguous where clientPeople contains both a client and partner.",
               "Write as an adviser-assistant reasoning about this specific client, not as a generic planning template.",
               "Write all recommendationText, clientBenefits, rationale, consequences, and alternativesConsidered in second person, addressed directly to the client using 'you' and 'your'.",
               "For recommendationText, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'.",
@@ -224,7 +255,7 @@ async function requestOpenAiStrategyDrafts(
               "- include meaningful consequences, trade-offs, risks, or implementation constraints relevant to this client",
               "- include reasonable alternatives considered and why they are less suitable or were not preferred",
               "If the evidence is incomplete, be cautious and say so in the rationale rather than inventing facts.",
-              "Do not invent product recommendations in this step.",
+              "Do not invent product recommendations in this step. Do not transform product recommendations into strategy recommendations by removing the product name if the substance remains product advice.",
               "Avoid generic statements like 'improves long-term wealth' unless tied to the client's actual goals and situation.",
             ].join(" "),
         },
@@ -233,15 +264,20 @@ async function requestOpenAiStrategyDrafts(
           content: JSON.stringify({
             task: "Draft structured strategy recommendations for the current SOA matter.",
             clientName: request.clientName ?? null,
+            clientPeople: request.clientPeople ?? [],
             draftingRequirements: {
               audience: "Australian financial adviser reviewing a Finley draft",
               focus: [
+                "non-product strategy advice only",
+                "explicit client or partner recommendation audience",
                 "client-specific suitability",
                 "objective linkage",
                 "best-interest style reasoning",
                 "meaningful trade-offs",
                 "practical alternatives",
               ],
+              exclusionBoundary:
+                "Exclude product retention, rollover, establishment, consolidation, replacement, platform, portfolio construction, and investment product advice from Strategy Recommendations. These belong in Product Recommendations or related product-specific sections.",
             },
             objectives: summarizeObjectives(request.objectives),
             scope: request.scope ?? null,

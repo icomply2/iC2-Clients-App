@@ -17,7 +17,18 @@ export type StandaloneAgreementDocxInput = {
   practiceName?: string | null;
   licenseeName?: string | null;
   services?: string[] | null;
+  fees?: StandaloneAgreementFeeRow[] | null;
+  consentNotes?: string | null;
   documentStyleProfile?: Partial<DocumentStyleProfile> | null;
+};
+
+export type StandaloneAgreementFeeRow = {
+  entity?: string | null;
+  product?: string | null;
+  feeAmount?: string | null;
+  frequency?: string | null;
+  annualFee?: string | null;
+  deductionAccount?: string | null;
 };
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -200,8 +211,48 @@ function servicesXml(services: string[]) {
     .join("");
 }
 
-function feeTableXml() {
+function parseCurrencyAmount(value?: string | null) {
+  const numeric = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function formatCurrencyAmount(value: number) {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function normalizeFeeRows(fees?: StandaloneAgreementFeeRow[] | null) {
+  const rows = (fees ?? []).map((fee) => ({
+    entity: text(fee.entity) || "To be confirmed",
+    product: text(fee.product) || "To be confirmed",
+    feeAmount: text(fee.feeAmount) || "$0.00",
+    frequency: text(fee.frequency) || "Monthly",
+    annualFee: text(fee.annualFee) || "$0.00",
+    deductionAccount: text(fee.deductionAccount),
+  }));
+
+  return rows.length
+    ? rows
+    : [
+        {
+          entity: "To be confirmed",
+          product: "To be confirmed",
+          feeAmount: "$0.00",
+          frequency: "Monthly",
+          annualFee: "$0.00",
+          deductionAccount: "",
+        },
+      ];
+}
+
+function feeTableXml(fees?: StandaloneAgreementFeeRow[] | null) {
   const headerFill = activeTableHeaderFill();
+  const rows = normalizeFeeRows(fees);
+  const totalAnnualFee = rows.reduce((sum, row) => sum + parseCurrencyAmount(row.annualFee), 0);
 
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D7E1EC"/><w:left w:val="single" w:sz="4" w:color="D7E1EC"/><w:bottom w:val="single" w:sz="4" w:color="D7E1EC"/><w:right w:val="single" w:sz="4" w:color="D7E1EC"/><w:insideH w:val="single" w:sz="4" w:color="D7E1EC"/><w:insideV w:val="single" w:sz="4" w:color="D7E1EC"/></w:tblBorders></w:tblPr>
     ${tableRowXml(
@@ -211,16 +262,18 @@ function feeTableXml() {
         + tableCellXml("Frequency", { widthPct: 15, bold: true, fill: headerFill })
         + tableCellXml("Annual fee", { widthPct: 15, bold: true, fill: headerFill, align: "right" }),
     )}
-    ${tableRowXml(
-      tableCellXml("To be confirmed", { widthPct: 25 })
-        + tableCellXml("To be confirmed", { widthPct: 25 })
-        + tableCellXml("$0.00", { widthPct: 20 })
-        + tableCellXml("Monthly", { widthPct: 15 })
-        + tableCellXml("$0.00", { widthPct: 15, align: "right" }),
-    )}
+    ${rows.map((row) =>
+      tableRowXml(
+        tableCellXml(row.entity, { widthPct: 25 })
+          + tableCellXml(row.product, { widthPct: 25 })
+          + tableCellXml(row.feeAmount, { widthPct: 20 })
+          + tableCellXml(row.frequency, { widthPct: 15 })
+          + tableCellXml(row.annualFee, { widthPct: 15, align: "right" }),
+      ),
+    ).join("")}
     ${tableRowXml(
       tableCellXml("Total annual advice fees", { widthPct: 85, bold: true, fill: headerFill })
-        + tableCellXml("$0.00", { widthPct: 15, bold: true, fill: headerFill, align: "right" }),
+        + tableCellXml(formatCurrencyAmount(totalAnnualFee), { widthPct: 15, bold: true, fill: headerFill, align: "right" }),
     )}
   </w:tbl>`;
 }
@@ -284,9 +337,10 @@ function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocx
     servicesXml(input.services?.filter(Boolean) ?? DEFAULT_SERVICE_AGREEMENT_SERVICES),
     headingXml("Fees Payable", 2),
     paragraphXml("The fees payable for this agreement are set out below. All fees include GST where applicable.", { spacingAfter: 160 }),
-    feeTableXml(),
+    feeTableXml(input.fees),
     headingXml("Consent To Deduct Fees From Your Account", 2),
     paragraphXml("By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.", { spacingAfter: 160 }),
+    text(input.consentNotes) ? paragraphXml(text(input.consentNotes), { spacingAfter: 160 }) : "",
     paragraphXml("This consent may be withdrawn by you at any time by notifying us in writing.", { spacingAfter: 160 }),
     headingXml(agreementType === "annual" ? "Next Steps" : "Your Acknowledgement", 2),
     paragraphXml(
