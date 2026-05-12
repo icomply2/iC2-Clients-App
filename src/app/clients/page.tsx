@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { AppTopbar } from "@/components/app-topbar";
 import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
@@ -14,6 +14,7 @@ type ClientRow = {
   adviser: string;
   category: string;
   practice: string;
+  licensee: string;
 };
 
 type CurrentUserScope = {
@@ -30,17 +31,37 @@ function mapClientSummaryToRow(client: ClientSummary): ClientRow {
     adviser: client.clientAdviserName ?? "",
     category: client.category ?? client.clientCategory ?? "",
     practice: client.clientAdviserPracticeName ?? "",
+    licensee: client.clientAdviserLicenseeName ?? "",
   };
 }
 
-function filterRowsByPractice(rows: ClientRow[], practiceName?: string | null) {
-  const normalizedPractice = practiceName?.trim().toLowerCase();
+function normalizeText(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
 
-  if (!normalizedPractice) {
+function isComplianceManagerRole(userRole?: string | null) {
+  return normalizeText(userRole) === "compliance manager";
+}
+
+function filterRowsByCurrentUserScope(rows: ClientRow[], currentUserScope?: CurrentUserScope | null) {
+  const normalizedLicensee = normalizeText(currentUserScope?.licensee?.name);
+  const normalizedPractice = normalizeText(currentUserScope?.practice?.name);
+  const isComplianceManager = isComplianceManagerRole(currentUserScope?.userRole);
+
+  if (!normalizedLicensee && (isComplianceManager || !normalizedPractice)) {
     return rows;
   }
 
-  return rows.filter((row) => row.practice.trim().toLowerCase() === normalizedPractice);
+  return rows.filter((row) => {
+    const matchesLicensee = !normalizedLicensee || normalizeText(row.licensee) === normalizedLicensee;
+    const matchesPractice = isComplianceManager || !normalizedPractice || normalizeText(row.practice) === normalizedPractice;
+
+    return matchesLicensee && matchesPractice;
+  });
+}
+
+function getClientHref(clientId: string) {
+  return `/clients/${clientId}`;
 }
 
 function ClientsPageContent() {
@@ -65,6 +86,10 @@ function ClientsPageContent() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pageDataSource, setPageDataSource] = useState<"mock" | "live">("live");
   const [fallbackSource, setFallbackSource] = useState("none");
+  const [clientListRefreshKey, setClientListRefreshKey] = useState(0);
+  const locallyCreatedClientIdsRef = useRef<Set<string>>(new Set());
+  const pendingCreatedClientNavigationRef = useRef<string | null>(null);
+  const isComplianceManager = isComplianceManagerRole(currentUserScope?.userRole);
 
   useEffect(() => {
     let isMounted = true;
@@ -99,12 +124,14 @@ function ClientsPageContent() {
                 totalPageCount?: number | null;
                 items?: Array<{
                   id?: string | null;
-                  client?: { name?: string | null } | null;
-                  partner?: { name?: string | null } | null;
+                  client?: { name?: string | null ; category?: string | null ; clientCategory?: string | null } | null;
+                  partner?: { name?: string | null ; category?: string | null ; clientCategory?: string | null }  | null;
                   adviser?: { name?: string | null } | null;
                   practice?: string | null;
+                  licensee?: string | null;
                   clientAdviserName?: string | null;
                   clientAdviserPracticeName?: string | null;
+                  clientAdviserLicenseeName?: string | null;
                   category?: string | null;
                   clientCategory?: string | null;
                 }>;
@@ -132,17 +159,26 @@ function ClientsPageContent() {
               name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
               clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
               clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
-              category: item.category ?? item.clientCategory,
-              clientCategory: item.clientCategory,
+              clientAdviserLicenseeName: item.clientAdviserLicenseeName ?? item.licensee,
+              category: item.category ?? item.clientCategory ?? item.client?.category,
+              clientCategory: item.clientCategory ?? item.client?.clientCategory,
             }),
           )
           .filter((client) => client.id);
 
-        if (nextClients.length > 0) {
-          setClients(filterRowsByPractice(nextClients, currentUserScope?.practice?.name));
-        } else {
-          setClients([]);
-        }
+        const filteredClients = filterRowsByCurrentUserScope(nextClients, currentUserScope);
+
+        setClients((currentClients) => {
+          const preservedLocallyCreatedClients = currentClients.filter(
+            (client) =>
+              locallyCreatedClientIdsRef.current.has(client.id) &&
+              !filteredClients.some((nextClient) => nextClient.id === client.id),
+          );
+
+          return preservedLocallyCreatedClients.length
+            ? [...preservedLocallyCreatedClients, ...filteredClients]
+            : filteredClients;
+        });
 
         setNextContinuationToken(body?.data?.continuationToken ?? null);
         setTotalPages(Math.max(body?.data?.totalPageCount ?? 1, 1));
@@ -151,7 +187,9 @@ function ClientsPageContent() {
         setFallbackSource("none");
       } catch (error) {
         if (isMounted) {
-          setClients([]);
+          setClients((currentClients) =>
+            currentClients.filter((client) => locallyCreatedClientIdsRef.current.has(client.id)),
+          );
           setNextContinuationToken(null);
           setTotalPages(1);
           setLoadError(error instanceof Error ? error.message : "Unable to load clients from the live API.");
@@ -161,6 +199,13 @@ function ClientsPageContent() {
       } finally {
         if (isMounted) {
           setIsLoading(false);
+
+          const pendingCreatedClientId = pendingCreatedClientNavigationRef.current;
+          if (pendingCreatedClientId) {
+            pendingCreatedClientNavigationRef.current = null;
+            router.push(getClientHref(pendingCreatedClientId));
+            router.refresh();
+          }
         }
       }
     }
@@ -170,7 +215,16 @@ function ClientsPageContent() {
     return () => {
       isMounted = false;
     };
-  }, [adviser, continuationTokens, currentPage, currentUserScope?.practice?.name, pageSize, search]);
+  }, [
+    adviser,
+    clientListRefreshKey,
+    continuationTokens,
+    currentPage,
+    currentUserScope,
+    pageSize,
+    router,
+    search,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -222,8 +276,13 @@ function ClientsPageContent() {
       try {
         const params = new URLSearchParams();
         const practiceName = currentUserScope?.practice?.name?.trim();
+        const licenseeName = currentUserScope?.licensee?.name?.trim();
 
-        if (practiceName) {
+        if (licenseeName) {
+          params.set("licenseeName", licenseeName);
+        }
+
+        if (!isComplianceManager && practiceName) {
           params.set("practiceName", practiceName);
         }
 
@@ -249,9 +308,13 @@ function ClientsPageContent() {
 
         const scopedAdvisers = (body?.data ?? []).filter((item) => {
           const normalizedPracticeName = currentUserScope?.practice?.name?.trim().toLowerCase();
+          const normalizedLicenseeName = currentUserScope?.licensee?.name?.trim().toLowerCase();
           const itemPractice = item.practiceName?.trim().toLowerCase();
+          const itemLicensee = item.licenseeName?.trim().toLowerCase();
+          const matchesLicensee = !normalizedLicenseeName || !itemLicensee || itemLicensee === normalizedLicenseeName;
+          const matchesPractice = isComplianceManager || !normalizedPracticeName || itemPractice === normalizedPracticeName;
 
-          return !normalizedPracticeName || itemPractice === normalizedPracticeName;
+          return matchesLicensee && matchesPractice;
         });
 
         const names = scopedAdvisers
@@ -260,6 +323,8 @@ function ClientsPageContent() {
 
         if (names.length > 0) {
           setAdviserOptions(["All advisers", ...Array.from(new Set(names)).sort((left, right) => left.localeCompare(right))]);
+        } else {
+          setAdviserOptions(["All advisers"]);
         }
       } catch {
         if (!isMounted) {
@@ -279,7 +344,7 @@ function ClientsPageContent() {
     return () => {
       isMounted = false;
     };
-  }, [clients, currentUserScope]);
+  }, [clients, currentUserScope, isComplianceManager]);
 
   function resetPagination() {
     setCurrentPage(1);
@@ -360,8 +425,32 @@ function ClientsPageContent() {
       return;
     }
 
-    router.push(`/clients/${createdProfileId}`);
-    router.refresh();
+    const primaryName = createdClient.client?.name?.trim() ?? "";
+    const partnerName = createdClient.partner?.name?.trim() ?? "";
+    const createdRow: ClientRow = {
+      id: createdProfileId,
+      name: createdClient.name?.trim() || [primaryName, partnerName].filter(Boolean).join(" & ") || "Unnamed Client",
+      adviser: createdClient.clientAdviserName ?? createdClient.adviser?.name ?? currentUserScope?.name ?? "",
+      category: "",
+      practice:
+        createdClient.clientAdviserPracticeName ??
+        createdClient.practice ??
+        currentUserScope?.practice?.name ??
+        "",
+      licensee:
+        createdClient.clientAdviserLicenseeName ??
+        createdClient.licensee ??
+        currentUserScope?.licensee?.name ??
+        "",
+    };
+
+    locallyCreatedClientIdsRef.current.add(createdProfileId);
+    setClients((currentClients) => [
+      createdRow,
+      ...currentClients.filter((client) => client.id !== createdProfileId),
+    ]);
+    pendingCreatedClientNavigationRef.current = createdProfileId;
+    setClientListRefreshKey((key) => key + 1);
   }
 
   return (
@@ -414,11 +503,11 @@ function ClientsPageContent() {
           <div>
             {clients.map((client) => (
               <div key={client.id} className={styles.tableRow}>
-                <Link href={`/clients/${client.id}`} className={styles.clientLink}>
+                <Link href={getClientHref(client.id)} className={styles.clientLink}>
                   {client.name}
                 </Link>
                 <div>{client.adviser}</div>
-                <div className={styles.muted}>{client.category}</div>
+                <div>{client.category}</div>
                 <div>{client.practice}</div>
                 <button
                   type="button"

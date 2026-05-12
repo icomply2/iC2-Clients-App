@@ -88,6 +88,7 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
     typeof changes.status === "string" && changes.status.trim()
       ? changes.status.trim()
       : getStringValue(current, ["accountStatus", "status", "clientStatus"]);
+  const accountStatusValue = statusValue === "Archived" ? "Archived" : "Active";
 
   const categoryValue =
     typeof changes.clientCategory === "string" && changes.clientCategory.trim()
@@ -149,7 +150,7 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
     preferredPhone: preferredPhoneValue || null,
     entityId: typeof current.entityId === "string" ? current.entityId : null,
     sharedWith: Array.isArray(current.sharedWith) ? current.sharedWith : [],
-    accountStatus: statusValue || null,
+    accountStatus: accountStatusValue,
     status: statusValue || null,
     clientStatus: statusValue || null,
     onboardingStatus: current.onboardingStatus ?? null,
