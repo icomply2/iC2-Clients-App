@@ -13,9 +13,11 @@ import { getPortfolioAccountViews, getPrimaryAllocationRows } from "@/lib/soa-po
 import type {
   AdviceCaseV1,
   CommissionItemV1,
+  FinancialProjectionV1,
   InsurancePolicyOwnershipGroupV1,
   InsurancePolicyReplacementV1,
   PortfolioHoldingV1,
+  ProjectionTableV1,
   ProductRexTransactionRowV1,
 } from "@/lib/soa-types";
 
@@ -1947,14 +1949,108 @@ function buildReplacementAnalysis(input: SoaDocxExportInput, fontFamily: string,
   ].join("");
 }
 
+function buildProjectionCashflowTable(
+  projection: FinancialProjectionV1,
+  fontFamily: string,
+  textColor: string,
+  tableHeaderColor: string,
+) {
+  const cashflowTable = projection.outputs.cashflowTable;
+  if (!cashflowTable?.columns.length || !cashflowTable.rows.length) {
+    return "";
+  }
+
+  const labelWidth = 28;
+  const valueWidth = (100 - labelWidth) / cashflowTable.columns.length;
+
+  return table(
+    [
+      [
+        headerCell("Date", tableHeaderColor, DEFAULT_TEXT_COLOR, labelWidth),
+        ...cashflowTable.columns.map((column) => headerCell(column, tableHeaderColor, DEFAULT_TEXT_COLOR, valueWidth)),
+      ],
+      ...cashflowTable.rows.map((row) => {
+        const buildCell = row.isTotal || row.isSection ? totalCell : (text: string, _fill: string, _color: string, widthPct?: number) => ({ text, widthPct });
+        const fill = row.isSection ? "#F3F7FB" : row.isTotal ? tableHeaderColor : "";
+
+        return [
+          buildCell(row.label, fill, DEFAULT_TEXT_COLOR, labelWidth),
+          ...cashflowTable.columns.map((_, columnIndex) =>
+            buildCell(row.isSection ? "" : row.values[columnIndex] || "-", fill, DEFAULT_TEXT_COLOR, valueWidth),
+          ),
+        ];
+      }),
+    ],
+    fontFamily,
+    textColor,
+  );
+}
+
+function buildProjectionAssumptionsTable(
+  projection: FinancialProjectionV1,
+  fontFamily: string,
+  textColor: string,
+  tableHeaderColor: string,
+) {
+  return table(
+    [
+      [headerCell("Assumption", tableHeaderColor, DEFAULT_TEXT_COLOR, 45), headerCell("Value", tableHeaderColor, DEFAULT_TEXT_COLOR, 55)],
+      [{ text: "Inflation", widthPct: 45 }, { text: formatPercent(projection.assumptions.inflationPct), widthPct: 55 }],
+      [{ text: "Earnings rate", widthPct: 45 }, { text: formatPercent(projection.assumptions.earningsRatePct), widthPct: 55 }],
+      [{ text: "Salary growth", widthPct: 45 }, { text: formatPercent(projection.assumptions.salaryGrowthPct), widthPct: 55 }],
+      [{ text: "Contribution growth", widthPct: 45 }, { text: formatPercent(projection.assumptions.contributionGrowthPct), widthPct: 55 }],
+      [{ text: "Drawdown rate", widthPct: 45 }, { text: formatPercent(projection.assumptions.drawdownRatePct), widthPct: 55 }],
+      [{ text: "Tax assumptions", widthPct: 45 }, { text: projection.assumptions.taxAssumptions || "-", widthPct: 55 }],
+      [{ text: "Legislative assumptions", widthPct: 45 }, { text: projection.assumptions.legislativeAssumptions || "-", widthPct: 55 }],
+      [{ text: "Notes", widthPct: 45 }, { text: projection.assumptions.notes || "-", widthPct: 55 }],
+    ],
+    fontFamily,
+    textColor,
+  );
+}
+
+function buildProjectionOutputTable(
+  projectionTable: ProjectionTableV1,
+  fontFamily: string,
+  textColor: string,
+  tableHeaderColor: string,
+) {
+  if (!projectionTable.columns.length || !projectionTable.rows.length) {
+    return "";
+  }
+
+  const labelWidth = projectionTable.columns.length > 4 ? 18 : 35;
+  const valueWidth = (100 - labelWidth) / projectionTable.columns.length;
+
+  return table(
+    [
+      [
+        headerCell("Assumption", tableHeaderColor, DEFAULT_TEXT_COLOR, labelWidth),
+        ...projectionTable.columns.map((column) => headerCell(column, tableHeaderColor, DEFAULT_TEXT_COLOR, valueWidth)),
+      ],
+      ...projectionTable.rows.map((row) => {
+        const buildCell = row.isTotal || row.isSection ? totalCell : (text: string, _fill: string, _color: string, widthPct?: number) => ({ text, widthPct });
+        const fill = row.isSection ? "#F3F7FB" : row.isTotal ? tableHeaderColor : "";
+
+        return [
+          buildCell(row.label, fill, DEFAULT_TEXT_COLOR, labelWidth),
+          ...projectionTable.columns.map((_, columnIndex) =>
+            buildCell(row.isSection ? "" : row.values[columnIndex] || "-", fill, DEFAULT_TEXT_COLOR, valueWidth),
+          ),
+        ];
+      }),
+    ],
+    fontFamily,
+    textColor,
+  );
+}
+
 function buildProjections(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const projections = input.adviceCase.financialProjections ?? [];
 
   if (!projections.length) {
     return [
       sectionTitle("Projected Outcomes", fontFamily),
-      heading("Assumptions", 2, fontFamily),
-      normal("Projection assumptions will be included here once the projection modelling has been completed.", fontFamily, textColor),
       heading("Cashflow and Taxation Projections", 2, fontFamily),
       normal("Maintaining adequate cashflow to meet living expenses is fundamental to the success of your plan. A summary of estimated income, expenses, tax and overall cashflow after implementing our recommendations will be included here.", fontFamily, textColor),
       heading("Capital Projections", 2, fontFamily),
@@ -1971,22 +2067,13 @@ function buildProjections(input: SoaDocxExportInput, fontFamily: string, textCol
       heading(projection.name || `Projection ${index + 1}`, 2, fontFamily),
       projection.purpose ? normal(projection.purpose, fontFamily, textColor) : "",
       projection.inputsSummary ? normal(projection.inputsSummary, fontFamily, textColor) : "",
-      heading("Assumptions", 2, fontFamily),
-      table(
-        [
-          [headerCell("Assumption", tableHeaderColor, DEFAULT_TEXT_COLOR, 45), headerCell("Value", tableHeaderColor, DEFAULT_TEXT_COLOR, 55)],
-          [{ text: "Inflation", widthPct: 45 }, { text: formatPercent(projection.assumptions.inflationPct), widthPct: 55 }],
-          [{ text: "Earnings rate", widthPct: 45 }, { text: formatPercent(projection.assumptions.earningsRatePct), widthPct: 55 }],
-          [{ text: "Salary growth", widthPct: 45 }, { text: formatPercent(projection.assumptions.salaryGrowthPct), widthPct: 55 }],
-          [{ text: "Contribution growth", widthPct: 45 }, { text: formatPercent(projection.assumptions.contributionGrowthPct), widthPct: 55 }],
-          [{ text: "Drawdown rate", widthPct: 45 }, { text: formatPercent(projection.assumptions.drawdownRatePct), widthPct: 55 }],
-          [{ text: "Tax assumptions", widthPct: 45 }, { text: projection.assumptions.taxAssumptions || "-", widthPct: 55 }],
-          [{ text: "Legislative assumptions", widthPct: 45 }, { text: projection.assumptions.legislativeAssumptions || "-", widthPct: 55 }],
-          [{ text: "Notes", widthPct: 45 }, { text: projection.assumptions.notes || "-", widthPct: 55 }],
-        ],
+      heading("Cashflow and Taxation Projections", 2, fontFamily),
+      normal(
+        "The table below summarises the first five projection years for personal cashflow, including estimated income, expenses, tax and net cashflow after tax.",
         fontFamily,
         textColor,
       ),
+      buildProjectionCashflowTable(projection, fontFamily, textColor, tableHeaderColor),
       heading("Key Outcome", 2, fontFamily),
       projection.outputs.currentPositionSummary ? normal(`Current position: ${projection.outputs.currentPositionSummary}`, fontFamily, textColor) : "",
       projection.outputs.recommendedPositionSummary ? normal(`Recommended position: ${projection.outputs.recommendedPositionSummary}`, fontFamily, textColor) : "",
@@ -2401,12 +2488,25 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
 function buildAppendix(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const investmentPdsGroups = getInvestmentPdsGroups(input.adviceCase);
   const insurancePdsRows = getInsurancePdsRows(input.adviceCase);
+  const projections = input.adviceCase.financialProjections ?? [];
   const transactionRows = (input.adviceCase.productRexReports ?? []).flatMap((report) => report.transactionRows);
   const transactionTotal = transactionRows.reduce((sum, row) => sum + (row.buySellSpreadAmount ?? 0) + (row.brokerageAmount ?? 0), 0);
 
   return [
     sectionTitle("Appendix", fontFamily),
     normal("Supporting material, calculations, additional comparisons, and reference tables can be included in this appendix as the SOA draft is refined further.", fontFamily, textColor),
+    heading("Projection Assumptions", 2, fontFamily),
+    ...(projections.length
+      ? projections.flatMap((projection, index) => [
+          projections.length > 1 ? paragraph(projection.name || `Projection ${index + 1}`, { bold: true, spacingBefore: 180, spacingAfter: 80 }, fontFamily, textColor) : "",
+          ...(projection.outputs.assumptionTables?.length
+            ? projection.outputs.assumptionTables.flatMap((assumptionTable) => [
+                paragraph(assumptionTable.title, { bold: true, spacingBefore: 180, spacingAfter: 80 }, fontFamily, textColor),
+                buildProjectionOutputTable(assumptionTable, fontFamily, textColor, tableHeaderColor),
+              ])
+            : [buildProjectionAssumptionsTable(projection, fontFamily, textColor, tableHeaderColor)]),
+        ])
+      : [normal("Projection assumptions will be included here once the projection modelling has been completed.", fontFamily, textColor)]),
     pageBreak(),
     sectionTitle("Product Disclosure Statements (PDS)", fontFamily),
     normal("The following Product Disclosure Statements should be provided where applicable.", fontFamily, textColor),

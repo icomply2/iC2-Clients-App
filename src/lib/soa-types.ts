@@ -477,6 +477,20 @@ export type ProjectionYearV1 = {
   differenceValue?: number | null;
 };
 
+export type ProjectionTableRowV1 = {
+  label: string;
+  values: string[];
+  isSection?: boolean;
+  isTotal?: boolean;
+};
+
+export type ProjectionTableV1 = {
+  tableId: string;
+  title: string;
+  columns: string[];
+  rows: ProjectionTableRowV1[];
+};
+
 export type FinancialProjectionV1 = {
   projectionId: string;
   name: string;
@@ -505,6 +519,8 @@ export type FinancialProjectionV1 = {
     betterPositionSummary?: string | null;
     keyMetrics: ProjectionMetricV1[];
     yearlySeries?: ProjectionYearV1[] | null;
+    cashflowTable?: ProjectionTableV1 | null;
+    assumptionTables?: ProjectionTableV1[] | null;
   };
   linkedRecommendationIds: string[];
   rationale?: string | null;

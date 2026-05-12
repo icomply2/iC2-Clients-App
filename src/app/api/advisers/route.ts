@@ -1,17 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+import type { AdviserSummary } from "@/lib/api/types";
+import { mockClientSummaries } from "@/lib/client-mocks";
+import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 
 export async function GET(request: NextRequest) {
-  if (!API_BASE_URL) {
-    return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
-  }
-
-  const upstreamUrl = new URL("/api/Advisers", API_BASE_URL);
+  const apiBaseUrl = getApiBaseUrl();
   const practiceName = request.nextUrl.searchParams.get("practiceName");
   const licenseeName = request.nextUrl.searchParams.get("licenseeName");
   const id = request.nextUrl.searchParams.get("id");
+
+  if (isMockAuthEnabled()) {
+    const advisers = Array.from(
+      new Map<string, AdviserSummary>(
+        mockClientSummaries
+          .filter((client) => {
+            const matchesPractice =
+              !practiceName ||
+              (client.clientAdviserPracticeName ?? "").trim().toLowerCase() === practiceName.trim().toLowerCase();
+            const matchesLicensee =
+              !licenseeName ||
+              (client.clientAdviserLicenseeName ?? "").trim().toLowerCase() === licenseeName.trim().toLowerCase();
+
+            return matchesPractice && matchesLicensee;
+          })
+          .map((client, index) => [
+            `${client.clientAdviserName ?? ""}|${client.clientAdviserPracticeName ?? ""}|${client.clientAdviserLicenseeName ?? ""}`,
+            {
+              id: `mock-adviser-${index + 1}`,
+              name: client.clientAdviserName ?? null,
+              practiceName: client.clientAdviserPracticeName ?? null,
+              licenseeName: client.clientAdviserLicenseeName ?? null,
+              licenseeId: null,
+              email: null,
+            },
+          ]),
+      ).values(),
+    ).filter((adviser) => !id || adviser.id === id);
+
+    return NextResponse.json({ data: advisers }, { status: 200, headers: { "Cache-Control": "no-store" } });
+  }
+
+  if (!apiBaseUrl) {
+    return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
+  }
+
+  const upstreamUrl = new URL("/api/Advisers", apiBaseUrl);
 
   if (practiceName) {
     upstreamUrl.searchParams.set("practiceName", practiceName);

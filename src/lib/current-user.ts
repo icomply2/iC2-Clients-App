@@ -1,6 +1,5 @@
 import type { UserSummary } from "@/lib/api/types";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+import { getApiBaseUrl } from "@/lib/server-runtime";
 
 export function decodeJwtPayload(token: string) {
   const parts = token.split(".");
@@ -33,7 +32,9 @@ export function readStringClaim(payload: Record<string, unknown>, claimNames: st
 }
 
 export async function resolveCurrentUserFromApi(token: string) {
-  if (!API_BASE_URL) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl) {
     return null;
   }
 
@@ -58,7 +59,7 @@ export async function resolveCurrentUserFromApi(token: string) {
       ])
     : null;
 
-  const response = await fetch(new URL("/api/Users", API_BASE_URL), {
+  const response = await fetch(new URL("/api/Users", apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",
