@@ -1141,19 +1141,30 @@ function buildEngagementDraftFromUploadedContext(
   };
 }
 
-function filterClientSummariesByPractice(
-  clients: FinleyClientSummary[],
-  practiceName?: string | null,
-) {
-  const normalizedPractice = practiceName?.trim().toLowerCase();
+function isComplianceManagerRole(userRole?: string | null) {
+  return normalizeText(userRole) === "compliance manager";
+}
 
-  if (!normalizedPractice) {
+function filterClientSummariesByCurrentUserScope(
+  clients: FinleyClientSummary[],
+  currentUserScope?: CurrentUserScope | null,
+) {
+  const normalizedLicensee = normalizeText(currentUserScope?.licensee?.name);
+  const normalizedPractice = normalizeText(currentUserScope?.practice?.name);
+  const isComplianceManager = isComplianceManagerRole(currentUserScope?.userRole);
+
+  if (!normalizedLicensee && (isComplianceManager || !normalizedPractice)) {
     return clients;
   }
 
-  return clients.filter(
-    (client) => client.clientAdviserPracticeName?.trim().toLowerCase() === normalizedPractice,
-  );
+  return clients.filter((client) => {
+    const matchesLicensee =
+      !normalizedLicensee || normalizeText(client.clientAdviserLicenseeName) === normalizedLicensee;
+    const matchesPractice =
+      isComplianceManager || !normalizedPractice || normalizeText(client.clientAdviserPracticeName) === normalizedPractice;
+
+    return matchesLicensee && matchesPractice;
+  });
 }
 
 const CURRENCY_FIELD_KEYS = new Set([
@@ -1583,6 +1594,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     isMockAuthEnabled ? mockClientSummaries : [],
   );
   const [clientSearch, setClientSearch] = useState("");
+  const [clientListRefreshKey, setClientListRefreshKey] = useState(0);
   const [isLoadingClients, setIsLoadingClients] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -1625,6 +1637,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [isFactFindImportModalOpen, setIsFactFindImportModalOpen] = useState(false);
   const conciergeUploadInputRef = useRef<HTMLInputElement | null>(null);
   const fileNoteAttachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const locallyCreatedClientIdsRef = useRef<Set<string>>(new Set());
+  const pendingCreatedClientSelectionRef = useRef<string | null>(null);
 
   const clients = serverClients;
 
@@ -1782,6 +1796,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   adviser?: { name?: string | null } | null;
                   practice?: string | null;
                   licensee?: string | null;
+                  clientAdviserName?: string | null;
+                  clientAdviserPracticeName?: string | null;
+                  clientAdviserLicenseeName?: string | null;
                 }>;
               };
             }
@@ -1795,25 +1812,55 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           body?.data?.items?.map((item) => ({
             id: item.id,
             name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
-            clientAdviserName: item.adviser?.name,
-            clientAdviserPracticeName: item.practice,
-            clientAdviserLicenseeName: item.licensee,
+            clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
+            clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
+            clientAdviserLicenseeName: item.clientAdviserLicenseeName ?? item.licensee,
           })) ?? [];
 
         if (!cancelled) {
-          setServerClients(filterClientSummariesByPractice(nextClients, currentUserScope?.practice?.name));
+          const filteredClients = filterClientSummariesByCurrentUserScope(nextClients, currentUserScope);
+
+          setServerClients((currentClients) => {
+            const preservedLocallyCreatedClients = currentClients.filter(
+              (client) =>
+                client.id &&
+                locallyCreatedClientIdsRef.current.has(client.id) &&
+                !filteredClients.some((nextClient) => nextClient.id === client.id),
+            );
+
+            return preservedLocallyCreatedClients.length
+              ? [...preservedLocallyCreatedClients, ...filteredClients]
+              : filteredClients;
+          });
         }
       } catch {
         if (!cancelled) {
-          setServerClients(
-            isMockAuthEnabled
-              ? filterClientSummariesByPractice(mockClientSummaries, currentUserScope?.practice?.name)
-              : [],
-          );
+          const fallbackClients = isMockAuthEnabled
+            ? filterClientSummariesByCurrentUserScope(mockClientSummaries, currentUserScope)
+            : [];
+
+          setServerClients((currentClients) => {
+            const preservedLocallyCreatedClients = currentClients.filter(
+              (client) =>
+                client.id &&
+                locallyCreatedClientIdsRef.current.has(client.id) &&
+                !fallbackClients.some((nextClient) => nextClient.id === client.id),
+            );
+
+            return preservedLocallyCreatedClients.length
+              ? [...preservedLocallyCreatedClients, ...fallbackClients]
+              : fallbackClients;
+          });
         }
       } finally {
         if (!cancelled) {
           setIsLoadingClients(false);
+
+          const pendingCreatedClientId = pendingCreatedClientSelectionRef.current;
+          if (pendingCreatedClientId) {
+            pendingCreatedClientSelectionRef.current = null;
+            selectClient(pendingCreatedClientId);
+          }
         }
       }
     }
@@ -1823,7 +1870,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     return () => {
       cancelled = true;
     };
-  }, [clientSearch, currentUserScope?.practice?.name]);
+  }, [clientListRefreshKey, clientSearch, currentUserScope]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1855,6 +1902,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }, []);
 
   function selectClient(clientId: string) {
+    if (!clientId) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams.toString());
     params.set("clientId", clientId);
     router.replace(`${pathname}?${params.toString()}`);
@@ -2519,15 +2570,13 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         null,
     };
 
+    locallyCreatedClientIdsRef.current.add(createdProfileId);
     setServerClients((current) => [
       createdSummary,
       ...current.filter((client) => client.id !== createdProfileId),
     ]);
-
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("clientId", createdProfileId);
-    router.replace(`${pathname}?${params.toString()}`);
-    resetConversation();
+    pendingCreatedClientSelectionRef.current = createdProfileId;
+    setClientListRefreshKey((key) => key + 1);
   }
 
   async function saveCurrentFactFindStepIfNeeded() {

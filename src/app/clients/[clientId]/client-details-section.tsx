@@ -222,7 +222,7 @@ function createDraft(person?: PersonRecord | null, profile?: ClientProfile | nul
 }
 
 function getDisplayedClientId(person: PersonRecord | null, profile: ClientProfile) {
-  return getFirstNonEmptyValue(profile.id, person?.ic2AppId, person?.id);
+  return getFirstNonEmptyValue(person?.id, person?.ic2AppId, profile?.id);
 }
 
 function getEditablePersonId(target: EditablePerson, person: PersonRecord | null, profile: ClientProfile) {
