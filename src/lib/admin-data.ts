@@ -4,8 +4,7 @@ import type { LicenseeDto, PracticeDto, UserSummary } from "@/lib/api/types";
 import { readAuthTokenFromCookies } from "@/lib/auth";
 import { isAppAdminValue } from "@/lib/app-admin";
 import { resolveCurrentUserFromApi } from "@/lib/current-user";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+import { getApiBaseUrl } from "@/lib/server-runtime";
 
 export type AdminUserRecord = UserSummary & {
   practiceName: string;
@@ -46,11 +45,13 @@ export async function getAdminContext() {
 }
 
 export async function loadAdminUsers(token: string | null) {
-  if (!API_BASE_URL || !token) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl || !token) {
     return [] as AdminUserRecord[];
   }
 
-  const response = await fetch(new URL("/api/Users", API_BASE_URL), {
+  const response = await fetch(new URL("/api/Users", apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -81,11 +82,13 @@ export async function loadAdminUsers(token: string | null) {
 }
 
 export async function loadAdminLicensees(token: string | null) {
-  if (!API_BASE_URL || !token) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl || !token) {
     return [] as LicenseeDto[];
   }
 
-  const response = await fetch(new URL("/api/Licensees", API_BASE_URL), {
+  const response = await fetch(new URL("/api/Licensees", apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -108,11 +111,13 @@ export async function loadAdminLicensees(token: string | null) {
 }
 
 export async function loadAdminPractices(token: string | null) {
-  if (!API_BASE_URL || !token) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl || !token) {
     return [] as PracticeDto[];
   }
 
-  const response = await fetch(new URL("/api/Licensees/Practice", API_BASE_URL), {
+  const response = await fetch(new URL("/api/Licensees/Practice", apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",

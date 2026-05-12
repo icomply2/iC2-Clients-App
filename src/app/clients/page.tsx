@@ -6,7 +6,6 @@ import { Suspense, useEffect, useState } from "react";
 import { AppTopbar } from "@/components/app-topbar";
 import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { AdviserSummary, ClientSummary } from "@/lib/api/types";
-import { mockClientSummaries } from "@/lib/client-mocks";
 import styles from "./page.module.css";
 
 type ClientRow = {
@@ -44,21 +43,6 @@ function filterRowsByPractice(rows: ClientRow[], practiceName?: string | null) {
   return rows.filter((row) => row.practice.trim().toLowerCase() === normalizedPractice);
 }
 
-function getMockClientRows(search: string, adviser: string, practiceName?: string | null) {
-  const normalizedSearch = search.trim().toLowerCase();
-  const rows = filterRowsByPractice(
-    mockClientSummaries.map(mapClientSummaryToRow),
-    practiceName,
-  );
-
-  return rows.filter((row) => {
-    const matchesSearch = !normalizedSearch || row.name.toLowerCase().includes(normalizedSearch);
-    const matchesAdviser = adviser === "All advisers" || row.adviser === adviser;
-
-    return matchesSearch && matchesAdviser;
-  });
-}
-
 function ClientsPageContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -78,23 +62,14 @@ function ClientsPageContent() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeletingClient, setIsDeletingClient] = useState(false);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pageDataSource, setPageDataSource] = useState<"mock" | "live">("live");
+  const [fallbackSource, setFallbackSource] = useState("none");
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadClients() {
-      if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
-        const fallbackRows = getMockClientRows(search, adviser, currentUserScope?.practice?.name);
-
-        if (isMounted) {
-          setClients(fallbackRows.slice((currentPage - 1) * pageSize, currentPage * pageSize));
-          setNextContinuationToken(null);
-          setTotalPages(Math.max(Math.ceil(fallbackRows.length / pageSize), 1));
-        }
-
-        return;
-      }
-
       setIsLoading(true);
 
       try {
@@ -171,18 +146,17 @@ function ClientsPageContent() {
 
         setNextContinuationToken(body?.data?.continuationToken ?? null);
         setTotalPages(Math.max(body?.data?.totalPageCount ?? 1, 1));
-      } catch {
+        setLoadError(null);
+        setPageDataSource("live");
+        setFallbackSource("none");
+      } catch (error) {
         if (isMounted) {
-          const fallbackRows = filterRowsByPractice(
-            mockClientSummaries.map(mapClientSummaryToRow),
-            currentUserScope?.practice?.name,
-          );
-
-          setClients(fallbackRows.slice(0, pageSize));
-          setCurrentPage(1);
-          setContinuationTokens([null]);
+          setClients([]);
           setNextContinuationToken(null);
-          setTotalPages(Math.max(Math.ceil(fallbackRows.length / pageSize), 1));
+          setTotalPages(1);
+          setLoadError(error instanceof Error ? error.message : "Unable to load clients from the live API.");
+          setPageDataSource("live");
+          setFallbackSource("clients-page:live-error");
         }
       } finally {
         if (isMounted) {
@@ -202,10 +176,6 @@ function ClientsPageContent() {
     let isMounted = true;
 
     async function loadCurrentUserScope() {
-      if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
-        return;
-      }
-
       try {
         const response = await fetch("/api/users/me", {
           method: "GET",
@@ -249,21 +219,6 @@ function ClientsPageContent() {
     let isMounted = true;
 
     async function loadAdvisers() {
-      if (!process.env.NEXT_PUBLIC_API_BASE_URL) {
-        const names = filterRowsByPractice(
-          mockClientSummaries.map(mapClientSummaryToRow),
-          currentUserScope?.practice?.name,
-        )
-          .map((client) => client.adviser.trim())
-          .filter(Boolean);
-
-        if (isMounted) {
-          setAdviserOptions(["All advisers", ...Array.from(new Set(names)).sort((left, right) => left.localeCompare(right))]);
-        }
-
-        return;
-      }
-
       try {
         const params = new URLSearchParams();
         const practiceName = currentUserScope?.practice?.name?.trim();
@@ -311,11 +266,11 @@ function ClientsPageContent() {
           return;
         }
 
-        const names = clients
-          .map((client) => client.adviser.trim())
-          .filter(Boolean);
-
-        setAdviserOptions(["All advisers", ...Array.from(new Set(names)).sort((left, right) => left.localeCompare(right))]);
+        setAdviserOptions(
+          clients.length > 0
+            ? ["All advisers", ...Array.from(new Set(clients.map((client) => client.adviser.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right))]
+            : ["All advisers"],
+        );
       }
     }
 
@@ -410,7 +365,11 @@ function ClientsPageContent() {
   }
 
   return (
-    <div className={styles.page}>
+    <div
+      className={styles.page}
+      data-ic2-data-source={pageDataSource}
+      data-ic2-fallback-source={fallbackSource}
+    >
       <AppTopbar finleyHref="/finley" />
 
       <main className={styles.content}>
@@ -443,6 +402,7 @@ function ClientsPageContent() {
         </section>
 
         <section className={styles.tableCard}>
+          {loadError ? <p className={styles.dataNotice}>{loadError}</p> : null}
           <div className={styles.tableHeader}>
             <div>Client Name</div>
             <div>Adviser Name</div>
@@ -472,6 +432,7 @@ function ClientsPageContent() {
                 </button>
               </div>
             ))}
+            {!clients.length && !isLoading && !loadError ? <p className={styles.dataNotice}>No clients found.</p> : null}
           </div>
 
           <div className={styles.footer}>

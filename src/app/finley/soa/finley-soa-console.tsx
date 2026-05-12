@@ -34,6 +34,14 @@ import type {
 } from "@/lib/soa-types";
 import { parseProductRexReport } from "@/lib/productrex-report-parser";
 import { getPortfolioAccountViews } from "@/lib/soa-portfolio-accounts";
+import {
+  SOA_PROJECTION_PACKAGE_EVENT,
+  SOA_PROJECTION_SCENARIO_OPTIONS_EVENT,
+  readSoaProjectionPackage,
+  readSoaProjectionScenarioOptions,
+  type SoaProjectionOutputPackage,
+  writeSoaProjectionPackage,
+} from "@/lib/projections/soa-projection-package";
 import type { IntakeAssessmentV1, ProductDraftResponseV1, StrategyDraftResponseV1 } from "@/lib/soa-output-contracts";
 import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
 import type { SoaIntakeResponse } from "@/lib/soa-intake-service";
@@ -1462,6 +1470,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   });
   const [activeCommissionInput, setActiveCommissionInput] = useState<{ commissionId: string; field: CommissionDraftField } | null>(null);
   const [commissionDrafts, setCommissionDrafts] = useState<Record<string, string>>({});
+  const [activeServiceFeeInput, setActiveServiceFeeInput] = useState<string | null>(null);
+  const [serviceFeeDrafts, setServiceFeeDrafts] = useState<Record<string, string>>({});
   const [scenarioReady, setScenarioReady] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const [soaRenderStyle, setSoaRenderStyle] = useState<SoaRenderStyle>(DEFAULT_SOA_RENDER_STYLE);
@@ -1472,6 +1482,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const activeSoaId = searchParams.get("soaId") ?? initialSoaId ?? "";
   const activeClient = useMemo(() => serverClients.find((client) => client.id === activeClientId) ?? null, [activeClientId, serverClients]);
   const [adviceCase, setAdviceCase] = useState<AdviceCaseV1>(() => buildInitialCase(activeClient));
+  const [linkedProjectionPackage, setLinkedProjectionPackage] = useState<SoaProjectionOutputPackage | null>(null);
+  const [projectionScenarioOptions, setProjectionScenarioOptions] = useState<SoaProjectionOutputPackage[]>([]);
 
   function resetConsoleState(nextAdviceCase: AdviceCaseV1) {
     setAdviceCase(nextAdviceCase);
@@ -2074,6 +2086,68 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
 
     return `/finley/soa/print?${params.toString()}`;
   }, [activeClientId, activeSectionId, activeSoaId, previewVersion, soaRenderStyle]);
+  const projectionWorkspaceUrl = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (activeClientId) {
+      params.set("clientId", activeClientId);
+    }
+
+    if (activeSoaId) {
+      params.set("soaId", activeSoaId);
+    }
+
+    return `/projections${params.toString() ? `?${params.toString()}` : ""}`;
+  }, [activeClientId, activeSoaId]);
+
+  useEffect(() => {
+    function refreshProjectionPackage() {
+      const packageValue = activeClientId && activeSoaId ? readSoaProjectionPackage(activeClientId, activeSoaId) : null;
+      const scenarioOptions = activeClientId && activeSoaId ? readSoaProjectionScenarioOptions(activeClientId, activeSoaId) : [];
+      setLinkedProjectionPackage(packageValue);
+      setProjectionScenarioOptions(scenarioOptions);
+
+      if (!packageValue) {
+        return;
+      }
+
+      setAdviceCase((current) => ({
+        ...current,
+        financialProjections: [packageValue.financialProjection],
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }));
+      setConfirmedSections((current) => ({ ...current, projections: false }));
+    }
+
+    refreshProjectionPackage();
+    window.addEventListener("focus", refreshProjectionPackage);
+    window.addEventListener("storage", refreshProjectionPackage);
+    window.addEventListener(SOA_PROJECTION_PACKAGE_EVENT, refreshProjectionPackage);
+    window.addEventListener(SOA_PROJECTION_SCENARIO_OPTIONS_EVENT, refreshProjectionPackage);
+
+    return () => {
+      window.removeEventListener("focus", refreshProjectionPackage);
+      window.removeEventListener("storage", refreshProjectionPackage);
+      window.removeEventListener(SOA_PROJECTION_PACKAGE_EVENT, refreshProjectionPackage);
+      window.removeEventListener(SOA_PROJECTION_SCENARIO_OPTIONS_EVENT, refreshProjectionPackage);
+    };
+  }, [activeClientId, activeSoaId]);
+
+  function selectProjectionScenarioForSoa(selectedScenarioId: string) {
+    const packageValue = projectionScenarioOptions.find((option) => option.selectedScenarioId === selectedScenarioId);
+    if (!packageValue) {
+      return;
+    }
+
+    writeSoaProjectionPackage(packageValue);
+    setLinkedProjectionPackage(packageValue);
+    setAdviceCase((current) => ({
+      ...current,
+      financialProjections: [packageValue.financialProjection],
+      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+    }));
+    setConfirmedSections((current) => ({ ...current, projections: false }));
+  }
 
   useEffect(() => {
     if (!showLiveSoaPreview) {
@@ -3536,6 +3610,31 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     }
 
     return field === "upfrontPercentage" || field === "ongoingPercentage" ? formatPercent(value) : formatCurrency(value);
+  }
+
+  function getServiceFeeInputValue(feeItem: ServiceAgreementFeeItemV1) {
+    if (activeServiceFeeInput === feeItem.feeItemId) {
+      return serviceFeeDrafts[feeItem.feeItemId] ?? "";
+    }
+
+    if (feeItem.feeAmount === null || feeItem.feeAmount === undefined || Number.isNaN(feeItem.feeAmount)) {
+      return "";
+    }
+
+    return formatCurrency(feeItem.feeAmount);
+  }
+
+  function beginServiceFeeEdit(feeItem: ServiceAgreementFeeItemV1) {
+    setActiveServiceFeeInput(feeItem.feeItemId);
+    setServiceFeeDrafts((current) => ({
+      ...current,
+      [feeItem.feeItemId]: feeItem.feeAmount === null || feeItem.feeAmount === undefined ? "" : String(feeItem.feeAmount),
+    }));
+  }
+
+  function updateServiceFeeAmount(feeItemId: string, rawValue: string) {
+    setServiceFeeDrafts((current) => ({ ...current, [feeItemId]: rawValue }));
+    updateServiceAgreementFeeItem(feeItemId, { feeAmount: parseCurrencyInput(rawValue) });
   }
 
   function beginCommissionEdit(commissionId: string, field: CommissionDraftField, value?: number | null) {
@@ -6215,10 +6314,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                   className={finleyStyles.clientSearch}
                                   inputMode="decimal"
                                   placeholder="$0.00"
-                                  value={feeItem.feeAmount ?? ""}
-                                  onChange={(event) =>
-                                    updateServiceAgreementFeeItem(feeItem.feeItemId, { feeAmount: parseCurrencyInput(event.target.value) })
-                                  }
+                                  value={getServiceFeeInputValue(feeItem)}
+                                  onFocus={() => beginServiceFeeEdit(feeItem)}
+                                  onChange={(event) => updateServiceFeeAmount(feeItem.feeItemId, event.target.value)}
+                                  onBlur={() => setActiveServiceFeeInput(null)}
                                 />
                               </div>
                               <div className={styles.workflowDraftSubcard}>
@@ -6677,7 +6776,58 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   </div>
                 </>
               ) : null}
-              {![
+              {activeSectionId === "projections" ? (
+                <div className={styles.workflowDraftStack}>
+                  <div className={styles.workflowDraftCard}>
+                    <div className={styles.workflowDraftHeader}>
+                      <div>
+                        <div className={styles.workflowDraftLabel}>Projection module</div>
+                        <div className={styles.workflowDraftPreview}>
+                          Select scenario from the projections workspace.
+                        </div>
+                      </div>
+                      <a
+                        className={`${styles.sectionActionButton} ${!activeClientId || !activeSoaId ? styles.disabledActionLink : ""}`.trim()}
+                        href={activeClientId && activeSoaId ? projectionWorkspaceUrl : undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-disabled={!activeClientId || !activeSoaId}
+                      >
+                        {linkedProjectionPackage ? "Open projections" : "Create projections"}
+                      </a>
+                    </div>
+                    {projectionScenarioOptions.length ? (
+                      <label className={styles.workflowDraftField}>
+                        <span className={styles.workflowDraftLabel}>Scenario for SOA</span>
+                        <select
+                          className={styles.workflowDraftSelect}
+                          value={
+                            projectionScenarioOptions.some(
+                              (option) => option.selectedScenarioId === linkedProjectionPackage?.selectedScenarioId,
+                            )
+                              ? linkedProjectionPackage?.selectedScenarioId
+                              : ""
+                          }
+                          onChange={(event) => selectProjectionScenarioForSoa(event.target.value)}
+                        >
+                          <option value="" disabled>
+                            Choose a projection scenario
+                          </option>
+                          {projectionScenarioOptions.map((option) => (
+                            <option key={option.selectedScenarioId} value={option.selectedScenarioId}>
+                              {option.selectedScenarioName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {!activeSoaId ? (
+                      <div className={styles.sectionCardText}>Save or open this SOA with an SOA ID before linking projections.</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              {![ 
                 "soa-introduction",
                 "risk-profile",
                 "scope-of-advice",
@@ -6690,6 +6840,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 "insurance-replacement",
                 "disclosure",
                 "service-agreement",
+                "projections",
               ].includes(activeSectionId) ? (
                 <div className={styles.sectionCardText}>
                   This section is wired into the workflow and readiness model. We can now use it for practical validation before we build the richer section editor.

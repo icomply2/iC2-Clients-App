@@ -5,11 +5,9 @@ import { getUser, getUsers } from "@/lib/api/users";
 import type { ClientProfile } from "@/lib/api/types";
 import { readAuthTokenFromCookies } from "@/lib/auth";
 import { getMockClientProfile } from "@/lib/client-mocks";
+import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 import { readUserProfileOverride } from "@/lib/user-profile-overrides-store";
 import { mergeClientProfileAdviserOverride } from "@/lib/user-profile-overrides-shared";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
-const ENABLE_MOCK_AUTH = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
 
 function normalizeText(value?: string | null) {
   return value?.trim().toLowerCase() ?? "";
@@ -86,7 +84,14 @@ async function enrichAdviser(profile: ClientProfile, token: string) {
 }
 
 async function loadProfile(clientId: string) {
-  if (ENABLE_MOCK_AUTH || !API_BASE_URL) {
+  if (isMockAuthEnabled()) {
+    return {
+      profile: getMockClientProfile(clientId),
+      source: "mock",
+    };
+  }
+
+  if (!getApiBaseUrl()) {
     return {
       profile: getMockClientProfile(clientId),
       source: "mock",
@@ -96,10 +101,7 @@ async function loadProfile(clientId: string) {
   const token = await readAuthTokenFromCookies();
 
   if (!token) {
-    return {
-      profile: getMockClientProfile(clientId),
-      source: "mock",
-    };
+    throw new Error("You must sign in to load the live client profile for the SOA preview.");
   }
 
   try {
@@ -115,7 +117,7 @@ async function loadProfile(clientId: string) {
 
   const profileIdResult = await getClientProfileId(clientId, token);
   if (!profileIdResult.data) {
-    throw new Error("Finley could not resolve the client profile needed for the SOA preview.");
+    throw new Error("The live API could not resolve the client profile needed for the SOA preview.");
   }
 
   return {
