@@ -361,7 +361,6 @@ async function extractWithOpenAi(sourceFileName: string, extractedText: string, 
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
-      temperature: 0.1,
       messages: [
         {
           role: "system",

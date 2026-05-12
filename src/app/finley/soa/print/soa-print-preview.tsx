@@ -749,6 +749,9 @@ export function SoaPrintPreview() {
 
   const { adviceCase } = payload;
   const productRexReports = adviceCase.productRexReports ?? [];
+  const projectionOutput = adviceCase.financialProjections?.[0] ?? null;
+  const projectionCashflowTable = projectionOutput?.outputs.cashflowTable ?? null;
+  const projectionAssumptionTables = projectionOutput?.outputs.assumptionTables ?? [];
   const addresseeLine = addresseeNames.length > 1 ? addresseeNames.join(" and ") : addresseeNames[0] ?? "<<clientname>>";
   const address = buildAddress(pickAddressPerson(clientProfile));
   const adviserName = clientProfile?.adviser?.name?.trim() || payload.adviserName || "<<adviser>>";
@@ -1021,6 +1024,15 @@ export function SoaPrintPreview() {
     ownerPersonId && adviceCase.clientGroup.clients.some((person) => person.personId === ownerPersonId)
       ? ownerPersonId
       : adviceCase.clientGroup.clients[0]?.personId ?? "client";
+  const getRecommendationAudience = (ownerPersonIds?: string[] | null) => {
+    const ids = ownerPersonIds?.length ? ownerPersonIds : adviceCase.clientGroup.clients.map((person) => person.personId);
+    const names = adviceCase.clientGroup.clients
+      .filter((person) => ids.includes(person.personId))
+      .map((person) => person.fullName)
+      .filter(Boolean);
+
+    return names.length ? names.join(" and ") : addresseeLine;
+  };
   const getCommissionUpfrontPercentage = (commission: AdviceCaseV1["fees"]["commissions"][number]) =>
     commission.upfrontPercentage ?? (commission.type === "upfront" ? commission.percentage : null) ?? DEFAULT_UPFRONT_COMMISSION_PERCENTAGE;
   const getCommissionUpfrontAmount = (commission: AdviceCaseV1["fees"]["commissions"][number]) =>
@@ -1845,6 +1857,9 @@ export function SoaPrintPreview() {
               ) : null}
               <div className={styles.recommendationBlock}>
                 <h3>{`Recommendation ${index + 1}`}</h3>
+                <p className={styles.recommendationText}>
+                  <strong>Recommended for:</strong> {getRecommendationAudience(recommendation.ownerPersonIds)}
+                </p>
                 <p className={styles.recommendationText}>{recommendation.recommendationText || "Draft recommendation not yet written."}</p>
                 <div className={styles.recommendationDetailStack}>
                   <div className={styles.card}>
@@ -1893,6 +1908,9 @@ export function SoaPrintPreview() {
               <h2 className={styles.sectionHeading}>Product Recommendations</h2>
               <div className={styles.recommendationBlock}>
                 <h3>{`Product Recommendation ${index + 1}`}</h3>
+                <p className={styles.metaLine}>
+                  <strong>Recommended for:</strong> {getRecommendationAudience(recommendation.ownerPersonIds)}
+                </p>
                 <p className={styles.recommendationText}>{recommendation.recommendationText || "Draft product recommendation not yet written."}</p>
                 <div className={styles.recommendationDetailStack}>
                   <div className={styles.card}>
@@ -2432,14 +2450,38 @@ export function SoaPrintPreview() {
           <h2 className={styles.sectionHeading}>Projected Outcomes</h2>
           <div className={styles.recommendationDetailStack}>
             <div className={styles.card}>
-              <h3>Assumptions</h3>
-              <p>Projection assumptions will be included here once the projection modelling has been completed.</p>
-            </div>
-            <div className={styles.card}>
               <h3>Cashflow and Taxation Projections</h3>
               <p>
                 Maintaining adequate cashflow to meet living expenses is fundamental to the success of your plan. A summary of estimated income, expenses, tax and overall cashflow after implementing our recommendations will be included here.
               </p>
+              {projectionCashflowTable?.columns.length && projectionCashflowTable.rows.length ? (
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      {projectionCashflowTable.columns.map((column) => (
+                        <th key={column}>{column}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projectionCashflowTable.rows.map((row) =>
+                      row.isSection ? (
+                        <tr key={row.label} className={styles.projectionSectionRow}>
+                          <td colSpan={projectionCashflowTable.columns.length + 1}>{row.label}</td>
+                        </tr>
+                      ) : (
+                        <tr key={row.label} className={row.isTotal ? styles.totalRow : undefined}>
+                          <td>{row.label}</td>
+                          {projectionCashflowTable.columns.map((column, columnIndex) => (
+                            <td key={`${row.label}-${column}`}>{row.values[columnIndex] || "-"}</td>
+                          ))}
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              ) : null}
             </div>
             <div className={styles.card}>
               <h3>Capital Projections</h3>
@@ -2968,6 +3010,38 @@ export function SoaPrintPreview() {
               Supporting material, calculations, additional comparisons, and reference tables can be included in this appendix
               as the SOA draft is refined further.
             </p>
+          </div>
+          <div className={styles.card}>
+            <h3>Projection Assumptions</h3>
+            {projectionAssumptionTables.length ? (
+              projectionAssumptionTables.map((assumptionTable) => (
+                <div key={assumptionTable.tableId} className={styles.appendixSubsection}>
+                  <h4>{assumptionTable.title}</h4>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Assumption</th>
+                        {assumptionTable.columns.map((column) => (
+                          <th key={column}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assumptionTable.rows.map((row) => (
+                        <tr key={row.label} className={row.isTotal ? styles.totalRow : undefined}>
+                          <td>{row.label}</td>
+                          {assumptionTable.columns.map((column, columnIndex) => (
+                            <td key={`${row.label}-${column}`}>{row.values[columnIndex] || "—"}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))
+            ) : (
+              <p>Projection assumptions will be included here once the projection modelling has been completed.</p>
+            )}
           </div>
           {renderPageNumber(appendixPageNumber)}
         </section>

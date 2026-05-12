@@ -76,6 +76,33 @@ type AgreementDraftCardState = {
   practiceName?: string | null;
   licenseeName?: string | null;
   services: string[];
+  fees: AgreementFeeRow[];
+  consentNotes: string;
+};
+
+type AgreementFeeRow = {
+  id: string;
+  entity: string;
+  product: string;
+  feeAmount: string;
+  frequency: string;
+  annualFee: string;
+  deductionAccount: string;
+};
+
+type ActiveOutputEditResponse = {
+  decision?: "edit_current_output" | "needs_clarification" | "handoff_to_workflow";
+  assistantMessage?: string;
+  changeSummary?: string;
+  missingInformation?: string[];
+  handoffReason?: string;
+  updatedEngagementLetter?: EngagementLetterDraftValue | null;
+  updatedAgreement?: {
+    services?: string[] | null;
+    fees?: Array<Partial<Omit<AgreementFeeRow, "id">> & { id?: string | null }> | null;
+    consentNotes?: string | null;
+  } | null;
+  warning?: string | null;
 };
 
 type InvoicePlaceholderItem = {
@@ -369,6 +396,8 @@ function AgreementRender({
   const clientSalutationName = salutationName(agreement.clientName);
   const services = agreement.services.length ? agreement.services : DEFAULT_SERVICE_AGREEMENT_SERVICES;
   const serviceGroups = groupServiceAgreementServices(services);
+  const fees = agreement.fees.length ? agreement.fees : defaultAgreementFeeRows();
+  const totalAnnualFee = formatCurrencyAmount(totalAgreementAnnualFee(fees));
   const title = isAnnual ? "Annual Advice Agreement" : "Ongoing Service Agreement";
 
   return (
@@ -469,16 +498,18 @@ function AgreementRender({
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>To be confirmed</td>
-              <td>To be confirmed</td>
-              <td>$0.00</td>
-              <td>Monthly</td>
-              <td>$0.00</td>
-            </tr>
+            {fees.map((fee) => (
+              <tr key={fee.id}>
+                <td>{fee.entity}</td>
+                <td>{fee.product}</td>
+                <td>{fee.feeAmount}</td>
+                <td>{fee.frequency}</td>
+                <td>{fee.annualFee}</td>
+              </tr>
+            ))}
             <tr className={styles.engagementFeeTotal}>
               <td colSpan={4}>Total annual advice fees</td>
-              <td>$0.00</td>
+              <td>{totalAnnualFee}</td>
             </tr>
           </tbody>
         </table>
@@ -488,6 +519,7 @@ function AgreementRender({
           By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for
           the services described in this agreement.
         </p>
+        {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
         <p>This consent may be withdrawn by you at any time by notifying us in writing.</p>
 
         <h2>{isAnnual ? "Next Steps" : "Your Acknowledgement"}</h2>
@@ -518,6 +550,40 @@ function invoiceItemAmounts(item: InvoicePlaceholderItem) {
   const total = subtotal + gst;
 
   return { quantity, unitPrice, gst, total };
+}
+
+function defaultAgreementFeeRows(): AgreementFeeRow[] {
+  return [
+    {
+      id: `agreement-fee-${crypto.randomUUID()}`,
+      entity: "To be confirmed",
+      product: "To be confirmed",
+      feeAmount: "$0.00",
+      frequency: "Monthly",
+      annualFee: "$0.00",
+      deductionAccount: "",
+    },
+  ];
+}
+
+function normalizeAgreementFeeRows(fees?: Array<Partial<Omit<AgreementFeeRow, "id">> & { id?: string | null }> | null) {
+  const rows = (fees ?? [])
+    .map((fee) => ({
+      id: fee.id?.trim() || `agreement-fee-${crypto.randomUUID()}`,
+      entity: fee.entity?.trim() || "To be confirmed",
+      product: fee.product?.trim() || "To be confirmed",
+      feeAmount: fee.feeAmount?.trim() || "$0.00",
+      frequency: fee.frequency?.trim() || "Monthly",
+      annualFee: fee.annualFee?.trim() || "$0.00",
+      deductionAccount: fee.deductionAccount?.trim() || "",
+    }))
+    .filter((fee) => fee.entity || fee.product || fee.feeAmount || fee.annualFee || fee.deductionAccount);
+
+  return rows.length ? rows : defaultAgreementFeeRows();
+}
+
+function totalAgreementAnnualFee(fees: AgreementFeeRow[]) {
+  return fees.reduce((total, fee) => total + (parseCurrencyAmount(fee.annualFee) || 0), 0);
 }
 
 function InvoiceWorkflowCard({
@@ -2024,6 +2090,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       practiceName: activeClient.clientAdviserPracticeName ?? currentUserScope?.practice?.name ?? "",
       licenseeName: activeClient.clientAdviserLicenseeName ?? "",
       services: DEFAULT_SERVICE_AGREEMENT_SERVICES,
+      fees: defaultAgreementFeeRows(),
+      consentNotes: "",
     });
   }
 
@@ -2526,11 +2594,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
 
     if (task.action === "summarise_documents") {
-      const documentContext = buildUploadedDocumentContext(conciergeUploads)
-        || conciergeUploads
-          .map((upload) => `${upload.name}: ${upload.tags.map(getConciergeTagLabel).join(", ")}`)
-          .join("; ");
-      await handleSend(`review the uploaded documents and suggest the next adviser tasks. Uploaded documents: ${documentContext}`);
+      await handleSend("summarise the uploaded document and suggest the next adviser tasks");
       return;
     }
 
@@ -2800,6 +2864,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             practiceName: agreementDraftCard.practiceName,
             licenseeName: agreementDraftCard.licenseeName,
             services: agreementDraftCard.services,
+            fees: agreementDraftCard.fees.map((fee) => ({
+              entity: fee.entity,
+              product: fee.product,
+              feeAmount: fee.feeAmount,
+              frequency: fee.frequency,
+              annualFee: fee.annualFee,
+              deductionAccount: fee.deductionAccount,
+            })),
+            consentNotes: agreementDraftCard.consentNotes,
           },
         }),
       });
@@ -2829,6 +2902,125 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     } finally {
       setIsGeneratingAgreementDocx(false);
     }
+  }
+
+  async function tryHandleActiveOutputInstruction(message: string, userMessage: Message) {
+    const activeOutput = engagementLetterDraftCard
+      ? {
+          outputKind: "engagement_letter" as const,
+          currentOutput: engagementLetterDraftCard.value,
+        }
+      : agreementDraftCard
+        ? {
+            outputKind: agreementDraftCard.agreementType === "annual" ? ("annual_agreement" as const) : ("ongoing_agreement" as const),
+            currentOutput: {
+              services: agreementDraftCard.services,
+              fees: agreementDraftCard.fees.map((fee) => ({
+                entity: fee.entity,
+                product: fee.product,
+                feeAmount: fee.feeAmount,
+                frequency: fee.frequency,
+                annualFee: fee.annualFee,
+                deductionAccount: fee.deductionAccount,
+              })),
+              consentNotes: agreementDraftCard.consentNotes,
+            },
+          }
+        : null;
+
+    if (!activeOutput) {
+      return false;
+    }
+
+    const response = await fetch("/api/finley/output-edit", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        outputKind: activeOutput.outputKind,
+        activeClientName: activeClient?.name ?? null,
+        adviserInstruction: message,
+        currentOutput: activeOutput.currentOutput,
+        recentMessages: [...messages.slice(-4), userMessage].map((entry) => ({
+          role: entry.role,
+          content: entry.content,
+        })),
+        uploadedFiles: conciergeUploads.map((upload) => ({
+          name: upload.name,
+          tags: upload.tags,
+          extractedText: upload.extractedText?.slice(0, 6000) ?? null,
+        })),
+      }),
+    });
+
+    const body = (await response.json().catch(() => null)) as ActiveOutputEditResponse | null;
+
+    if (!response.ok || !body) {
+      throw new Error("Unable to reach Finley’s active output editor right now.");
+    }
+
+    if (body.decision === "handoff_to_workflow") {
+      return false;
+    }
+
+    if (body.decision === "edit_current_output") {
+      if (activeOutput.outputKind === "engagement_letter" && body.updatedEngagementLetter) {
+        setEngagementLetterDraftCard((current) =>
+          current
+            ? {
+                ...current,
+                value: body.updatedEngagementLetter!,
+              }
+            : current,
+        );
+      }
+
+      if (
+        (activeOutput.outputKind === "ongoing_agreement" || activeOutput.outputKind === "annual_agreement")
+        && body.updatedAgreement
+      ) {
+        setAgreementDraftCard((current) =>
+          current
+            ? {
+                ...current,
+                services: body.updatedAgreement!.services?.length
+                  ? body.updatedAgreement!.services!
+                  : current.services,
+                fees: body.updatedAgreement!.fees
+                  ? normalizeAgreementFeeRows(body.updatedAgreement!.fees)
+                  : current.fees,
+                consentNotes:
+                  typeof body.updatedAgreement!.consentNotes === "string"
+                    ? body.updatedAgreement!.consentNotes
+                    : current.consentNotes,
+              }
+            : current,
+        );
+      }
+    }
+
+    setMessages((current) => [
+      ...current,
+      {
+        id: `assistant-active-output-edit-${Date.now()}`,
+        role: "assistant",
+        content:
+          body.assistantMessage
+          || (body.decision === "edit_current_output"
+            ? "I updated the active draft in the workspace."
+            : "I need a little more detail before I update the active draft."),
+      },
+    ]);
+    setPlanSummary(null);
+    setPlanSteps([]);
+    setWarnings(body.warning ? [body.warning] : []);
+    setPendingPlanId(null);
+    setDisplayCard(null);
+    setEditorCard(null);
+    setFileNoteSubjectManuallyEdited(false);
+
+    return true;
   }
 
   async function handleSend(nextMessage?: string) {
@@ -2911,6 +3103,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             content: body.assistantMessage ?? "I updated the selected file note field.",
           },
         ]);
+        return;
+      }
+
+      const activeOutputHandled = await tryHandleActiveOutputInstruction(message, userMessage);
+      if (activeOutputHandled) {
         return;
       }
 
@@ -4058,7 +4255,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
           {displayCard ? (
             <div className={styles.dataCard}>
-              <div className={styles.planLabel}>Client Data</div>
+              <div className={styles.planLabel}>
+                {displayCard.title.toLowerCase().includes("document") ? "Document Review" : "Client Data"}
+              </div>
               <div className={styles.planSummary}>{displayCard.title}</div>
               <div className={styles.dataTableWrap}>
                 <div className={styles.dataTableHeader}>
@@ -4097,6 +4296,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   </div>
                 ))}
               </div>
+              {displayCard.footer ? <div className={styles.planWarning}>{displayCard.footer}</div> : null}
             </div>
           ) : null}
 
