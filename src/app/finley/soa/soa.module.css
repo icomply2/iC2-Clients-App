@@ -147,6 +147,9 @@
 
 .quickActionButton,
 .sectionActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2.35rem;
   padding: 0 0.85rem;
   border: 1px solid #d2dae5;
@@ -343,6 +346,12 @@
   cursor: pointer;
 }
 
+.disabledActionLink {
+  pointer-events: none;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .workflowDraftLabel {
   color: #6b7c93;
   font-size: 0.74rem;
@@ -354,6 +363,23 @@
 .workflowDraftPreview {
   color: #486581;
   line-height: 1.6;
+}
+
+.workflowDraftField {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workflowDraftSelect {
+  min-height: 2.55rem;
+  width: min(100%, 28rem);
+  padding: 0 0.85rem;
+  border: 1px solid #cdd9e5;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #102f55;
+  font: inherit;
+  font-weight: 700;
 }
 
 .sectionGrid {

@@ -144,6 +144,56 @@ const GENDER_OPTIONS = ["Male", "Female", "Non-Binary", "Other", "Prefer not to 
 const RISK_PROFILE_OPTIONS = ["Conservative", "Moderately Conservative", "Balanced", "Growth", "High Growth"] as const;
 const ADVICE_AGREEMENT_REQUIRED_OPTIONS = ["Yes", "No"] as const;
 const AGREEMENT_TYPE_OPTIONS = ["Fixed-Term Agreement", "Ongoing Agreement"] as const;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim() ?? "";
+const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
+const OPENAI_DOCUMENT_REVIEW_MODEL = process.env.OPENAI_SOA_INTAKE_MODEL?.trim() || "gpt-5.2";
+
+type UploadedDocumentReview = {
+  title: string;
+  documentType: string;
+  purpose: string;
+  keyParties: string[];
+  importantDates: string[];
+  adviserActionsRequired: string[];
+  clientImpact: string[];
+  risksAndChecks: string[];
+  suggestedNextWorkflow: string[];
+  evidenceNotes: string[];
+  warning?: string | null;
+};
+
+const uploadedDocumentReviewSchema = {
+  name: "finley_uploaded_document_review",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      title: { type: "string" },
+      documentType: { type: "string" },
+      purpose: { type: "string" },
+      keyParties: { type: "array", items: { type: "string" } },
+      importantDates: { type: "array", items: { type: "string" } },
+      adviserActionsRequired: { type: "array", items: { type: "string" } },
+      clientImpact: { type: "array", items: { type: "string" } },
+      risksAndChecks: { type: "array", items: { type: "string" } },
+      suggestedNextWorkflow: { type: "array", items: { type: "string" } },
+      evidenceNotes: { type: "array", items: { type: "string" } },
+    },
+    required: [
+      "title",
+      "documentType",
+      "purpose",
+      "keyParties",
+      "importantDates",
+      "adviserActionsRequired",
+      "clientImpact",
+      "risksAndChecks",
+      "suggestedNextWorkflow",
+      "evidenceNotes",
+    ],
+  },
+};
 
 type CollectionIntentResult = {
   kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
@@ -4421,21 +4471,267 @@ function normalizeUploadedFiles(files?: FinleyChatRequest["uploadedFiles"]) {
     }));
 }
 
-function summarizeUploadedFilesForAdviser(files?: FinleyChatRequest["uploadedFiles"]) {
+function isAzureOpenAiBaseUrl(baseUrl: string) {
+  return /(?:\.openai\.azure\.com|\.services\.ai\.azure\.com)/i.test(baseUrl);
+}
+
+function normalizeStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function normalizeDocumentReview(value: unknown, uploads: ReturnType<typeof normalizeUploadedFiles>): UploadedDocumentReview {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const fallback = buildFallbackUploadedDocumentReview(uploads, null);
+
+  return {
+    title: typeof record.title === "string" && record.title.trim() ? record.title.trim() : fallback.title,
+    documentType: typeof record.documentType === "string" && record.documentType.trim() ? record.documentType.trim() : fallback.documentType,
+    purpose: typeof record.purpose === "string" && record.purpose.trim() ? record.purpose.trim() : fallback.purpose,
+    keyParties: normalizeStringArray(record.keyParties),
+    importantDates: normalizeStringArray(record.importantDates),
+    adviserActionsRequired: normalizeStringArray(record.adviserActionsRequired),
+    clientImpact: normalizeStringArray(record.clientImpact),
+    risksAndChecks: normalizeStringArray(record.risksAndChecks),
+    suggestedNextWorkflow: normalizeStringArray(record.suggestedNextWorkflow),
+    evidenceNotes: normalizeStringArray(record.evidenceNotes),
+    warning: null,
+  };
+}
+
+function inferUploadedDocumentType(upload: ReturnType<typeof normalizeUploadedFiles>[number]) {
+  const tags = upload.tags.map((tag) => tag.toLowerCase());
+  const name = upload.name.toLowerCase();
+  const text = upload.extractedText.toLowerCase();
+
+  if (tags.includes("fact-find") || /fact[-\s]?find|client data form/.test(name) || text.includes("fact find")) {
+    return "Fact find / client profile evidence";
+  }
+  if (tags.includes("meeting-transcript") || /transcript|meeting/.test(name)) {
+    return "Meeting transcript / adviser notes";
+  }
+  if (tags.includes("productrex") || /productrex|product report/.test(name) || text.includes("productrex")) {
+    return "Product research report";
+  }
+  if (tags.includes("engagement-letter") || /engagement letter/.test(name)) {
+    return "Engagement letter evidence";
+  }
+  if (tags.includes("record-of-advice") || /\broa\b|record of advice/.test(name)) {
+    return "Record of Advice";
+  }
+  if (tags.includes("service-agreement") || /service agreement|ongoing agreement|annual agreement/.test(name)) {
+    return "Service agreement";
+  }
+  if (tags.includes("invoice") || /invoice/.test(name)) {
+    return "Invoice / fee evidence";
+  }
+  if (/release|authority|transfer|servicing rights|ongoing revenue/.test(`${name}\n${text}`)) {
+    return "Release authority / servicing transfer letter";
+  }
+  if (/\bsoa\b|statement of advice|client pack|advice pack/.test(`${name}\n${text}`)) {
+    return "SOA client pack / advice evidence";
+  }
+  return "Uploaded advice document";
+}
+
+function extractDistinctMatches(text: string, pattern: RegExp, limit: number) {
+  const matches = new Set<string>();
+  for (const match of text.matchAll(pattern)) {
+    const value = (match[1] ?? match[0]).replace(/\s+/g, " ").trim();
+    if (value.length > 1 && value.length < 120) {
+      matches.add(value);
+    }
+    if (matches.size >= limit) break;
+  }
+  return Array.from(matches);
+}
+
+function joinList(items: string[], fallback: string) {
+  const clean = items.map((item) => item.trim()).filter(Boolean);
+  return clean.length ? clean.join("; ") : fallback;
+}
+
+function buildFallbackUploadedDocumentReview(
+  uploads: ReturnType<typeof normalizeUploadedFiles>,
+  warning: string | null,
+): UploadedDocumentReview {
+  const combinedText = uploads.map((upload) => upload.extractedText).join("\n\n");
+  const combinedSearchText = `${uploads.map((upload) => upload.name).join("\n")}\n${combinedText}`;
+  const documentTypes = Array.from(new Set(uploads.map(inferUploadedDocumentType)));
+  const moneyAmounts = extractDistinctMatches(combinedSearchText, /\$[\d,]+(?:\.\d{2})?/g, 8);
+  const dates = extractDistinctMatches(
+    combinedSearchText,
+    /\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b/gi,
+    8,
+  );
+  const possibleParties = extractDistinctMatches(
+    combinedSearchText,
+    /\b(?:client|adviser|advisor|representative|practice|licensee|trustee|provider|insurer|fund|company|partner|spouse)\s*[:-]\s*([A-Z][A-Za-z0-9&,' -]{2,80})/gi,
+    8,
+  );
+  const lower = combinedSearchText.toLowerCase();
+  const suggestedNextWorkflow = [
+    lower.includes("fact find") || lower.includes("personal details") ? "Review and apply fact find data" : null,
+    lower.includes("transcript") || lower.includes("meeting") ? "Create file note" : null,
+    lower.includes("engagement") || lower.includes("scope") ? "Draft engagement letter" : null,
+    lower.includes("invoice") || lower.includes("fee") ? "Prepare invoice or fee disclosure" : null,
+    lower.includes("ongoing") || lower.includes("annual agreement") || lower.includes("service agreement") ? "Prepare service agreement" : null,
+    lower.includes("statement of advice") || lower.includes("strategy") || lower.includes("recommendation") ? "Start SOA workflow" : null,
+    "Check missing information",
+  ].filter((entry): entry is string => Boolean(entry));
+
+  return {
+    title: "Uploaded Document Review",
+    documentType: joinList(documentTypes, "Uploaded advice document"),
+    purpose:
+      "Finley has treated the upload as adviser evidence for the current client/session and prepared a reviewable workspace summary.",
+    keyParties: possibleParties,
+    importantDates: dates,
+    adviserActionsRequired: [
+      "Confirm the document belongs to the selected client and current advice matter.",
+      "Review extracted facts before using them to update records or generate documents.",
+      "Choose the relevant workflow card for the next controlled action.",
+    ],
+    clientImpact: moneyAmounts.length
+      ? [`The document includes financial values that may affect advice scope or client records: ${moneyAmounts.join(", ")}.`]
+      : ["Client impact should be confirmed against the advice scope before any record or document is updated."],
+    risksAndChecks: [
+      "Check whether the upload contains adviser instructions, client facts, assumptions, or unconfirmed information.",
+      "Do not save profile changes or produce client-facing output until the adviser has reviewed the evidence.",
+    ],
+    suggestedNextWorkflow,
+    evidenceNotes: uploads
+      .map((upload) => {
+        const lines = upload.extractedText
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 16 && line.length < 220)
+          .slice(0, 2);
+        return [upload.name, ...lines].join(": ");
+      })
+      .slice(0, 5),
+    warning,
+  };
+}
+
+function buildUploadedDocumentReviewCard(review: UploadedDocumentReview): FinleyDisplayCard {
+  const rows = [
+    ["Document type", review.documentType],
+    ["Purpose", review.purpose],
+    ["Key parties", joinList(review.keyParties, "No key parties confidently extracted yet.")],
+    ["Important dates", joinList(review.importantDates, "No important dates confidently extracted yet.")],
+    ["Adviser actions required", joinList(review.adviserActionsRequired, "Review evidence and confirm the next workflow.")],
+    ["Client impact", joinList(review.clientImpact, "Client impact needs adviser confirmation.")],
+    ["Risks / checks", joinList(review.risksAndChecks, "Review assumptions and missing confirmations.")],
+    ["Suggested next workflow", joinList(review.suggestedNextWorkflow, "Choose a workflow card when ready.")],
+    ["Evidence notes", joinList(review.evidenceNotes, "No evidence notes available.")],
+  ];
+
+  return {
+    kind: "collection_summary",
+    title: review.title || "Uploaded Document Review",
+    columns: ["Review area", "Finley's read"],
+    rows: rows.map(([label, value], index) => ({
+      id: `document-review-${index}`,
+      cells: [label, value],
+    })),
+    footer: review.warning ?? null,
+  };
+}
+
+async function buildUploadedDocumentReview(files?: FinleyChatRequest["uploadedFiles"], clientName?: string | null) {
   const uploads = normalizeUploadedFiles(files);
   if (!uploads.length) return null;
 
-  return uploads
-    .map((upload) => {
-      const lines = upload.extractedText
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 16 && line.length < 240)
-        .slice(0, 10);
-      const detected = upload.tags.length ? ` (${upload.tags.join(", ")})` : "";
-      return [`${upload.name}${detected}`, ...lines.map((line) => `- ${line}`)].join("\n");
-    })
-    .join("\n\n");
+  if (!OPENAI_API_KEY) {
+    return buildFallbackUploadedDocumentReview(
+      uploads,
+      "Finley used the local evidence review because OPENAI_API_KEY is not configured. Configure the SOA intake model to enable LLM-backed document understanding.",
+    );
+  }
+
+  try {
+    const isAzure = isAzureOpenAiBaseUrl(OPENAI_BASE_URL);
+    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(isAzure ? { "api-key": OPENAI_API_KEY } : { authorization: `Bearer ${OPENAI_API_KEY}` }),
+      },
+      body: JSON.stringify({
+        model: OPENAI_DOCUMENT_REVIEW_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are Finley, an intelligent paraplanner for an Australian financial advice practice.",
+              "Review uploaded evidence broadly, but return a concise adviser workspace card for the requested document summary.",
+              "Do not push every fact into a rigid client-profile schema. Treat this as flexible evidence memory.",
+              "Separate document understanding from workflow output. Suggest relevant workflow cards, but do not claim changes have been saved.",
+              "Preserve uncertainty. Do not invent parties, dates, fees, strategies, or client facts.",
+              "Return only JSON that matches the provided schema.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              task: "Prepare an adviser-grade document understanding summary for the uploaded evidence.",
+              clientName: clientName ?? null,
+              uploadedFiles: uploads.map((upload) => ({
+                name: upload.name,
+                tags: upload.tags,
+                extractedText: upload.extractedText.slice(0, 10000),
+              })),
+              requiredWorkspaceSections: [
+                "Document type",
+                "Purpose",
+                "Key parties",
+                "Important dates",
+                "Adviser actions required",
+                "Client impact",
+                "Risks / checks",
+                "Suggested next workflow",
+              ],
+            }),
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: uploadedDocumentReviewSchema,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Document review request failed with status ${response.status}.`);
+    }
+
+    const body = (await response.json().catch(() => null)) as
+      | {
+          choices?: Array<{
+            message?: {
+              content?: string | null;
+            } | null;
+          }>;
+        }
+      | null;
+    const content = body?.choices?.[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("Document review response did not include message content.");
+    }
+
+    return normalizeDocumentReview(JSON.parse(content), uploads);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to run the LLM document review.";
+    return buildFallbackUploadedDocumentReview(
+      uploads,
+      `Finley could not reach the configured document understanding model (${message}), so it used the local evidence review.`,
+    );
+  }
 }
 
 function buildFileNoteTextFromUploadedFiles(message: string, files?: FinleyChatRequest["uploadedFiles"]) {
@@ -4549,17 +4845,19 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
 
   if (looksLikeReadQuestion) {
     if ((lower.includes("uploaded") || lower.includes("document")) && normalizeUploadedFiles(request.uploadedFiles).length) {
+      const documentReview = await buildUploadedDocumentReview(request.uploadedFiles, clientName);
+
       return {
         ...base,
         status: "completed",
         responseMode: "inform",
-        assistantMessage: `I reviewed the uploaded document text for ${clientName}. Here are the useful adviser-facing details I can see:\n\n${summarizeUploadedFilesForAdviser(request.uploadedFiles)}`,
+        assistantMessage: "I've summarised the document and prepared a review card in the workspace.",
         plan: null,
         results: [],
         missingInformation: [],
-        warnings: [],
+        warnings: documentReview?.warning ? [documentReview.warning] : [],
         errors: [],
-        displayCard: null,
+        displayCard: documentReview ? buildUploadedDocumentReviewCard(documentReview) : null,
         editorCard: null,
         suggestedActions: [],
       };

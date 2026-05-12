@@ -346,7 +346,6 @@ async function requestOpenAiSectionEdit(request: SoaSectionEditRequest) {
     },
     body: JSON.stringify({
       model: OPENAI_SECTION_EDIT_MODEL,
-      temperature: 0.1,
       messages: [
         {
           role: "system",
