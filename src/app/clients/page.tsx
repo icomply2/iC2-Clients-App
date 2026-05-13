@@ -14,6 +14,7 @@ type ClientRow = {
   adviser: string;
   category: string;
   practice: string;
+  status: string;
 };
 
 type CurrentUserScope = {
@@ -30,6 +31,7 @@ function mapClientSummaryToRow(client: ClientSummary): ClientRow {
     adviser: client.clientAdviserName ?? "",
     category: client.category ?? client.clientCategory ?? "",
     practice: client.clientAdviserPracticeName ?? "",
+    status: client.clientStatus ?? client.status ?? "",
   };
 }
 
@@ -49,7 +51,9 @@ function ClientsPageContent() {
   const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
   const [adviser, setAdviser] = useState("All advisers");
+  const [statusFilter, setStatusFilter] = useState("All statuses");
   const [adviserOptions, setAdviserOptions] = useState<string[]>(["All advisers"]);
+  const [statusOptions, setStatusOptions] = useState<string[]>(["All statuses"]);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [pageSize, setPageSize] = useState(10);
@@ -99,12 +103,14 @@ function ClientsPageContent() {
                 totalPageCount?: number | null;
                 items?: Array<{
                   id?: string | null;
-                  client?: { name?: string | null } | null;
+                  client?: { name?: string | null; clientStatus?: string | null; status?: string | null } | null;
                   partner?: { name?: string | null } | null;
                   adviser?: { name?: string | null } | null;
                   practice?: string | null;
                   clientAdviserName?: string | null;
                   clientAdviserPracticeName?: string | null;
+                  status?: string | null;
+                  clientStatus?: string | null;
                   category?: string | null;
                   clientCategory?: string | null;
                 }>;
@@ -132,6 +138,8 @@ function ClientsPageContent() {
               name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
               clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
               clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
+              status: item.status,
+              clientStatus: item.client?.clientStatus ?? item.clientStatus ?? item.client?.status,
               category: item.category ?? item.clientCategory,
               clientCategory: item.clientCategory,
             }),
@@ -139,7 +147,18 @@ function ClientsPageContent() {
           .filter((client) => client.id);
 
         if (nextClients.length > 0) {
-          setClients(filterRowsByPractice(nextClients, currentUserScope?.practice?.name));
+          const scopedClients = filterRowsByPractice(nextClients, currentUserScope?.practice?.name);
+          setStatusOptions([
+            "All statuses",
+            ...Array.from(new Set(scopedClients.map((client) => client.status.trim()).filter(Boolean))).sort((left, right) =>
+              left.localeCompare(right),
+            ),
+          ]);
+          setClients(
+            statusFilter === "All statuses"
+              ? scopedClients
+              : scopedClients.filter((client) => client.status.trim() === statusFilter),
+          );
         } else {
           setClients([]);
         }
@@ -170,7 +189,7 @@ function ClientsPageContent() {
     return () => {
       isMounted = false;
     };
-  }, [adviser, continuationTokens, currentPage, currentUserScope?.practice?.name, pageSize, search]);
+  }, [adviser, continuationTokens, currentPage, currentUserScope?.practice?.name, pageSize, search, statusFilter]);
 
   useEffect(() => {
     let isMounted = true;
@@ -388,6 +407,18 @@ function ClientsPageContent() {
             />
             <select
               className={styles.filterSelect}
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                resetPagination();
+              }}
+            >
+              {statusOptions.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </select>
+            <select
+              className={styles.filterSelect}
               value={adviser}
               onChange={(event) => {
                 setAdviser(event.target.value);
@@ -408,6 +439,7 @@ function ClientsPageContent() {
             <div>Adviser Name</div>
             <div>Category</div>
             <div>Practice Name</div>
+            <div>Status</div>
             <div />
           </div>
 
@@ -420,6 +452,7 @@ function ClientsPageContent() {
                 <div>{client.adviser}</div>
                 <div className={styles.muted}>{client.category}</div>
                 <div>{client.practice}</div>
+                <div>{client.status || "No status"}</div>
                 <button
                   type="button"
                   className={styles.deleteButton}

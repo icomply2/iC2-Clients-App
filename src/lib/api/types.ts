@@ -24,11 +24,35 @@ export type UserSummary = {
   adviserExperience?: string | null;
   businessName?: string | null;
   dateJoined?: string | null;
+  reviewCounter?: number | null;
   profilePhoto?: string | null;
   practiceLetterHead?: string | null;
   practiceLogo?: string | null;
+  stripeCustomerId?: string | null;
+  stripePaymentMethod?: string | null;
+  subscriptionId?: string | null;
   phoneNumber?: string | null;
   officeNumber?: string | null;
+  authorizedRepNumber?: string | null;
+  fsg?: {
+    name?: string | null;
+    url?: string | null;
+  } | null;
+  faseaCertificate?: {
+    name?: string | null;
+    url?: string | null;
+  } | null;
+  faseaExam?: string | null;
+  assignedParaplanner?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+  } | null;
+  supportStaff?: {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
+  } | null;
   complianceManager?: {
     id?: string | null;
     name?: string | null;
@@ -53,6 +77,8 @@ export type UserSummary = {
   entityId?: string | null;
   website?: string | null;
   xplanSite?: string | null;
+  createdDate?: string | null;
+  modifiedDate?: string | null;
 };
 
 export type ApiAddress = {
@@ -106,16 +132,7 @@ export type PracticeDto = {
   } | null;
 };
 
-export type UpdateUserRequest = {
-  subscriptionId?: string | null;
-  practiceId?: string | null;
-  licenseeId?: string | null;
-  complianceManagerId?: string | null;
-  appAccess?: string | null;
-  userRole?: string | null;
-  userStatus?: string | null;
-  appAdmin?: boolean | null;
-};
+export type UpdateUserRequest = Partial<Omit<UserSummary, "appAdmin"> & { appAdmin?: boolean | null }>;
 
 export type ClientSummary = {
   id?: string | null;
@@ -123,6 +140,8 @@ export type ClientSummary = {
   clientAdviserName?: string | null;
   clientAdviserPracticeName?: string | null;
   clientAdviserLicenseeName?: string | null;
+  status?: string | null;
+  clientStatus?: string | null;
   category?: string | null;
   clientCategory?: string | null;
 };
@@ -214,6 +233,11 @@ export type PersonRecord = {
     score?: string | null;
     resultDisplay?: string | null;
     resultGraph?: string | null;
+    answer?: {
+      index?: string | null;
+      choice?: string | null;
+      question?: string | null;
+    }[] | null;
   } | null;
   employment?: {
     id?: string | null;

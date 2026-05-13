@@ -26,7 +26,9 @@ export function AppTopbar({ finleyHref = "/finley" }: AppTopbarProps) {
     <header className={styles.topbar}>
       <div className={styles.topbarLeft}>
         <Link href="/clients" className={styles.homeButton} aria-label="Go to client search">
-          <span className={styles.homeIcon}>⌂</span>
+          <svg className={styles.homeIcon} viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4.5 10.9 12 4.75l7.5 6.15v8.35a1 1 0 0 1-1 1h-4.25v-5.5h-4.5v5.5H5.5a1 1 0 0 1-1-1V10.9Z" />
+          </svg>
         </Link>
         <span className={styles.pageName}>Finley</span>
       </div>

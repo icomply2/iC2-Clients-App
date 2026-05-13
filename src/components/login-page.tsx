@@ -5,12 +5,17 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import styles from "./login-page.module.css";
 
+type AuthMode = "login" | "signup" | "reset";
+
 export function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<AuthMode>("login");
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [licenseeName, setLicenseeName] = useState("Default");
   const [practiceName, setPracticeName] = useState("Default");
   const [twoFactorCode, setTwoFactorCode] = useState("");
@@ -27,7 +32,7 @@ export function LoginPage() {
     "Default","C A Hill Financial Services","Insight Investment Partners","Life Solutions","Lifestyle Connexion","MWS Wealth Professionals","Rubin Partners Financial Solutions","Banyan Securities Pty Ltd","Direct Advisers","iComply2","Adviser Central","Flinders Financial Services","Story Wealth Management Pty Ltd","Paragon Wealth Management","Mavuno Financial Planning","ID Accounting and Wealth Solutions","THL Finance Partners","One Wealth Advisory","Icomply Open group","IIP Asset Management","Amphora Private Wealth","Yarra Valley Financial","FutureFlow Financial Advice","Structured Financial Planning","Pivotal Private Wealth","Lots FP","2020 FP","SA State Wealth and Financial Services","Tenex Wealth","Sandringham Wealth","Luna Financial Services","Zenith Wealth","MK Financial Planning","CPS","Aureus Financial","Coral Horizon Wealth Management","HP Advisory","Keybiz Group","Life Financial Services","Prosperum Wealth","Brightday Melbourne","Brightday Brisbane","Brightday Advisers","Test Practice","Factor1 Consulting","Carnbrea & Co. Limited","Dorset Wealth Management","Wealth For Tradies","Sans Pareil Financial Services Pty Ltd","Invest Blue","Partners in Wealth","Figtree Financial","Plan Plus","Steadfast Life","Link Wealth Group","Spark Wealth Advisers","Altitude Wealth Management","The Complete Planner","Carey Financial"
   ];
 
-  function switchMode(nextMode: "login" | "signup") {
+  function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
     setError(null);
     setSuccess(null);
@@ -42,6 +47,38 @@ export function LoginPage() {
     setSuccess(null);
 
     try {
+      if (mode === "reset") {
+        if (newPassword !== confirmPassword) {
+          throw new Error("New password and confirmation do not match.");
+        }
+
+        const response = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email,
+            code: resetCode,
+            newPassword,
+          }),
+        });
+
+        const body = (await response.json().catch(() => null)) as { message?: string } | null;
+
+        if (!response.ok) {
+          throw new Error(body?.message ?? "Password reset failed.");
+        }
+
+        setPassword("");
+        setResetCode("");
+        setNewPassword("");
+        setConfirmPassword("");
+        switchMode("login");
+        setSuccess(body?.message ?? "Password reset. You can now log in with your new password.");
+        return;
+      }
+
       if (mode === "signup") {
         const response = await fetch("/api/auth/register", {
           method: "POST",
@@ -86,7 +123,7 @@ export function LoginPage() {
           throw new Error(body?.message ?? "Two-factor verification failed.");
         }
 
-        router.push("/finley");
+        router.push("/clients");
         return;
       }
 
@@ -112,7 +149,7 @@ export function LoginPage() {
         return;
       }
 
-      router.push("/finley");
+      router.push("/clients");
     } catch (submissionError) {
       const message =
         submissionError instanceof Error ? submissionError.message : "Unable to sign in right now.";
@@ -145,7 +182,8 @@ export function LoginPage() {
         throw new Error(body?.message ?? "Password reset request failed.");
       }
 
-      setSuccess(body?.message ?? "If the email exists, a password reset link has been sent.");
+      setSuccess(body?.message ?? "If the email exists, a password reset code has been sent.");
+      setMode("reset");
     } catch (requestError) {
       const message =
         requestError instanceof Error ? requestError.message : "Unable to start password reset.";
@@ -199,7 +237,7 @@ export function LoginPage() {
             />
           </div>
 
-          {!needsTwoFactor ? (
+          {!needsTwoFactor && mode !== "reset" ? (
             <div className={styles.field}>
               <input
                 className={styles.input}
@@ -225,6 +263,45 @@ export function LoginPage() {
               <p className={styles.hint}>Two-factor verification is enabled for this account.</p>
             </div>
           )}
+
+          {mode === "reset" ? (
+            <>
+              <div className={styles.field}>
+                <input
+                  className={styles.input}
+                  type="text"
+                  value={resetCode}
+                  onChange={(event) => setResetCode(event.target.value)}
+                  placeholder="Reset code"
+                  autoComplete="one-time-code"
+                  required
+                />
+                <p className={styles.hint}>Enter the code from your password reset email.</p>
+              </div>
+              <div className={styles.field}>
+                <input
+                  className={styles.input}
+                  type="password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="New password"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+              <div className={styles.field}>
+                <input
+                  className={styles.input}
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Confirm new password"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+            </>
+          ) : null}
 
           {mode === "signup" ? (
             <>
@@ -253,7 +330,15 @@ export function LoginPage() {
           {success ? <p className={`${styles.message} ${styles.success}`}>{success}</p> : null}
 
           <button className={styles.button} type="submit" disabled={busy}>
-            {busy ? "Please wait..." : mode === "signup" ? "Sign up" : needsTwoFactor ? "Verify code" : "Log in"}
+            {busy
+              ? "Please wait..."
+              : mode === "signup"
+                ? "Sign up"
+                : mode === "reset"
+                  ? "Reset password"
+                  : needsTwoFactor
+                    ? "Verify code"
+                    : "Log in"}
           </button>
 
           {!needsTwoFactor && mode === "login" ? (
@@ -266,9 +351,19 @@ export function LoginPage() {
           ) : null}
 
           {!needsTwoFactor ? (
-            <button className={styles.linkButton} type="button" onClick={() => switchMode(mode === "signup" ? "login" : "signup")} disabled={busy}>
-              {mode === "signup" ? "Already have an account? Log in" : "Need an account? Sign up"}
-            </button>
+            mode === "signup" ? (
+              <button className={styles.linkButton} type="button" onClick={() => switchMode("login")} disabled={busy}>
+                Already have an account? Log in
+              </button>
+            ) : mode === "reset" ? (
+              <button className={styles.linkButton} type="button" onClick={() => switchMode("login")} disabled={busy}>
+                Back to log in
+              </button>
+            ) : (
+              <a className={styles.linkButton} href="https://www.icomply2.com.au/contact-sales" target="_blank" rel="noreferrer">
+                Need an account? Contact support for a free trial
+              </a>
+            )
           ) : null}
         </form>
       </div>

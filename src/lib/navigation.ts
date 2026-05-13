@@ -30,11 +30,6 @@ export const appNavItems: AppNavItem[] = [
 
 export const adminNavItems: AppNavItem[] = [
   {
-    href: "/admin",
-    label: "Overview",
-    description: "Administration summary and quick links.",
-  },
-  {
     href: "/admin/users",
     label: "Users",
     description: "Manage user access, roles, and app admin flags.",

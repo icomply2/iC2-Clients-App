@@ -88,10 +88,10 @@
 
 .secondary {
   height: 2.75rem;
-  border: 1px solid #9faab4;
+  border: 1px solid #8a7400;
   border-radius: 6px;
   background: #fff;
-  color: #71808e;
+  color: #8a7400;
   cursor: pointer;
 }
 
@@ -117,11 +117,13 @@
 }
 
 .linkButton {
+  justify-self: center;
   border: 0;
   background: transparent;
   color: #8a7400;
   font: inherit;
   font-weight: 700;
+  text-align: center;
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 0.15rem;

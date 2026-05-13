@@ -39,3 +39,34 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pra
     },
   });
 }
+
+export async function DELETE(_request: NextRequest, context: { params: Promise<{ practiceId: string }> }) {
+  if (!API_BASE_URL) {
+    return adminConfigError();
+  }
+
+  const token = await readAdminToken();
+
+  if (!token) {
+    return adminAuthError();
+  }
+
+  const { practiceId } = await context.params;
+  const response = await fetch(new URL(`/api/Licensees/Practice/${encodeURIComponent(practiceId)}`, API_BASE_URL), {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  const text = await response.text();
+
+  return new NextResponse(text, {
+    status: response.status,
+    headers: {
+      "Content-Type": response.headers.get("Content-Type") ?? "application/json",
+    },
+  });
+}

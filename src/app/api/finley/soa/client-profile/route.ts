@@ -69,7 +69,7 @@ async function enrichAdviser(profile: ClientProfile, token: string) {
       address: adviserUser.address ?? null,
       abn: adviserUser.abn ?? null,
       acn: adviserUser.acn ?? null,
-      asicNumber: adviserUser.asicNumber ?? null,
+      asicNumber: adviserUser.authorizedRepNumber ?? adviserUser.asicNumber ?? null,
       businessName: adviserUser.businessName ?? null,
       phoneNumber: adviserUser.phoneNumber ?? null,
       officeNumber: adviserUser.officeNumber ?? null,

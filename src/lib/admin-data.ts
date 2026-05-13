@@ -22,6 +22,7 @@ export type PracticeSummary = {
   licenseeId?: string | null;
   statusName: string;
   userCount: number;
+  activeUserCount: number;
   appAdminCount: number;
   adviserCount: number;
   record: PracticeDto;
@@ -31,7 +32,9 @@ export type LicenseeSummary = {
   id: string;
   name: string;
   practiceCount: number;
+  practices: { id: string; name: string; activeUserCount: number; userCount: number }[];
   userCount: number;
+  activeUserCount: number;
   appAdminCount: number;
   record: LicenseeDto;
 };
@@ -152,6 +155,7 @@ export function summarizePractices(practices: PracticeDto[], users: AdminUserRec
       licenseeId: user.licensee?.id?.trim() || null,
       statusName: "Unknown",
       userCount: 0,
+      activeUserCount: 0,
       appAdminCount: 0,
       adviserCount: 0,
       record: {
@@ -168,6 +172,9 @@ export function summarizePractices(practices: PracticeDto[], users: AdminUserRec
     };
 
     next.userCount += 1;
+    if (user.statusName.trim().toLowerCase() === "active") {
+      next.activeUserCount += 1;
+    }
     next.licenseeName = next.licenseeName || user.licenseeName;
     next.licenseeId = next.licenseeId || user.licensee?.id?.trim() || null;
 
@@ -186,6 +193,7 @@ export function summarizePractices(practices: PracticeDto[], users: AdminUserRec
     const key = practice.id?.trim() || practice.name?.trim()?.toLowerCase() || `practice-${practiceMap.size + 1}`;
     const existing = practiceMap.get(key);
     const userCount = existing?.userCount ?? 0;
+    const activeUserCount = existing?.activeUserCount ?? 0;
     const appAdminCount = existing?.appAdminCount ?? 0;
     const adviserCount = existing?.adviserCount ?? 0;
 
@@ -196,6 +204,7 @@ export function summarizePractices(practices: PracticeDto[], users: AdminUserRec
       licenseeId: practice.licensee?.id?.trim() || existing?.licenseeId || null,
       statusName: practice.status?.trim() || existing?.statusName || "Unknown",
       userCount,
+      activeUserCount,
       appAdminCount,
       adviserCount,
       record: practice,
@@ -208,15 +217,25 @@ export function summarizePractices(practices: PracticeDto[], users: AdminUserRec
 export function summarizeLicensees(licensees: LicenseeDto[], practices: PracticeSummary[], users: AdminUserRecord[]) {
   const licenseeMap = new Map<string, LicenseeSummary>();
   const practiceKeysByLicensee = new Map<string, Set<string>>();
+  const practiceSummariesByLicensee = new Map<string, Map<string, LicenseeSummary["practices"][number]>>();
+
+  function addPracticeSummary(licenseeKey: string, practice: LicenseeSummary["practices"][number]) {
+    const next = practiceSummariesByLicensee.get(licenseeKey) ?? new Map<string, LicenseeSummary["practices"][number]>();
+    next.set(practice.id, practice);
+    practiceSummariesByLicensee.set(licenseeKey, next);
+  }
 
   for (const user of users) {
     const licenseeName = user.licenseeName;
+    const practiceId = user.practice?.id?.trim() || user.practiceName.toLowerCase();
     const key = user.licensee?.id?.trim() || licenseeName.toLowerCase();
     const next = licenseeMap.get(key) ?? {
       id: key,
       name: licenseeName,
       practiceCount: 0,
+      practices: [],
       userCount: 0,
+      activeUserCount: 0,
       appAdminCount: 0,
       record: {
         id: user.licensee?.id?.trim() || key,
@@ -226,13 +245,16 @@ export function summarizeLicensees(licensees: LicenseeDto[], practices: Practice
     };
 
     next.userCount += 1;
+    if (user.statusName.trim().toLowerCase() === "active") {
+      next.activeUserCount += 1;
+    }
 
     if (user.adminEnabled) {
       next.appAdminCount += 1;
     }
 
     const practiceSet = practiceKeysByLicensee.get(key) ?? new Set<string>();
-    practiceSet.add(user.practice?.id?.trim() || user.practiceName.toLowerCase());
+    practiceSet.add(practiceId);
     practiceKeysByLicensee.set(key, practiceSet);
     next.practiceCount = practiceSet.size;
 
@@ -249,7 +271,9 @@ export function summarizeLicensees(licensees: LicenseeDto[], practices: Practice
       id: practice.licenseeId?.trim() || licenseeKey,
       name: practice.licenseeName,
       practiceCount: 0,
+      practices: [],
       userCount: 0,
+      activeUserCount: 0,
       appAdminCount: 0,
       record: {
         id: practice.licenseeId?.trim() || licenseeKey,
@@ -259,6 +283,12 @@ export function summarizeLicensees(licensees: LicenseeDto[], practices: Practice
     };
 
     next.practiceCount = practiceSet.size;
+    addPracticeSummary(licenseeKey, {
+      id: practice.id,
+      name: practice.name,
+      activeUserCount: practice.activeUserCount,
+      userCount: practice.userCount,
+    });
     licenseeMap.set(licenseeKey, next);
   }
 
@@ -270,10 +300,20 @@ export function summarizeLicensees(licensees: LicenseeDto[], practices: Practice
       id: licensee.id?.trim() || key,
       name: licensee.name?.trim() || existing?.name || "Untitled licensee",
       practiceCount: practiceKeysByLicensee.get(key)?.size ?? existing?.practiceCount ?? 0,
+      practices: Array.from(practiceSummariesByLicensee.get(key)?.values() ?? []).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
       userCount: existing?.userCount ?? 0,
+      activeUserCount: existing?.activeUserCount ?? 0,
       appAdminCount: existing?.appAdminCount ?? 0,
       record: licensee,
     });
+  }
+
+  for (const [key, licensee] of licenseeMap) {
+    licensee.practices = Array.from(practiceSummariesByLicensee.get(key)?.values() ?? []).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
   }
 
   return Array.from(licenseeMap.values()).sort((left, right) => left.name.localeCompare(right.name));

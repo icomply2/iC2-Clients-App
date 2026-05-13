@@ -124,6 +124,8 @@ export async function GET(request: NextRequest) {
             practice: client.clientAdviserPracticeName,
             clientAdviserName: client.clientAdviserName,
             clientAdviserPracticeName: client.clientAdviserPracticeName,
+            status: client.status,
+            clientStatus: client.clientStatus,
             category: client.category,
             clientCategory: client.clientCategory,
           })),

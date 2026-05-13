@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { updateAdminUser } from "@/lib/api/admin";
 import type { AdminUserRecord, LicenseeSummary, PracticeSummary } from "@/lib/admin-data";
 import styles from "@/app/admin/admin.module.css";
@@ -11,6 +11,7 @@ type UserDraft = {
   statusName: string;
   practiceId: string;
   licenseeId: string;
+  appAdmin: boolean;
 };
 
 type AdminUsersManagerProps = {
@@ -19,9 +20,12 @@ type AdminUsersManagerProps = {
   licensees: LicenseeSummary[];
 };
 
+type UserAccessUpdate = Partial<UserDraft>;
+
 const DEFAULT_ROLE_OPTIONS = ["Adviser", "Compliance Manager", "Paraplanner", "Support Staff"];
-const DEFAULT_ACCESS_OPTIONS = ["Full Access", "Standard Access", "Read Only", "No Access"];
-const DEFAULT_STATUS_OPTIONS = ["Active", "Invited", "Suspended", "Inactive"];
+const DEFAULT_ACCESS_OPTIONS = ["Full Access"];
+const DEFAULT_STATUS_OPTIONS = ["Active", "Archived"];
+const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 export function AdminUsersManager({ initialUsers, practices, licensees }: AdminUsersManagerProps) {
   const [users, setUsers] = useState(initialUsers);
@@ -34,6 +38,9 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const licenseeOptions = useMemo(() => {
     const values = Array.from(
@@ -99,7 +106,30 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
     [nameQuery, selectedLicensee, selectedPractice, selectedStatus, users],
   );
 
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
+  const visiblePage = Math.min(currentPage, totalPages);
+  const pageStartIndex = filteredUsers.length ? (visiblePage - 1) * pageSize : 0;
+  const pageEndIndex = Math.min(pageStartIndex + pageSize, filteredUsers.length);
+  const paginatedUsers = filteredUsers.slice(pageStartIndex, pageEndIndex);
+  const filteredPracticeCount = new Set(
+    filteredUsers.map((user) => user.practice?.id?.trim() || user.practiceName?.trim()).filter(Boolean),
+  ).size;
+  const filteredLicenseeCount = new Set(
+    filteredUsers.map((user) => user.licensee?.id?.trim() || user.licenseeName?.trim()).filter(Boolean),
+  ).size;
+  const filteredAppAdminCount = filteredUsers.filter((user) => user.adminEnabled).length;
+
   const editingUser = users.find((user) => user.id && user.id === editingUserId) ?? null;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [nameQuery, selectedLicensee, selectedPractice, selectedStatus, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   function openEditor(user: AdminUserRecord) {
     if (!user.id) {
@@ -115,6 +145,7 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
       statusName: user.statusName,
       practiceId: user.practice?.id?.trim() || "",
       licenseeId: user.licensee?.id?.trim() || "",
+      appAdmin: user.adminEnabled,
     });
   }
 
@@ -123,6 +154,85 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
     setDraft(null);
     setIsSaving(false);
     setSaveError(null);
+  }
+
+  async function saveUserAccess(user: AdminUserRecord, update: UserAccessUpdate) {
+    if (!user.id) {
+      return;
+    }
+
+    const nextPracticeId = update.practiceId ?? user.practice?.id?.trim() ?? "";
+    const nextLicenseeId = update.licenseeId ?? user.licensee?.id?.trim() ?? "";
+    const nextPracticeRecord = practices.find((item) => item.id === nextPracticeId) ?? null;
+    const nextLicenseeRecord = licensees.find((item) => item.id === nextLicenseeId) ?? null;
+    const nextRoleName = update.roleName ?? user.roleName;
+    const nextAccessName = update.accessName ?? user.accessName;
+    const nextStatusName = update.statusName ?? user.statusName;
+    const nextAppAdmin = update.appAdmin ?? user.adminEnabled;
+
+    await updateAdminUser(user.id, {
+      subscriptionId: user.subscriptionId ?? user.subscriptionTier?.id ?? null,
+      subscriptionTier: user.subscriptionTier ?? null,
+      practice: nextPracticeRecord ? { id: nextPracticeRecord.id, name: nextPracticeRecord.name } : null,
+      licensee: nextLicenseeRecord ? { id: nextLicenseeRecord.id, name: nextLicenseeRecord.name } : null,
+      complianceManager: user.complianceManager ?? null,
+      appAccess: nextAccessName || null,
+      userRole: nextRoleName || null,
+      userStatus: nextStatusName || null,
+      appAdmin: nextAppAdmin,
+    });
+
+    setUsers((current) =>
+      current.map((item) =>
+        item.id === user.id
+          ? {
+              ...item,
+              roleName: nextRoleName,
+              accessName: nextAccessName,
+              statusName: nextStatusName,
+              practiceName: nextPracticeRecord?.name || "Unassigned practice",
+              licenseeName: nextLicenseeRecord?.name || "Unassigned licensee",
+              practice: nextPracticeRecord ? { id: nextPracticeRecord.id, name: nextPracticeRecord.name } : null,
+              licensee: nextLicenseeRecord ? { id: nextLicenseeRecord.id, name: nextLicenseeRecord.name } : null,
+              userRole: nextRoleName,
+              appAccess: nextAccessName,
+              userStatus: nextStatusName,
+              appAdmin: nextAppAdmin,
+              adminEnabled: nextAppAdmin,
+            }
+          : item,
+      ),
+    );
+
+    if (editingUserId === user.id && draft) {
+      setDraft({
+        roleName: nextRoleName,
+        accessName: nextAccessName,
+        statusName: nextStatusName,
+        practiceId: nextPracticeId,
+        licenseeId: nextLicenseeId,
+        appAdmin: nextAppAdmin,
+      });
+    }
+  }
+
+  async function saveInlineUserAccess(user: AdminUserRecord, update: UserAccessUpdate) {
+    if (!user.id) {
+      return;
+    }
+
+    setSavingUserId(user.id);
+    setSaveError(null);
+    setSaveSuccess(null);
+
+    try {
+      await saveUserAccess(user, update);
+      setSaveSuccess("User saved.");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save user changes.");
+    } finally {
+      setSavingUserId(null);
+    }
   }
 
   async function saveEditor() {
@@ -135,43 +245,7 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
     setSaveSuccess(null);
 
     try {
-      await updateAdminUser(editingUserId, {
-        subscriptionId: editingUser.subscriptionTier?.id ?? null,
-        practiceId: draft.practiceId || null,
-        licenseeId: draft.licenseeId || null,
-        complianceManagerId: editingUser.complianceManager?.id ?? null,
-        appAccess: draft.accessName || null,
-        userRole: draft.roleName || null,
-        userStatus: draft.statusName || null,
-      });
-
-      const selectedPracticeRecord = practices.find((item) => item.id === draft.practiceId) ?? null;
-      const selectedLicenseeRecord = licensees.find((item) => item.id === draft.licenseeId) ?? null;
-
-      setUsers((current) =>
-        current.map((user) =>
-          user.id === editingUserId
-            ? {
-                ...user,
-                roleName: draft.roleName,
-                accessName: draft.accessName,
-                statusName: draft.statusName,
-                practiceName: selectedPracticeRecord?.name || "Unassigned practice",
-                licenseeName: selectedLicenseeRecord?.name || "Unassigned licensee",
-                practice: selectedPracticeRecord
-                  ? { id: selectedPracticeRecord.id, name: selectedPracticeRecord.name }
-                  : null,
-                licensee: selectedLicenseeRecord
-                  ? { id: selectedLicenseeRecord.id, name: selectedLicenseeRecord.name }
-                  : null,
-                userRole: draft.roleName,
-                appAccess: draft.accessName,
-                userStatus: draft.statusName,
-              }
-            : user,
-        ),
-      );
-
+      await saveUserAccess(editingUser, draft);
       setSaveSuccess("User saved.");
       closeEditor();
     } catch (error) {
@@ -182,14 +256,29 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
 
   return (
     <>
+      <section className={styles.overviewGrid}>
+        <article className={styles.metricCard}>
+          <span className={styles.metricLabel}>Users</span>
+          <strong className={styles.metricValue}>{filteredUsers.length}</strong>
+        </article>
+        <article className={styles.metricCard}>
+          <span className={styles.metricLabel}>Practices</span>
+          <strong className={styles.metricValue}>{filteredPracticeCount}</strong>
+        </article>
+        <article className={styles.metricCard}>
+          <span className={styles.metricLabel}>Licensees</span>
+          <strong className={styles.metricValue}>{filteredLicenseeCount}</strong>
+        </article>
+        <article className={styles.metricCard}>
+          <span className={styles.metricLabel}>App Admins</span>
+          <strong className={styles.metricValue}>{filteredAppAdminCount}</strong>
+        </article>
+      </section>
+
       <section className={styles.contentCard}>
         <div className={styles.contentCardHeader}>
           <div>
             <h2 className={styles.cardTitle}>Users</h2>
-            <p className={styles.cardText}>
-              Live user records are shown below, and supported role, access, status, practice, and licensee changes
-              now save back to the live API.
-            </p>
           </div>
 
           <span className={styles.badge}>
@@ -242,6 +331,7 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
         </div>
 
         {saveSuccess ? <p className={styles.successText}>{saveSuccess}</p> : null}
+        {saveError ? <p className={styles.errorText}>{saveError}</p> : null}
 
         <div className={styles.tableWrap}>
           <table className={styles.table}>
@@ -259,20 +349,102 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((user) => (
+              {paginatedUsers.map((user) => (
                 <tr key={user.id ?? `${user.email ?? "user"}-${user.name ?? "unknown"}`}>
                   <td>{user.name ?? "Unknown user"}</td>
                   <td>{user.email ?? "No email"}</td>
-                  <td>{user.roleName}</td>
-                  <td>{user.practiceName}</td>
-                  <td>{user.licenseeName}</td>
-                  <td>{user.accessName}</td>
+                  <td>
+                    <select
+                      className={styles.tableSelect}
+                      value={user.roleName}
+                      onChange={(event) => void saveInlineUserAccess(user, { roleName: event.target.value })}
+                      disabled={savingUserId === user.id}
+                    >
+                      {!roleOptions.includes(user.roleName) && user.roleName ? (
+                        <option value={user.roleName}>{user.roleName}</option>
+                      ) : null}
+                      {roleOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      className={styles.tableSelect}
+                      value={user.practice?.id?.trim() || ""}
+                      onChange={(event) => void saveInlineUserAccess(user, { practiceId: event.target.value })}
+                      disabled={savingUserId === user.id}
+                    >
+                      <option value="">Unassigned practice</option>
+                      {user.practice?.id && !practices.some((option) => option.id === user.practice?.id) ? (
+                        <option value={user.practice.id}>{user.practiceName}</option>
+                      ) : null}
+                      {practices.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      className={styles.tableSelect}
+                      value={user.licensee?.id?.trim() || ""}
+                      onChange={(event) => void saveInlineUserAccess(user, { licenseeId: event.target.value })}
+                      disabled={savingUserId === user.id}
+                    >
+                      <option value="">Unassigned licensee</option>
+                      {user.licensee?.id && !licensees.some((option) => option.id === user.licensee?.id) ? (
+                        <option value={user.licensee.id}>{user.licenseeName}</option>
+                      ) : null}
+                      {licensees.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      className={styles.tableSelect}
+                      value={user.accessName}
+                      onChange={(event) => void saveInlineUserAccess(user, { accessName: event.target.value })}
+                      disabled={savingUserId === user.id}
+                    >
+                      {!accessOptions.includes(user.accessName) && user.accessName ? (
+                        <option value={user.accessName}>{user.accessName}</option>
+                      ) : null}
+                      {accessOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td>
                     <span className={`${styles.statusPill} ${user.adminEnabled ? styles.statusPillAdmin : ""}`.trim()}>
                       {user.adminEnabled ? "Enabled" : "No"}
                     </span>
                   </td>
-                  <td>{user.statusName}</td>
+                  <td>
+                    <select
+                      className={styles.tableSelect}
+                      value={user.statusName}
+                      onChange={(event) => void saveInlineUserAccess(user, { statusName: event.target.value })}
+                      disabled={savingUserId === user.id}
+                    >
+                      {!userStatusOptions.includes(user.statusName) && user.statusName ? (
+                        <option value={user.statusName}>{user.statusName}</option>
+                      ) : null}
+                      {userStatusOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td>
                     <button type="button" className={styles.secondaryButton} onClick={() => openEditor(user)}>
                       Edit
@@ -287,6 +459,47 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
               ) : null}
             </tbody>
           </table>
+        </div>
+
+        <div className={styles.paginationBar}>
+          <span className={styles.paginationSummary}>
+            {filteredUsers.length
+              ? `Showing ${pageStartIndex + 1}-${pageEndIndex} of ${filteredUsers.length} users`
+              : "Showing 0 users"}
+          </span>
+
+          <label className={styles.paginationSize}>
+            <span>Rows</span>
+            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
+              {PAGE_SIZE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className={styles.paginationActions}>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+              disabled={visiblePage <= 1}
+            >
+              Previous
+            </button>
+            <span className={styles.paginationPage}>
+              Page {visiblePage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+              disabled={visiblePage >= totalPages}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </section>
 
@@ -360,12 +573,16 @@ export function AdminUsersManager({ initialUsers, practices, licensees }: AdminU
 
               <label className={styles.field}>
                 <span>App admin</span>
-                <input value={editingUser.appAdmin == null ? "Not configured" : String(editingUser.appAdmin)} readOnly />
+                <input
+                  type="checkbox"
+                  checked={draft.appAdmin}
+                  onChange={(event) => setDraft({ ...draft, appAdmin: event.target.checked })}
+                />
               </label>
             </div>
 
             <p className={styles.helperText}>
-              App admin stays read-only here until the backend exposes an admin-specific update field for it.
+              App admin, role, access, status, practice, and licensee changes save to the live user endpoint.
             </p>
             {saveError ? <p className={styles.errorText}>{saveError}</p> : null}
 

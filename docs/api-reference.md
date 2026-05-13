@@ -289,7 +289,7 @@ API version: **v1**
 | --- | --- | --- | --- | --- | --- |
 | `GET` | `/api/Users` | This endpoint will return the lists of Users | - | - | `200` `UserDtoIEnumerableApiResult`<br>`400` `UserDtoIEnumerableApiResult` |
 | `GET` | `/api/Users/{userId}` | This endpoint will return the user details for the provided userId | `path:userId` required `string` | - | `200` `UserDtoApiResult`<br>`400` `UserDtoApiResult` |
-| `PATCH` | `/api/Users/{userId}` | This endpoint is used to update user details | `path:userId` required `string` | application/json: `UpdateUserRequest`<br>text/json: `UpdateUserRequest`<br>application/*+json: `UpdateUserRequest` | `200` `BooleanApiResult`<br>`400` `BooleanApiResult` |
+| `PATCH` | `/api/Users/{userId}` | This endpoint is used to update user details | `path:userId` required `string` | application/json: `UserDto`<br>text/json: `UserDto`<br>application/*+json: `UserDto` | `200` `BooleanApiResult`<br>`400` `BooleanApiResult` |
 | `DELETE` | `/api/Users/{userId}` | This endpoint is used to delete user | `path:userId` required `string` | - | `200` `BooleanApiResult`<br>`400` `BooleanApiResult` |
 | `GET` | `/api/Users/AppAccess` | This endpoint will return the lists of User App Access | - | - | `200` `StringIEnumerableApiResult`<br>`400` `StringIEnumerableApiResult` |
 | `GET` | `/api/Users/ComplianceManagers` | This endpoint will return the lists of Compliance Managers | - | - | `200` `ComplianceManagerIEnumerableApiResult`<br>`400` `ComplianceManagerIEnumerableApiResult` |
@@ -552,9 +552,9 @@ Schemas are listed by name for quick lookup. See the Swagger source file for ful
 - `UpdateSaraReviewConversationRequest` (object): practiceName, passFail, content, status
 - `UpdateSaraReviewRequest` (object): reviewStatus, practiceName*, adviserName, clientName
 - `UpdateSaraReviewStatusRequest` (object): reviewStatus, practiceName*
-- `UpdateUserRequest` (object): subscriptionId, practiceId, licenseeId, complianceManagerId, appAccess, userRole, userStatus, appAdmin
+- `UserDto` request body is used for `PATCH /api/Users/{userId}` in the 13 May 2026 OpenAPI update.
 - `UploadRctiTransactionRequest` (object): id, bankTransactionDate, transactionAmount, transactionType, providerName, uploadedBy, practiceName, adviserName, feeType
-- `UserDto` (object): id, passwordHash, emailConfirmed, emailVerificationToken, emailVerificationTokenExpires, totpSecret, twoFactorAuthenticationEnabled, twoFactorAuthenticationExpires, twoFactorAuthenticationCode, passwordResetCode, passwordResetExpires, complianceManager, ... +12
+- `UserDto` (object): id, email, name, dateOfBirth, address, acn, abn, asicNumber, occupation, adviserExperience, businessName, dateJoined, ... +28
 - `UserDtoIEnumerableApiResult` (object): statusCode, status, data, message, modelErrors
 - `XeroAccount` (object): accountID, code, name, status, type, taxType, class, enablePaymentsToAccount, showInExpenseClaims, bankAccountNumber, bankAccountType, currencyCode, ... +5
 - `XeroAccountIEnumerableApiResult` (object): statusCode, status, data, message, modelErrors

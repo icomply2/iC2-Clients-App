@@ -9,6 +9,7 @@ export type UserProfileOverride = {
   acn?: string | null;
   abn?: string | null;
   asicNumber?: string | null;
+  authorizedRepNumber?: string | null;
   occupation?: string | null;
   adviserExperience?: string | null;
   businessName?: string | null;
@@ -47,6 +48,7 @@ export function mergeUserSummaryOverride(user: UserSummary, override?: UserProfi
     acn: preferOverride(override.acn, user.acn),
     abn: preferOverride(override.abn, user.abn),
     asicNumber: preferOverride(override.asicNumber, user.asicNumber),
+    authorizedRepNumber: preferOverride(override.authorizedRepNumber, user.authorizedRepNumber),
     occupation: preferOverride(override.occupation, user.occupation),
     adviserExperience: preferOverride(override.adviserExperience, user.adviserExperience),
     businessName: preferOverride(override.businessName, user.businessName),
