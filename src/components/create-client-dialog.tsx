@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { v4 as uuidv4 } from "uuid";
 import type { AdviserSummary } from "@/lib/api/types";
 import styles from "./create-client-dialog.module.css";
 
@@ -16,6 +17,8 @@ export type CreateClientAdviserOption = {
   entityId: string;
   name: string;
   email: string;
+  practiceName: string;
+  licenseeName: string;
 };
 
 export type CreatedClientResponse = {
@@ -77,6 +80,7 @@ export function CreateClientDialog({
   const [practiceName, setPracticeName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const isComplianceManager = normalizeText(currentUserScope?.userRole) === "compliance manager";
 
   useEffect(() => {
     if (!isOpen) {
@@ -101,8 +105,9 @@ export function CreateClientDialog({
       const scopedPracticeName = currentUserScope?.practice?.name?.trim() || defaultPracticeName?.trim();
       const normalizedPracticeName = scopedPracticeName?.toLowerCase();
       const licenseeName = currentUserScope?.licensee?.name?.trim() || defaultLicenseeName?.trim();
+      const normalizedLicenseeName = licenseeName?.toLowerCase();
 
-      if (!normalizedPracticeName) {
+      if (isComplianceManager ? !normalizedLicenseeName : !normalizedPracticeName) {
         if (isMounted) {
           setAdviserOptions([]);
         }
@@ -125,6 +130,7 @@ export function CreateClientDialog({
                     email?: string | null;
                     userRole?: string | null;
                     practice?: { name?: string | null } | null;
+                    licensee?: { name?: string | null } | null;
                   }>
                 | null;
               message?: string;
@@ -138,20 +144,26 @@ export function CreateClientDialog({
         const scopedUserAdvisers = (usersBody?.data ?? [])
           .filter((user) => user.name)
           .filter((user) => normalizeText(user.userRole) === "adviser")
-          .filter((user) => normalizeText(user.practice?.name) === normalizedPracticeName)
+          .filter((user) =>
+            isComplianceManager
+              ? normalizeText(user.licensee?.name) === normalizedLicenseeName
+              : normalizeText(user.practice?.name) === normalizedPracticeName,
+          )
           .map((user) => ({
             id: "",
             entityId: user.entityId?.trim() ?? "",
             name: user.name?.trim() ?? "",
             email: user.email?.trim() ?? "",
+            practiceName: user.practice?.name?.trim() ?? "",
+            licenseeName: user.licensee?.name?.trim() ?? "",
           }))
           .filter((user) => user.name);
 
         const adviserParams = new URLSearchParams();
 
-        if (licenseeName) {
+        if (isComplianceManager && licenseeName) {
           adviserParams.set("licenseeName", licenseeName);
-        } else {
+        } else if (scopedPracticeName) {
           adviserParams.set("practiceName", scopedPracticeName ?? "");
         }
 
@@ -182,6 +194,7 @@ export function CreateClientDialog({
             name: user.name?.trim() ?? "",
             email: user.email?.trim() ?? "",
             practiceName: user.practiceName?.trim() ?? "",
+            licenseeName: user.licenseeName?.trim() ?? "",
           }))
           .filter((user) => user.id && user.name);
 
@@ -203,25 +216,33 @@ export function CreateClientDialog({
                     entityId: userAdviser.entityId,
                     name: matchedRecord.name,
                     email: matchedRecord.email,
+                    practiceName: matchedRecord.practiceName || userAdviser.practiceName,
+                    licenseeName: matchedRecord.licenseeName || userAdviser.licenseeName,
                   }
                 : userAdviser;
             })
             .filter((user) => user.name) ?? [];
 
-        const practiceScopedAdvisers = adviserRecords
-          .filter((user) => !user.practiceName || normalizeText(user.practiceName) === normalizedPracticeName)
+        const scopedAdviserRecords = adviserRecords
+          .filter((user) =>
+            isComplianceManager
+              ? !user.licenseeName || normalizeText(user.licenseeName) === normalizedLicenseeName
+              : !user.practiceName || normalizeText(user.practiceName) === normalizedPracticeName,
+          )
           .map((user) => ({
             id: user.id,
             entityId: "",
             name: user.name,
             email: user.email,
+            practiceName: user.practiceName,
+            licenseeName: user.licenseeName,
           }));
 
         const sourceOptions =
           matchedAdvisers.length > 0
             ? matchedAdvisers
-            : practiceScopedAdvisers.length > 0
-              ? practiceScopedAdvisers
+            : scopedAdviserRecords.length > 0
+              ? scopedAdviserRecords
               : scopedUserAdvisers;
 
         const nextOptions = Array.from(
@@ -240,6 +261,9 @@ export function CreateClientDialog({
           null;
 
         setAdviserValue(preferredOption ? getCreateClientAdviserOptionValue(preferredOption) : "");
+        if (isComplianceManager && preferredOption?.practiceName) {
+          setPracticeName(preferredOption.practiceName);
+        }
       } catch {
         if (isMounted) {
           setAdviserOptions([]);
@@ -256,11 +280,27 @@ export function CreateClientDialog({
     currentUserScope?.licensee?.name,
     currentUserScope?.name,
     currentUserScope?.practice?.name,
+    currentUserScope?.userRole,
     defaultAdviserName,
     defaultLicenseeName,
     defaultPracticeName,
+    isComplianceManager,
     isOpen,
   ]);
+
+  function handleAdviserChange(nextValue: string) {
+    setAdviserValue(nextValue);
+
+    if (!isComplianceManager) {
+      return;
+    }
+
+    const selectedAdviser = adviserOptions.find((option) => getCreateClientAdviserOptionValue(option) === nextValue);
+
+    if (selectedAdviser?.practiceName) {
+      setPracticeName(selectedAdviser.practiceName);
+    }
+  }
 
   async function handleCreate() {
     const primaryName = clientName.trim();
@@ -278,6 +318,13 @@ export function CreateClientDialog({
         adviserOptions.find((option) => getCreateClientAdviserOptionValue(option) === adviserValue) ??
         adviserOptions[0] ??
         null;
+      const selectedAdviserPracticeName = selectedAdviser?.practiceName?.trim();
+      const resolvedPracticeName =
+        (isComplianceManager ? selectedAdviserPracticeName : "") ||
+        practiceName.trim() ||
+        currentUserScope?.practice?.name ||
+        defaultPracticeName ||
+        "";
 
       const response = await fetch("/api/client-profiles", {
         method: "POST",
@@ -285,7 +332,10 @@ export function CreateClientDialog({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          practice: practiceName.trim() || currentUserScope?.practice?.name || defaultPracticeName || "",
+          modifiedDate: new Date().toISOString(),
+          xplanUrl: "",
+          ivanaHelp: false,
+          practice: resolvedPracticeName,
           licensee: currentUserScope?.licensee?.name || defaultLicenseeName || "",
           adviser: selectedAdviser
             ? {
@@ -296,6 +346,7 @@ export function CreateClientDialog({
               }
             : {},
           client: {
+            id : uuidv4(),
             name: primaryName,
             status: "Client",
             accountStatus: "Active",
@@ -303,6 +354,7 @@ export function CreateClientDialog({
           },
           partner: partnerName.trim()
             ? {
+                id : uuidv4(),
                 name: partnerName.trim(),
                 status: "Client",
                 accountStatus: "Active",
@@ -375,7 +427,7 @@ export function CreateClientDialog({
           <select
             className={styles.input}
             value={adviserValue}
-            onChange={(event) => setAdviserValue(event.target.value)}
+            onChange={(event) => handleAdviserChange(event.target.value)}
           >
             {adviserOptions.length ? (
               adviserOptions.map((adviserOption) => (
@@ -388,9 +440,13 @@ export function CreateClientDialog({
               ))
             ) : (
               <option value="">
-                {currentUserScope?.practice?.name || defaultPracticeName
-                  ? "No advisers available in this practice"
-                  : "No practice selected"}
+                {isComplianceManager
+                  ? currentUserScope?.licensee?.name || defaultLicenseeName
+                    ? "No advisers available in this licensee"
+                    : "No licensee selected"
+                  : currentUserScope?.practice?.name || defaultPracticeName
+                    ? "No advisers available in this practice"
+                    : "No practice selected"}
               </option>
             )}
           </select>

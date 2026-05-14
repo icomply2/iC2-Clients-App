@@ -665,6 +665,16 @@ function normalizeStringArray(value: unknown) {
     .filter(Boolean);
 }
 
+function looksLikeProductAdvice(text: string) {
+  const normalized = text.toLowerCase();
+  const productActionPattern =
+    /\b(retain|replace|roll(?:\s|-)?over|consolidat(?:e|ion)|establish|commence|switch|dispose|transfer|platform|wrap|managed account|model portfolio|asset allocation|portfolio|investment approach|risk profile implementation|product fee|fee comparison)\b/;
+  const productNounPattern =
+    /\b(superannuation|super\b|pension|account[-\s]?based pension|investment product|managed fund|investment portfolio|platform|wrap|hub24|north|mynorth|aware|amp|colonial|netwealth|macquarie|australian retirement trust|art\b|insignia|mlc|ioof|bt panorama)\b/;
+
+  return productActionPattern.test(normalized) && productNounPattern.test(normalized);
+}
+
 function normalizeNullableNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -1054,6 +1064,14 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
     return null;
   }
 
+  const rawCandidateStrategyRecommendations = normalizeStringArray(record.candidateStrategyRecommendations).map((item) =>
+    normalizeRecommendationLanguage(item, clientName),
+  );
+  const productAdviceFromStrategyCandidates = rawCandidateStrategyRecommendations.filter(looksLikeProductAdvice);
+  const rawCandidateProductReviewNotes = normalizeStringArray(record.candidateProductReviewNotes).map((item) =>
+    normalizeRecommendationLanguage(item, clientName),
+  );
+
   return {
     matterSummary,
     documentInsights,
@@ -1064,12 +1082,8 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
     candidateStrategies,
     candidateScopeInclusions: normalizeStringArray(record.candidateScopeInclusions),
     candidateScopeExclusions: normalizeStringArray(record.candidateScopeExclusions),
-    candidateStrategyRecommendations: normalizeStringArray(record.candidateStrategyRecommendations).map((item) =>
-      normalizeRecommendationLanguage(item, clientName),
-    ),
-    candidateProductReviewNotes: normalizeStringArray(record.candidateProductReviewNotes).map((item) =>
-      normalizeRecommendationLanguage(item, clientName),
-    ),
+    candidateStrategyRecommendations: rawCandidateStrategyRecommendations.filter((item) => !looksLikeProductAdvice(item)),
+    candidateProductReviewNotes: [...rawCandidateProductReviewNotes, ...productAdviceFromStrategyCandidates],
     candidateInsuranceReviewNotes: normalizeStringArray(record.candidateInsuranceReviewNotes),
     candidateInsuranceNeedsAnalyses,
     candidateInsurancePolicyRecommendations,
@@ -1102,7 +1116,6 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
     },
     body: JSON.stringify({
       model: OPENAI_SOA_INTAKE_MODEL,
-      temperature: 0.2,
       messages: [
         {
           role: "system",
@@ -1124,6 +1137,10 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
               "Do not produce generic objective wording that could apply to any client.",
               "When drafting candidateStrategyRecommendations, candidateProductReviewNotes, candidateInsuranceReviewNotes, or candidateProjectionNotes, use second-person client-facing wording with 'you' and 'your' wherever the text may flow into the SOA workflow.",
               "For candidateStrategyRecommendations and candidateProductReviewNotes, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'. Do not use 'you should', 'you need to', or 'you must'.",
+              "Keep candidateStrategyRecommendations strictly non-product. Strategy recommendations are for strategy-level advice such as contribution strategy, retirement income strategy at a high level, Centrelink strategy, cashflow/reserve strategy, tax strategy, debt repayment strategy, estate planning referral, or projection/scenario analysis.",
+              "Do not place product advice in candidateStrategyRecommendations. Product advice includes retaining, replacing, rolling over, consolidating, establishing, commencing, switching, disposing of, or altering superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial products.",
+              "Any recommendation involving a named product, provider, platform, account, portfolio, rollover, retention, establishment, consolidation, replacement, product fee comparison, asset allocation implementation, model portfolio, or investment approach must go into candidateProductReviewNotes, candidateInsurancePolicyRecommendations, candidateInsurancePolicyReplacements, candidateProjectionNotes, portfolio/replacement sections, or another product-specific section instead.",
+              "Do not turn product advice into a strategy recommendation by removing the product name if the substance remains product advice.",
               "Avoid third-person phrasing such as 'the client', 'Guy's', 'their objectives', 'he', 'she', or 'they' in candidate recommendation wording unless a name is strictly needed to identify account ownership or who takes a specific action.",
               "For insurance needs analysis documents, populate candidateInsuranceNeedsAnalyses with one entry per insured person and cover type. Extract calculated and agreed sums insured, existing cover, cover gaps, policy ownership, waiting and benefit periods, annual income, liabilities, super balances, education or dependant support costs, living expenses, and the rationale for the recommended cover level. Preserve adviser overrides where the agreed cover differs from the calculated amount.",
               "For insurance quote documents, populate candidateInsurancePolicyRecommendations with one recommendation per insured person and insurer/product package where the evidence supports it. Extract insurer name, product or policy name, ownership/funding structure, cover types, sum insured or monthly benefit, premium type, waiting period, benefit period, premium amount and frequency, annualised premiums, optional benefits, premium breakdown, underwriting notes, and replacement or retention notes.",

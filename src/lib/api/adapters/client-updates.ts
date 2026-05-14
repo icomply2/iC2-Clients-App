@@ -55,6 +55,8 @@ export async function updatePersonDetails(
         },
       );
 
+  console.log(response);
+
   const text = await response.text().catch(() => "");
   const body = (() => {
     if (!text) return null;

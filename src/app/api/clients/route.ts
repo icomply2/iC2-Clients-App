@@ -1,100 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import { mockClientSummaries } from "@/lib/client-mocks";
+import { resolveCurrentUserFromApi } from "@/lib/current-user";
 import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 
-function decodeJwtPayload(token: string) {
-  const parts = token.split(".");
-
-  if (parts.length < 2) {
-    return null;
-  }
-
-  try {
-    const normalized = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
-    const payload = Buffer.from(padded, "base64").toString("utf8");
-
-    return JSON.parse(payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+function normalizeText(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
 }
 
-function readStringClaim(payload: Record<string, unknown>, claimNames: string[]) {
-  for (const claimName of claimNames) {
-    const value = payload[claimName];
-
-    if (typeof value === "string" && value.trim()) {
-      return value;
-    }
-  }
-
-  return null;
+function getClientItemPracticeName(item: {
+  practice?: string | null;
+  practiceName?: string | null;
+  clientAdviserPracticeName?: string | null;
+}) {
+  return item.clientAdviserPracticeName?.trim() || item.practiceName?.trim() || item.practice?.trim() || "";
 }
 
-async function resolveCurrentUserPracticeName(token: string) {
-  const apiBaseUrl = getApiBaseUrl();
-
-  if (!apiBaseUrl) {
-    return null;
-  }
-
-  const payload = decodeJwtPayload(token);
-  const currentUserId = payload
-    ? readStringClaim(payload, [
-        "nameid",
-        "sub",
-        "uid",
-        "userId",
-        "id",
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
-      ])
-    : null;
-  const currentEmail = payload
-    ? readStringClaim(payload, [
-        "email",
-        "unique_name",
-        "upn",
-        "preferred_username",
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
-      ])
-    : null;
-
-  const response = await fetch(new URL("/api/Users", apiBaseUrl), {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    cache: "no-store",
-  });
-
-  const body = (await response.json().catch(() => null)) as
-    | {
-        data?: Array<{
-          id?: string | null;
-          email?: string | null;
-          practice?: { name?: string | null } | null;
-        }> | null;
-      }
-    | null;
-
-  if (!response.ok) {
-    throw new Error("Unable to resolve the current user scope.");
-  }
-
-  const matchedUser =
-    body?.data?.find((user) => currentUserId && user.id && user.id === currentUserId) ??
-    body?.data?.find(
-      (user) =>
-        currentEmail &&
-        user.email &&
-        currentEmail.trim().toLowerCase() === user.email.trim().toLowerCase(),
-    ) ??
-    null;
-
-  return matchedUser?.practice?.name?.trim() ?? null;
+function getClientItemLicenseeName(item: {
+  licensee?: string | null;
+  licenseeName?: string | null;
+  clientAdviserLicenseeName?: string | null;
+}) {
+  return item.clientAdviserLicenseeName?.trim() || item.licenseeName?.trim() || item.licensee?.trim() || "";
 }
 
 export async function GET(request: NextRequest) {
@@ -122,10 +49,12 @@ export async function GET(request: NextRequest) {
             partner: null,
             adviser: { name: client.clientAdviserName },
             practice: client.clientAdviserPracticeName,
+            licensee: client.clientAdviserLicenseeName,
             clientAdviserName: client.clientAdviserName,
             clientAdviserPracticeName: client.clientAdviserPracticeName,
             status: client.status,
             clientStatus: client.clientStatus,
+            clientAdviserLicenseeName: client.clientAdviserLicenseeName,
             category: client.category,
             clientCategory: client.clientCategory,
           })),
@@ -145,7 +74,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
-    const resolvedPracticeName = token ? await resolveCurrentUserPracticeName(token).catch(() => null) : null;
+    const currentUserScope = token ? await resolveCurrentUserFromApi(token).catch(() => null) : null;
+    const resolvedLicenseeName = currentUserScope?.licensee?.name?.trim() || "";
+    const resolvedPracticeName = currentUserScope?.practice?.name?.trim() || "";
+    const isComplianceManager = normalizeText(currentUserScope?.userRole) === "compliance manager";
 
     const response = await fetch(upstreamUrl, {
       method: "POST",
@@ -159,7 +91,8 @@ export async function GET(request: NextRequest) {
         continuationToken: continuationToken || undefined,
         clientName,
         adviserName: adviserName && adviserName !== "All advisers" ? adviserName : undefined,
-        practiceName: resolvedPracticeName || undefined,
+        licenseeName: resolvedLicenseeName || undefined,
+        practiceName: !isComplianceManager && resolvedPracticeName ? resolvedPracticeName : undefined,
       }),
       cache: "no-store",
     });
@@ -180,15 +113,27 @@ export async function GET(request: NextRequest) {
       data?: {
         items?: Array<{
           practice?: string | null;
+          practiceName?: string | null;
+          clientAdviserPracticeName?: string | null;
+          licensee?: string | null;
+          licenseeName?: string | null;
+          clientAdviserLicenseeName?: string | null;
         }>;
         totalPageCount?: number | null;
       } | null;
     };
 
-    if (resolvedPracticeName && Array.isArray(body.data?.items)) {
-      body.data.items = body.data.items.filter(
-        (item) => item.practice?.trim().toLowerCase() === resolvedPracticeName.trim().toLowerCase(),
-      );
+    if ((resolvedLicenseeName || resolvedPracticeName) && Array.isArray(body.data?.items)) {
+      body.data.items = body.data.items.filter((item) => {
+        const matchesLicensee =
+          !resolvedLicenseeName || normalizeText(getClientItemLicenseeName(item)) === normalizeText(resolvedLicenseeName);
+        const matchesPractice =
+          isComplianceManager ||
+          !resolvedPracticeName ||
+          normalizeText(getClientItemPracticeName(item)) === normalizeText(resolvedPracticeName);
+
+        return matchesLicensee && matchesPractice;
+      });
     }
 
     return new NextResponse(JSON.stringify(body), {

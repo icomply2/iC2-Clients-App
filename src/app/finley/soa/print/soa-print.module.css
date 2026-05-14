@@ -506,6 +506,15 @@
   font-weight: 800;
 }
 
+.projectionSectionRow td {
+  background: #f3f7fb;
+  color: #486581;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .platformSubtotalRow td {
   background: #faf7eb;
   color: #113864;

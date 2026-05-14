@@ -34,6 +34,14 @@ import type {
 } from "@/lib/soa-types";
 import { parseProductRexReport } from "@/lib/productrex-report-parser";
 import { getPortfolioAccountViews } from "@/lib/soa-portfolio-accounts";
+import {
+  SOA_PROJECTION_PACKAGE_EVENT,
+  SOA_PROJECTION_SCENARIO_OPTIONS_EVENT,
+  readSoaProjectionPackage,
+  readSoaProjectionScenarioOptions,
+  type SoaProjectionOutputPackage,
+  writeSoaProjectionPackage,
+} from "@/lib/projections/soa-projection-package";
 import type { IntakeAssessmentV1, ProductDraftResponseV1, StrategyDraftResponseV1 } from "@/lib/soa-output-contracts";
 import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
 import type { SoaIntakeResponse } from "@/lib/soa-intake-service";
@@ -278,17 +286,85 @@ function normalizeText(value: string) {
   return value.trim().toLowerCase();
 }
 
+function resolvePersonIdsFromNames(
+  names: string[] | null | undefined,
+  people: AdviceCaseV1["clientGroup"]["clients"],
+) {
+  if (!names?.length) {
+    return people.map((person) => person.personId);
+  }
+
+  const requestedNames = names.map(normalizeText).filter(Boolean);
+  const matchedIds = people
+    .filter((person) => {
+      const fullName = normalizeText(person.fullName);
+      const firstName = normalizeText(person.fullName.split(/\s+/)[0] ?? "");
+      const role = normalizeText(person.role);
+
+      return requestedNames.some(
+        (name) =>
+          name === "both" ||
+          name === "joint" ||
+          name === "jointly" ||
+          name === "client and partner" ||
+          name === "both clients" ||
+          fullName === name ||
+          fullName.includes(name) ||
+          name.includes(fullName) ||
+          (firstName && firstName === name) ||
+          role === name,
+      );
+    })
+    .map((person) => person.personId);
+
+  return matchedIds.length ? matchedIds : people.map((person) => person.personId);
+}
+
+function formatRecommendationAudience(ownerPersonIds: string[] | null | undefined, people: AdviceCaseV1["clientGroup"]["clients"]) {
+  const ids = ownerPersonIds?.length ? ownerPersonIds : people.map((person) => person.personId);
+  const names = people.filter((person) => ids.includes(person.personId)).map((person) => person.fullName).filter(Boolean);
+
+  return names.length ? names.join(" and ") : "Client and partner";
+}
+
+function getRecommendationAudienceSelectValue(
+  ownerPersonIds: string[] | null | undefined,
+  people: AdviceCaseV1["clientGroup"]["clients"],
+) {
+  const ids = ownerPersonIds?.length ? ownerPersonIds : people.map((person) => person.personId);
+
+  if (people.length > 1 && ids.length >= people.length) {
+    return "joint";
+  }
+
+  return ids[0] ?? people[0]?.personId ?? "joint";
+}
+
+function resolveRecommendationAudienceSelectValue(value: string, people: AdviceCaseV1["clientGroup"]["clients"]) {
+  if (value === "joint") {
+    return people.map((person) => person.personId);
+  }
+
+  return people.some((person) => person.personId === value)
+    ? [value]
+    : people.map((person) => person.personId);
+}
+
 function normalizeAdviceCaseRecommendationLanguage(caseValue: AdviceCaseV1, clientName?: string | null): AdviceCaseV1 {
+  const allPersonIds = caseValue.clientGroup.clients.map((client) => client.personId);
+
   return {
     ...caseValue,
     recommendations: {
       ...caseValue.recommendations,
       strategic: caseValue.recommendations.strategic.map((recommendation) => ({
         ...recommendation,
+        ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
         recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
       })),
       product: caseValue.recommendations.product.map((recommendation) => ({
         ...recommendation,
+        ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
         recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
       })),
     },
@@ -682,12 +758,20 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     replacementJustification: report.replacementReasons.join(" "),
   };
 
+  const ownerPeople = matchOwnerPeople(report, current.clientGroup.clients);
+  const ownerName =
+    report.ownerName?.trim() ||
+    ownerPeople.map((person) => person.fullName).filter(Boolean).join(" & ") ||
+    current.clientGroup.clients.map((person) => person.fullName).filter(Boolean).join(" & ") ||
+    null;
+
   const nextProductRecommendation = {
     recommendationId: makeId("product"),
     action: isProductRexConsolidation(report) ? ("consolidate" as const) : ("replace" as const),
     productType: "investment" as const,
     recommendedProductName: report.recommendedPlatform ?? null,
     recommendedProvider: report.recommendedPlatform ?? null,
+    ownerPersonIds: ownerPeople.map((person) => person.personId),
     linkedObjectiveIds: current.objectives.map((objective) => objective.objectiveId),
     recommendationText: report.replacementReasons[0] ?? `Replace ${report.currentPlatform ?? "the current platform"} with ${report.recommendedPlatform ?? "the recommended platform"}.`,
     targetAmount: null,
@@ -769,12 +853,6 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     ? current.recommendations.replacement
     : [...current.recommendations.replacement, nextReplacementRecommendation];
   const productRexPortfolioHoldings = buildProductRexPortfolioHoldings(report);
-  const ownerPeople = matchOwnerPeople(report, current.clientGroup.clients);
-  const ownerName =
-    report.ownerName?.trim() ||
-    ownerPeople.map((person) => person.fullName).filter(Boolean).join(" & ") ||
-    current.clientGroup.clients.map((person) => person.fullName).filter(Boolean).join(" & ") ||
-    null;
   const existingPortfolioAccounts = (current.recommendations.portfolio?.accounts ?? []).filter(
     (account) => account.sourceFileName !== report.sourceFileName && account.productRexReportId !== report.reportId,
   );
@@ -1056,8 +1134,16 @@ function getSectionStatusLabel(status: SectionStatus) {
 function splitNonEmptyLines(value: string) {
   return value
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line) => line.replace(/^[-*•\d.)\s]+/, "").trim())
     .filter(Boolean);
+}
+
+function formatBulletTextarea(items: string[]) {
+  return items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => `• ${item}`)
+    .join("\n");
 }
 
 type SectionChatEditMode = "append" | "replace" | "remove";
@@ -1388,6 +1474,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   });
   const [activeCommissionInput, setActiveCommissionInput] = useState<{ commissionId: string; field: CommissionDraftField } | null>(null);
   const [commissionDrafts, setCommissionDrafts] = useState<Record<string, string>>({});
+  const [activeServiceFeeInput, setActiveServiceFeeInput] = useState<string | null>(null);
+  const [serviceFeeDrafts, setServiceFeeDrafts] = useState<Record<string, string>>({});
   const [scenarioReady, setScenarioReady] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const [soaRenderStyle, setSoaRenderStyle] = useState<SoaRenderStyle>(DEFAULT_SOA_RENDER_STYLE);
@@ -1398,6 +1486,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const activeSoaId = searchParams.get("soaId") ?? initialSoaId ?? "";
   const activeClient = useMemo(() => serverClients.find((client) => client.id === activeClientId) ?? null, [activeClientId, serverClients]);
   const [adviceCase, setAdviceCase] = useState<AdviceCaseV1>(() => buildInitialCase(activeClient));
+  const [linkedProjectionPackage, setLinkedProjectionPackage] = useState<SoaProjectionOutputPackage | null>(null);
+  const [projectionScenarioOptions, setProjectionScenarioOptions] = useState<SoaProjectionOutputPackage[]>([]);
 
   function resetConsoleState(nextAdviceCase: AdviceCaseV1) {
     setAdviceCase(nextAdviceCase);
@@ -2002,6 +2092,68 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
 
     return `/finley/soa/print?${params.toString()}`;
   }, [activeClientId, activeSectionId, activeSoaId, previewVersion, soaRenderStyle]);
+  const projectionWorkspaceUrl = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (activeClientId) {
+      params.set("clientId", activeClientId);
+    }
+
+    if (activeSoaId) {
+      params.set("soaId", activeSoaId);
+    }
+
+    return `/projections${params.toString() ? `?${params.toString()}` : ""}`;
+  }, [activeClientId, activeSoaId]);
+
+  useEffect(() => {
+    function refreshProjectionPackage() {
+      const packageValue = activeClientId && activeSoaId ? readSoaProjectionPackage(activeClientId, activeSoaId) : null;
+      const scenarioOptions = activeClientId && activeSoaId ? readSoaProjectionScenarioOptions(activeClientId, activeSoaId) : [];
+      setLinkedProjectionPackage(packageValue);
+      setProjectionScenarioOptions(scenarioOptions);
+
+      if (!packageValue) {
+        return;
+      }
+
+      setAdviceCase((current) => ({
+        ...current,
+        financialProjections: [packageValue.financialProjection],
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }));
+      setConfirmedSections((current) => ({ ...current, projections: false }));
+    }
+
+    refreshProjectionPackage();
+    window.addEventListener("focus", refreshProjectionPackage);
+    window.addEventListener("storage", refreshProjectionPackage);
+    window.addEventListener(SOA_PROJECTION_PACKAGE_EVENT, refreshProjectionPackage);
+    window.addEventListener(SOA_PROJECTION_SCENARIO_OPTIONS_EVENT, refreshProjectionPackage);
+
+    return () => {
+      window.removeEventListener("focus", refreshProjectionPackage);
+      window.removeEventListener("storage", refreshProjectionPackage);
+      window.removeEventListener(SOA_PROJECTION_PACKAGE_EVENT, refreshProjectionPackage);
+      window.removeEventListener(SOA_PROJECTION_SCENARIO_OPTIONS_EVENT, refreshProjectionPackage);
+    };
+  }, [activeClientId, activeSoaId]);
+
+  function selectProjectionScenarioForSoa(selectedScenarioId: string) {
+    const packageValue = projectionScenarioOptions.find((option) => option.selectedScenarioId === selectedScenarioId);
+    if (!packageValue) {
+      return;
+    }
+
+    writeSoaProjectionPackage(packageValue);
+    setLinkedProjectionPackage(packageValue);
+    setAdviceCase((current) => ({
+      ...current,
+      financialProjections: [packageValue.financialProjection],
+      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+    }));
+    setConfirmedSections((current) => ({ ...current, projections: false }));
+  }
 
   useEffect(() => {
     if (!showLiveSoaPreview) {
@@ -2354,6 +2506,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         },
         riskProfile: adviceCase.riskProfile ?? null,
         intakeAssessment: nextAssessment,
+        clientPeople: adviceCase.clientGroup.clients.map((person) => ({
+          name: person.fullName,
+          role: person.role,
+        })),
         uploadedFiles: uploads.map((upload) => ({
           name: upload.name,
           kind: upload.kind,
@@ -2392,6 +2548,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         },
         riskProfile: adviceCase.riskProfile ?? null,
         intakeAssessment: nextAssessment,
+        clientPeople: adviceCase.clientGroup.clients.map((person) => ({
+          name: person.fullName,
+          role: person.role,
+        })),
         uploadedFiles: uploads.map((upload) => ({
           name: upload.name,
           kind: upload.kind,
@@ -2573,6 +2733,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       return {
                       recommendationId: makeId("strategy"),
                       type: draft.type || "other",
+                      ownerPersonIds: resolvePersonIdsFromNames(draft.recommendedFor, current.clientGroup.clients),
                       recommendationText: normalizeRecommendationLanguage(draft.recommendationText, activeClient?.name),
                       linkedObjectiveIds: linkedObjectiveIds.length ? linkedObjectiveIds : nextObjectiveIds,
                       targetAmount: null,
@@ -2606,6 +2767,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   : nextAssessment.candidateStrategyRecommendations.map((recommendationText) => ({
                       recommendationId: makeId("strategy"),
                       type: "other",
+                      ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                       recommendationText: normalizeRecommendationLanguage(recommendationText, activeClient?.name),
                       linkedObjectiveIds: nextObjectiveIds,
                       targetAmount: null,
@@ -2636,6 +2798,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         productType: draft.productType,
                         recommendedProductName: draft.recommendedProductName ?? null,
                         recommendedProvider: draft.recommendedProvider ?? null,
+                        ownerPersonIds: resolvePersonIdsFromNames(draft.recommendedFor, current.clientGroup.clients),
                         linkedObjectiveIds: linkedObjectiveIds.length ? linkedObjectiveIds : nextObjectiveIds,
                         recommendationText: normalizeRecommendationLanguage(draft.recommendationText, activeClient?.name),
                         targetAmount: null,
@@ -2677,6 +2840,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         productType: "other" as const,
                         recommendedProductName: null,
                         recommendedProvider: null,
+                        ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                         linkedObjectiveIds: nextObjectiveIds,
                         recommendationText: normalizeRecommendationLanguage(note, activeClient?.name),
                         targetAmount: null,
@@ -3454,6 +3618,31 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     return field === "upfrontPercentage" || field === "ongoingPercentage" ? formatPercent(value) : formatCurrency(value);
   }
 
+  function getServiceFeeInputValue(feeItem: ServiceAgreementFeeItemV1) {
+    if (activeServiceFeeInput === feeItem.feeItemId) {
+      return serviceFeeDrafts[feeItem.feeItemId] ?? "";
+    }
+
+    if (feeItem.feeAmount === null || feeItem.feeAmount === undefined || Number.isNaN(feeItem.feeAmount)) {
+      return "";
+    }
+
+    return formatCurrency(feeItem.feeAmount);
+  }
+
+  function beginServiceFeeEdit(feeItem: ServiceAgreementFeeItemV1) {
+    setActiveServiceFeeInput(feeItem.feeItemId);
+    setServiceFeeDrafts((current) => ({
+      ...current,
+      [feeItem.feeItemId]: feeItem.feeAmount === null || feeItem.feeAmount === undefined ? "" : String(feeItem.feeAmount),
+    }));
+  }
+
+  function updateServiceFeeAmount(feeItemId: string, rawValue: string) {
+    setServiceFeeDrafts((current) => ({ ...current, [feeItemId]: rawValue }));
+    updateServiceAgreementFeeItem(feeItemId, { feeAmount: parseCurrencyInput(rawValue) });
+  }
+
   function beginCommissionEdit(commissionId: string, field: CommissionDraftField, value?: number | null) {
     setActiveCommissionInput({ commissionId, field });
     setCommissionDrafts((current) => ({
@@ -4139,6 +4328,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         </div>
                         {collapsedStrategyRecommendations[recommendation.recommendationId] ? (
                           <div className={styles.workflowDraftPreview}>
+                            <strong>For {formatRecommendationAudience(recommendation.ownerPersonIds, adviceCase.clientGroup.clients)}:</strong>{" "}
                             {recommendation.recommendationText?.trim() || "No recommendation text yet."}
                           </div>
                         ) : (
@@ -4213,6 +4403,42 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                           if (activeTab === "recommendation") {
                             return (
                               <div className={styles.workflowDraftSubcard}>
+                                <div className={styles.workflowDraftLabel}>Recommendation is for</div>
+                                <select
+                                  className={finleyStyles.clientSearch}
+                                  value={getRecommendationAudienceSelectValue(
+                                    recommendation.ownerPersonIds,
+                                    adviceCase.clientGroup.clients,
+                                  )}
+                                  onChange={(event) => {
+                                    setAdviceCase((current) => ({
+                                      ...current,
+                                      recommendations: {
+                                        ...current.recommendations,
+                                        strategic: current.recommendations.strategic.map((entry) =>
+                                          entry.recommendationId === recommendation.recommendationId
+                                            ? {
+                                                ...entry,
+                                                ownerPersonIds: resolveRecommendationAudienceSelectValue(
+                                                  event.target.value,
+                                                  current.clientGroup.clients,
+                                                ),
+                                              }
+                                            : entry,
+                                        ),
+                                      },
+                                      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+                                    }));
+                                    setConfirmedSections((current) => ({ ...current, "strategy-recommendations": false }));
+                                  }}
+                                >
+                                  {adviceCase.clientGroup.clients.map((person) => (
+                                    <option key={person.personId} value={person.personId}>
+                                      {person.fullName || (person.role === "partner" ? "Partner" : "Client")}
+                                    </option>
+                                  ))}
+                                  {adviceCase.clientGroup.clients.length > 1 ? <option value="joint">Joint</option> : null}
+                                </select>
                                 <div className={styles.workflowDraftLabel}>Recommendation</div>
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
@@ -4245,12 +4471,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One benefit or rationale point per line"
-                                  value={[
+                                  value={formatBulletTextarea([
                                     ...recommendation.clientBenefits.map((benefit) => benefit.text),
                                     recommendation.rationale ?? "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join("\n")}
+                                  ])}
                                   onChange={(event) => {
                                     const nextBenefits = splitNonEmptyLines(event.target.value).map((text) => ({
                                       benefitId: makeId("benefit"),
@@ -4283,7 +4507,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One consequence or trade-off per line"
-                                  value={recommendation.consequences.map((consequence) => consequence.text).join("\n")}
+                                  value={formatBulletTextarea(recommendation.consequences.map((consequence) => consequence.text))}
                                   onChange={(event) => {
                                     const nextConsequences = splitNonEmptyLines(event.target.value).map((text) => ({
                                       consequenceId: makeId("consequence"),
@@ -4315,7 +4539,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               <textarea
                                 className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                 placeholder="One alternative per line"
-                                value={recommendation.alternativesConsidered.map((alternative) => alternative.optionText).join("\n")}
+                                value={formatBulletTextarea(recommendation.alternativesConsidered.map((alternative) => alternative.optionText))}
                                 onChange={(event) => {
                                   const nextAlternatives = splitNonEmptyLines(event.target.value).map((text) => ({
                                     alternativeId: makeId("alternative"),
@@ -4359,6 +4583,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               {
                                 recommendationId: makeId("strategy"),
                                 type: "other",
+                                ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                                 recommendationText: "",
                                 linkedObjectiveIds: [],
                                 targetAmount: null,
@@ -4435,6 +4660,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         </div>
                         {collapsedProductRecommendations[recommendation.recommendationId] ? (
                           <div className={styles.workflowDraftPreview}>
+                            <strong>For {formatRecommendationAudience(recommendation.ownerPersonIds, adviceCase.clientGroup.clients)}:</strong>{" "}
                             {recommendation.recommendationText?.trim() ||
                               recommendation.recommendedProductName?.trim() ||
                               "No product recommendation text yet."}
@@ -4442,6 +4668,44 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         ) : (
                           <>
                         <div className={styles.sectionGridCompact}>
+                          <div className={styles.workflowDraftSubcard}>
+                            <div className={styles.workflowDraftLabel}>Recommendation is for</div>
+                            <select
+                              className={finleyStyles.clientSearch}
+                              value={getRecommendationAudienceSelectValue(
+                                recommendation.ownerPersonIds,
+                                adviceCase.clientGroup.clients,
+                              )}
+                              onChange={(event) => {
+                                setAdviceCase((current) => ({
+                                  ...current,
+                                  recommendations: {
+                                    ...current.recommendations,
+                                    product: current.recommendations.product.map((entry) =>
+                                      entry.recommendationId === recommendation.recommendationId
+                                        ? {
+                                            ...entry,
+                                            ownerPersonIds: resolveRecommendationAudienceSelectValue(
+                                              event.target.value,
+                                              current.clientGroup.clients,
+                                            ),
+                                          }
+                                        : entry,
+                                    ),
+                                  },
+                                  metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+                                }));
+                                setConfirmedSections((current) => ({ ...current, "product-recommendations": false }));
+                              }}
+                            >
+                              {adviceCase.clientGroup.clients.map((person) => (
+                                <option key={person.personId} value={person.personId}>
+                                  {person.fullName || (person.role === "partner" ? "Partner" : "Client")}
+                                </option>
+                              ))}
+                              {adviceCase.clientGroup.clients.length > 1 ? <option value="joint">Joint</option> : null}
+                            </select>
+                          </div>
                           <div className={styles.workflowDraftSubcard}>
                             <div className={styles.workflowDraftLabel}>Action</div>
                             <select
@@ -4648,12 +4912,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One benefit or suitability point per line"
-                                  value={[
+                                  value={formatBulletTextarea([
                                     ...recommendation.clientBenefits.map((benefit) => benefit.text),
                                     recommendation.suitabilityRationale ?? "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join("\n")}
+                                  ])}
                                   onChange={(event) => {
                                     const nextBenefits = splitNonEmptyLines(event.target.value).map((text) => ({
                                       benefitId: makeId("benefit"),
@@ -4686,7 +4948,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 <textarea
                                   className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                   placeholder="One consequence or trade-off per line"
-                                  value={recommendation.consequences.map((consequence) => consequence.text).join("\n")}
+                                  value={formatBulletTextarea(recommendation.consequences.map((consequence) => consequence.text))}
                                   onChange={(event) => {
                                     const nextConsequences = splitNonEmptyLines(event.target.value).map((text) => ({
                                       consequenceId: makeId("consequence"),
@@ -4718,10 +4980,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               <textarea
                                 className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
                                 placeholder="One alternative per line"
-                                value={recommendation.alternativesConsidered
+                                value={formatBulletTextarea(recommendation.alternativesConsidered
                                   .map((alternative) => alternative.productName ?? alternative.provider ?? "")
-                                  .filter(Boolean)
-                                  .join("\n")}
+                                  .filter(Boolean))}
                                 onChange={(event) => {
                                   const nextAlternatives = splitNonEmptyLines(event.target.value).map((text) => ({
                                     alternativeId: makeId("product-alternative"),
@@ -4769,6 +5030,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 productType: "other",
                                 recommendedProductName: null,
                                 recommendedProvider: null,
+                                ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
                                 linkedObjectiveIds: [],
                                 recommendationText: "",
                                 targetAmount: null,
@@ -6058,10 +6320,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                   className={finleyStyles.clientSearch}
                                   inputMode="decimal"
                                   placeholder="$0.00"
-                                  value={feeItem.feeAmount ?? ""}
-                                  onChange={(event) =>
-                                    updateServiceAgreementFeeItem(feeItem.feeItemId, { feeAmount: parseCurrencyInput(event.target.value) })
-                                  }
+                                  value={getServiceFeeInputValue(feeItem)}
+                                  onFocus={() => beginServiceFeeEdit(feeItem)}
+                                  onChange={(event) => updateServiceFeeAmount(feeItem.feeItemId, event.target.value)}
+                                  onBlur={() => setActiveServiceFeeInput(null)}
                                 />
                               </div>
                               <div className={styles.workflowDraftSubcard}>
@@ -6520,7 +6782,58 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   </div>
                 </>
               ) : null}
-              {![
+              {activeSectionId === "projections" ? (
+                <div className={styles.workflowDraftStack}>
+                  <div className={styles.workflowDraftCard}>
+                    <div className={styles.workflowDraftHeader}>
+                      <div>
+                        <div className={styles.workflowDraftLabel}>Projection module</div>
+                        <div className={styles.workflowDraftPreview}>
+                          Select scenario from the projections workspace.
+                        </div>
+                      </div>
+                      <a
+                        className={`${styles.sectionActionButton} ${!activeClientId || !activeSoaId ? styles.disabledActionLink : ""}`.trim()}
+                        href={activeClientId && activeSoaId ? projectionWorkspaceUrl : undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-disabled={!activeClientId || !activeSoaId}
+                      >
+                        {linkedProjectionPackage ? "Open projections" : "Create projections"}
+                      </a>
+                    </div>
+                    {projectionScenarioOptions.length ? (
+                      <label className={styles.workflowDraftField}>
+                        <span className={styles.workflowDraftLabel}>Scenario for SOA</span>
+                        <select
+                          className={styles.workflowDraftSelect}
+                          value={
+                            projectionScenarioOptions.some(
+                              (option) => option.selectedScenarioId === linkedProjectionPackage?.selectedScenarioId,
+                            )
+                              ? linkedProjectionPackage?.selectedScenarioId
+                              : ""
+                          }
+                          onChange={(event) => selectProjectionScenarioForSoa(event.target.value)}
+                        >
+                          <option value="" disabled>
+                            Choose a projection scenario
+                          </option>
+                          {projectionScenarioOptions.map((option) => (
+                            <option key={option.selectedScenarioId} value={option.selectedScenarioId}>
+                              {option.selectedScenarioName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {!activeSoaId ? (
+                      <div className={styles.sectionCardText}>Save or open this SOA with an SOA ID before linking projections.</div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+              {![ 
                 "soa-introduction",
                 "risk-profile",
                 "scope-of-advice",
@@ -6533,6 +6846,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 "insurance-replacement",
                 "disclosure",
                 "service-agreement",
+                "projections",
               ].includes(activeSectionId) ? (
                 <div className={styles.sectionCardText}>
                   This section is wired into the workflow and readiness model. We can now use it for practical validation before we build the richer section editor.

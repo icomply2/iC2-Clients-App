@@ -17,6 +17,11 @@ export const appNavItems: AppNavItem[] = [
     description: "Generate client letters and advice outputs.",
   },
   {
+    href: "/projections",
+    label: "Projections",
+    description: "Model advice scenarios, assumptions, and projection outputs.",
+  },
+  {
     href: "/admin",
     label: "Admin",
     description: "Manage users, licensees, and practices.",

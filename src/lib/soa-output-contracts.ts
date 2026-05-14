@@ -186,6 +186,7 @@ export type IntakeAssessmentV1 = {
 
 export type StrategyRecommendationDraftV1 = {
   type: string;
+  recommendedFor: string[];
   recommendationText: string;
   linkedObjectiveTexts: string[];
   clientBenefits: string[];
@@ -204,6 +205,7 @@ export type StrategyDraftResponseV1 = {
 export type ProductRecommendationDraftV1 = {
   action: "obtain" | "retain" | "replace" | "rollover" | "consolidate" | "dispose";
   productType: "super" | "pension" | "investment" | "annuity" | "insurance" | "other";
+  recommendedFor: string[];
   recommendationText: string;
   linkedObjectiveTexts: string[];
   currentProductName?: string | null;
