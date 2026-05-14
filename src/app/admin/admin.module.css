@@ -221,6 +221,59 @@
   background: #fffdf4;
 }
 
+.tableSelect {
+  width: 100%;
+  min-width: 8.5rem;
+  min-height: 2.35rem;
+  padding: 0 0.55rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #243b53;
+  font: inherit;
+}
+
+.tableSelect:disabled {
+  opacity: 0.65;
+}
+
+.paginationBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  padding-top: 0.35rem;
+}
+
+.paginationSummary,
+.paginationPage {
+  color: #5f7286;
+  font-weight: 700;
+}
+
+.paginationSize,
+.paginationActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.paginationSize span {
+  color: #102a56;
+  font-weight: 800;
+}
+
+.paginationSize select {
+  min-height: 2.35rem;
+  padding: 0 0.55rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #243b53;
+  font: inherit;
+}
+
 .statusPill {
   display: inline-flex;
   align-items: center;
@@ -298,7 +351,8 @@
 }
 
 .primaryButton,
-.secondaryButton {
+.secondaryButton,
+.dangerButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -312,6 +366,95 @@
   border: 1px solid #c7d7eb;
   background: #fff;
   color: #102a56;
+}
+
+.dangerButton {
+  border: 1px solid #f0b4ae;
+  background: #fff;
+  color: #b42318;
+}
+
+.dangerButton:disabled {
+  opacity: 0.65;
+}
+
+.tableActions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.expandRowButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #102a56;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.expandRowButton:hover span:last-child {
+  text-decoration: underline;
+}
+
+.expandIcon {
+  display: inline-grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  place-items: center;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.25rem;
+  background: #fff;
+  color: #102a56;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.subListRow td {
+  padding: 0;
+  background: #fff;
+}
+
+.subListPanel {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0.2rem 0 0.75rem;
+  padding: 0.85rem 1rem 0.95rem 2.7rem;
+  border-top: 1px solid #f4df93;
+  border-bottom: 1px solid #f4df93;
+  background: #fffdf3;
+}
+
+.subListPanel strong {
+  color: #102a56;
+}
+
+.subList {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.subList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 44rem;
+  color: #243b53;
+}
+
+.subList li span:last-child {
+  color: #5f7286;
+  font-size: 0.9rem;
 }
 
 .modalOverlay {
@@ -374,6 +517,27 @@
   background: #fff;
   color: #243b53;
   font: inherit;
+}
+
+.logoUploadField input[type="file"] {
+  display: block;
+  min-height: auto;
+  padding: 0;
+  border: 0;
+}
+
+.uploadMeta {
+  color: #5f7286;
+  font-size: 0.86rem;
+}
+
+.imagePreview {
+  width: 8rem;
+  height: 8rem;
+  object-fit: contain;
+  border: 1px solid #d8e2ef;
+  border-radius: 0.35rem;
+  background: #fff;
 }
 
 .checkboxRow {

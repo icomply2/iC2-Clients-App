@@ -32,11 +32,12 @@ type SidebarNavProps = {
 const navItems = [
   { label: "All Clients", icon: "◔", href: "/clients", key: "all-clients" },
   { label: "Client Details", icon: "◕", href: "", key: "details" },
-  { label: "Identity Check", icon: "◉", href: "/identity-check", key: "identity-check" },
   { label: "Entities", icon: "⌘", href: "/entities", key: "entities" },
-  { label: "Dependents", icon: "◔", href: "/dependents", key: "dependents" },
+  { label: "Identity Check", icon: "◉", href: "/identity-check", key: "identity-check" },
   { label: "Client File Notes", icon: "◫", href: "/file-notes", key: "file-notes" },
   { label: "iC2 Wizards", icon: "✲", href: "/wizards", key: "wizards" },
+  { label: "Projections", icon: "▥", href: "/projections", key: "projections", newTab: true },
+  { label: "Dependents", icon: "◔", href: "/dependents", key: "dependents" },
   { label: "Assets", icon: "$", href: "/assets", key: "assets" },
   { label: "Liability", icon: "▤", href: "/liabilities", key: "liabilities" },
   { label: "Superannuation", icon: "▮", href: "/superannuation", key: "superannuation" },
@@ -49,6 +50,8 @@ const navItems = [
 
 function resolveHref(clientId: string, key: string, href: string) {
   switch (key) {
+    case "projections":
+      return `https://www.finleyai.com.au/projections?clientid=${encodeURIComponent(clientId)}`;
     case "details":
       return `/clients/${clientId}`;
     case "identity-check":
@@ -124,6 +127,12 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
                     Fact Find
                   </Link>
                   <Link
+                    href={`/clients/${encodeURIComponent(clientId)}?section=wizards-statement-of-advice`}
+                    className={`${styles.subnavItem} ${section === "wizards-statement-of-advice" ? styles.subnavItemActive : ""}`.trim()}
+                  >
+                    Statement of Advice
+                  </Link>
+                  <Link
                     href={`/clients/${clientId}/wizards/engagement-letter`}
                     className={`${styles.subnavItem} ${section === "wizards-engagement-letter" ? styles.subnavItemActive : ""}`.trim()}
                   >
@@ -135,12 +144,6 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
                   >
                     Record of Advice
                   </Link>
-                  <Link
-                    href={`/clients/${encodeURIComponent(clientId)}?section=wizards-statement-of-advice`}
-                    className={`${styles.subnavItem} ${section === "wizards-statement-of-advice" ? styles.subnavItemActive : ""}`.trim()}
-                  >
-                    Statement of Advice
-                  </Link>
                 </div>
               ) : null}
             </div>
@@ -151,7 +154,13 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
         const isActive = item.key === section;
 
         return (
-          <Link key={item.label} href={href} className={`${styles.navItem} ${isActive ? styles.navItemActive : ""}`.trim()}>
+          <Link
+            key={item.label}
+            href={href}
+            target={"newTab" in item && item.newTab ? "_blank" : undefined}
+            rel={"newTab" in item && item.newTab ? "noopener noreferrer" : undefined}
+            className={`${styles.navItem} ${isActive ? styles.navItemActive : ""}`.trim()}
+          >
             <span className={styles.navIcon}>{item.icon}</span>
             <span className={styles.navLabel}>{item.label}</span>
           </Link>

@@ -1121,6 +1121,43 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
       return;
     }
 
+    if (currentStep.id === "risk-profile") {
+      const values = Object.fromEntries(currentStep.editorCard.fields.map((field) => [field.key, field.value]));
+      const profileId = profileState.id?.trim() || "";
+
+      if (!profileId) {
+        throw new Error("Finley could not determine which profile to save for this step.");
+      }
+
+      if (typeof values.clientRiskProfile === "string" && profileState.client?.id?.trim()) {
+        await updatePersonRiskProfile(
+          {
+            profileId,
+            personId: profileState.client.id.trim(),
+            person: profileState.client,
+            changes: { riskProfile: values.clientRiskProfile },
+            target: "client",
+          },
+          values.clientRiskProfile,
+        );
+      }
+
+      if (typeof values.partnerRiskProfile === "string" && profileState.partner?.id?.trim()) {
+        await updatePersonRiskProfile(
+          {
+            profileId,
+            personId: profileState.partner.id.trim(),
+            person: profileState.partner,
+            changes: { riskProfile: values.partnerRiskProfile },
+            target: "partner",
+          },
+          values.partnerRiskProfile,
+        );
+      }
+
+      return;
+    }
+
     const isClientStep =
       currentStep.id === "household-details" || currentStep.id === "partner-details";
 
@@ -1276,8 +1313,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
               <div>
                 <div className={styles.factFindEyebrow}>Update Fact Find</div>
                 <h2 className={styles.factFindStepTitle}>{currentStep.title}</h2>
-                <p className={styles.factFindStepDescription}>{currentStep.description}</p>
-                {currentStep.guidance ? <div className={styles.factFindGuidance}>{currentStep.guidance}</div> : null}
               </div>
               <div className={styles.factFindHeaderActions}>
                 {currentStepPopupSection ? (

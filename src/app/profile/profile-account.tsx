@@ -67,14 +67,29 @@ type ProductRexUserSummary = {
   active_rp_name?: string;
 };
 
+function toDateInputValue(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  const datePrefix = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  if (datePrefix) {
+    return datePrefix[1];
+  }
+
+  const parsedDate = new Date(trimmed);
+
+  return Number.isNaN(parsedDate.getTime()) ? "" : parsedDate.toISOString().slice(0, 10);
+}
+
 export function ProfileAccount({
   userId,
   name,
   email,
   role,
-  status,
-  appAccess,
-  appAdminValue,
   isAppAdmin,
   practiceName,
   practiceAbn,
@@ -112,19 +127,16 @@ export function ProfileAccount({
   const [emailAddress, setEmailAddress] = useState(email);
   const [preferredPhone, setPreferredPhone] = useState(phoneNumber);
   const [officePhone, setOfficePhone] = useState(officeNumber);
-  const [birthDate, setBirthDate] = useState(dateOfBirth);
+  const [birthDate, setBirthDate] = useState(toDateInputValue(dateOfBirth));
   const [jobTitle, setJobTitle] = useState(role);
-  const [accountStatus, setAccountStatus] = useState(status);
-  const [accountAccess, setAccountAccess] = useState(appAccess);
-  const [appAdminSelection, setAppAdminSelection] = useState(appAdminValue);
   const [occupationValue, setOccupationValue] = useState(occupation);
-  const [adviserExperienceValue, setAdviserExperienceValue] = useState(adviserExperience);
-  const [businessNameValue, setBusinessNameValue] = useState(businessName);
+  const [adviserExperienceValue] = useState(adviserExperience);
+  const [businessNameValue] = useState(businessName);
   const [acnValue, setAcnValue] = useState(acn);
   const [abnValue, setAbnValue] = useState(abn || practiceAbn);
   const [asicNumberValue, setAsicNumberValue] = useState(asicNumber);
   const [websiteValue, setWebsiteValue] = useState(website);
-  const [xplanSiteValue, setXplanSiteValue] = useState(xplanSite);
+  const [xplanSiteValue] = useState(xplanSite);
   const [practiceNameValue, setPracticeNameValue] = useState(practiceName);
   const [licenseeNameValue, setLicenseeNameValue] = useState(licenseeName);
   const [complianceManagerValue, setComplianceManagerValue] = useState(complianceManagerName);
@@ -132,7 +144,7 @@ export function ProfileAccount({
   const [suburbValue, setSuburbValue] = useState(suburb);
   const [stateValue, setStateValue] = useState(state);
   const [postCodeValue, setPostCodeValue] = useState(postCode);
-  const [countryValue, setCountryValue] = useState(country);
+  const [countryValue] = useState(country);
   const [defaultLandingPage, setDefaultLandingPage] = useState("/clients");
   const [defaultPageSize, setDefaultPageSize] = useState("10");
   const [compactLists, setCompactLists] = useState(false);
@@ -160,9 +172,7 @@ export function ProfileAccount({
     "Support Staff",
     "Licensee Admin",
   ];
-  const statusOptions = ["Active", "Pending", "Suspended", "Inactive"];
-  const appAccessOptions = ["Full Access", "Standard Access", "Read Only", "No Access"];
-  const appAdminOptions = ["No", "App Admin", "ic2 App Admin"];
+  const stateOptions = ["NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"];
 
   async function readFileAsDataUrl(file: File) {
     return new Promise<string>((resolve, reject) => {
@@ -324,9 +334,7 @@ export function ProfileAccount({
         },
         body: JSON.stringify({
           userUpdate: {
-            ...(accountAccess ? { appAccess: accountAccess } : {}),
             ...(jobTitle ? { userRole: jobTitle } : {}),
-            ...(accountStatus ? { userStatus: accountStatus } : {}),
           },
           profile: {
             name: fullName,
@@ -340,6 +348,7 @@ export function ProfileAccount({
             acn: acnValue,
             abn: abnValue,
             asicNumber: asicNumberValue,
+            authorizedRepNumber: asicNumberValue,
             website: websiteValue,
             xplanSite: xplanSiteValue,
             practiceName: practiceNameValue,
@@ -472,50 +481,13 @@ export function ProfileAccount({
                   </div>
                   <div className={styles.field}>
                     <span>Date of birth</span>
-                    <input value={birthDate} onChange={(event) => setBirthDate(event.target.value)} placeholder="Date of birth" />
+                    <input type="date" value={birthDate} onChange={(event) => setBirthDate(event.target.value)} />
                   </div>
                   <div className={styles.field}>
                     <span>User role</span>
                     <select value={jobTitle} onChange={(event) => setJobTitle(event.target.value)}>
                       {!roleOptions.includes(jobTitle) && jobTitle ? <option value={jobTitle}>{jobTitle}</option> : null}
                       {roleOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className={styles.field}>
-                    <span>Account status</span>
-                    <select value={accountStatus} onChange={(event) => setAccountStatus(event.target.value)}>
-                      {!statusOptions.includes(accountStatus) && accountStatus ? <option value={accountStatus}>{accountStatus}</option> : null}
-                      {statusOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className={styles.field}>
-                    <span>App access</span>
-                    <select value={accountAccess} onChange={(event) => setAccountAccess(event.target.value)}>
-                      {!appAccessOptions.includes(accountAccess) && accountAccess ? (
-                        <option value={accountAccess}>{accountAccess}</option>
-                      ) : null}
-                      {appAccessOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className={styles.field}>
-                    <span>App admin value</span>
-                    <select value={appAdminSelection} onChange={(event) => setAppAdminSelection(event.target.value)} disabled>
-                      {!appAdminOptions.includes(appAdminSelection) && appAdminSelection ? (
-                        <option value={appAdminSelection}>{appAdminSelection}</option>
-                      ) : null}
-                      {appAdminOptions.map((option) => (
                         <option key={option} value={option}>
                           {option}
                         </option>
@@ -529,8 +501,8 @@ export function ProfileAccount({
                 <div className={styles.sectionBanner}>Adviser Details</div>
                 <div className={styles.panelGrid}>
                   <div className={styles.field}>
-                    <span>ASIC adviser / CAR number</span>
-                    <input value={asicNumberValue} onChange={(event) => setAsicNumberValue(event.target.value)} placeholder="ASIC adviser / CAR number" />
+                    <span>ASIC Adviser Number</span>
+                    <input value={asicNumberValue} onChange={(event) => setAsicNumberValue(event.target.value)} placeholder="ASIC Adviser Number" />
                   </div>
                   <div className={styles.field}>
                     <span>ABN</span>
@@ -541,24 +513,8 @@ export function ProfileAccount({
                     <input value={acnValue} onChange={(event) => setAcnValue(event.target.value)} placeholder="ACN" />
                   </div>
                   <div className={styles.field}>
-                    <span>Business name</span>
-                    <input value={businessNameValue} onChange={(event) => setBusinessNameValue(event.target.value)} placeholder="Business name" />
-                  </div>
-                  <div className={styles.field}>
                     <span>Occupation</span>
                     <input value={occupationValue} onChange={(event) => setOccupationValue(event.target.value)} placeholder="Occupation" />
-                  </div>
-                  <div className={styles.field}>
-                    <span>Adviser experience</span>
-                    <input value={adviserExperienceValue} onChange={(event) => setAdviserExperienceValue(event.target.value)} placeholder="Adviser experience" />
-                  </div>
-                  <div className={styles.field}>
-                    <span>Website</span>
-                    <input value={websiteValue} onChange={(event) => setWebsiteValue(event.target.value)} placeholder="Website" />
-                  </div>
-                  <div className={styles.field}>
-                    <span>Xplan site</span>
-                    <input value={xplanSiteValue} onChange={(event) => setXplanSiteValue(event.target.value)} placeholder="Xplan site" />
                   </div>
                 </div>
               </div>
@@ -576,15 +532,19 @@ export function ProfileAccount({
                   </div>
                   <div className={styles.field}>
                     <span>State</span>
-                    <input value={stateValue} onChange={(event) => setStateValue(event.target.value)} placeholder="State" />
+                    <select value={stateValue} onChange={(event) => setStateValue(event.target.value)}>
+                      {!stateOptions.includes(stateValue) && stateValue ? <option value={stateValue}>{stateValue}</option> : null}
+                      <option value="">Select state</option>
+                      {stateOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className={styles.field}>
                     <span>Postcode</span>
                     <input value={postCodeValue} onChange={(event) => setPostCodeValue(event.target.value)} placeholder="Postcode" />
-                  </div>
-                  <div className={styles.field}>
-                    <span>Country</span>
-                    <input value={countryValue} onChange={(event) => setCountryValue(event.target.value)} placeholder="Country" />
                   </div>
                 </div>
               </div>
@@ -597,8 +557,8 @@ export function ProfileAccount({
                     <input value={practiceNameValue} onChange={(event) => setPracticeNameValue(event.target.value)} placeholder="Practice name" />
                   </div>
                   <div className={styles.field}>
-                    <span>Practice / adviser ABN</span>
-                    <input value={abnValue} onChange={(event) => setAbnValue(event.target.value)} placeholder="Practice / adviser ABN" />
+                    <span>Website</span>
+                    <input value={websiteValue} onChange={(event) => setWebsiteValue(event.target.value)} placeholder="Website" />
                   </div>
                   <div className={styles.field}>
                     <span>Licensee name</span>
@@ -629,9 +589,6 @@ export function ProfileAccount({
                 </div>
               </div>
 
-              <p className={styles.cardText}>
-                Role, account status, and app access are sent to the live user endpoint. Adviser details and branding are saved locally for Finley and the SOA cover page until the backend PATCH endpoint supports the full user profile contract.
-              </p>
             </div>
           ) : null}
 
