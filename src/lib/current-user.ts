@@ -13,7 +13,7 @@ export function decodeJwtPayload(token: string) {
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
     const payload = Buffer.from(padded, "base64").toString("utf8");
 
-    return JSON.parse(payload) as Record<string, unknown>;
+    return JSON.parse(payload);
   } catch {
     return null;
   }
@@ -32,6 +32,7 @@ export function readStringClaim(payload: Record<string, unknown>, claimNames: st
 }
 
 export async function resolveCurrentUserFromApi(token: string) {
+
   const apiBaseUrl = getApiBaseUrl();
 
   if (!apiBaseUrl) {
@@ -39,27 +40,8 @@ export async function resolveCurrentUserFromApi(token: string) {
   }
 
   const payload = decodeJwtPayload(token);
-  const currentUserId = payload
-    ? readStringClaim(payload, [
-        "nameid",
-        "sub",
-        "uid",
-        "userId",
-        "id",
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
-      ])
-    : null;
-  const currentEmail = payload
-    ? readStringClaim(payload, [
-        "email",
-        "unique_name",
-        "upn",
-        "preferred_username",
-        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
-      ])
-    : null;
-
-  const response = await fetch(new URL("/api/Users", apiBaseUrl), {
+ 
+  const response = await fetch(new URL(`/api/Users/${payload.Id}`, apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -70,22 +52,16 @@ export async function resolveCurrentUserFromApi(token: string) {
 
   const body = (await response.json().catch(() => null)) as
     | {
-        data?: UserSummary[] | null;
+        data?: UserSummary | null;
       }
     | null;
+
 
   if (!response.ok) {
     throw new Error("Unable to load the current user.");
   }
 
   return (
-    body?.data?.find((user) => currentUserId && user.id && user.id === currentUserId) ??
-    body?.data?.find(
-      (user) =>
-        currentEmail &&
-        user.email &&
-        currentEmail.trim().toLowerCase() === user.email.trim().toLowerCase(),
-    ) ??
-    null
+    body?.data?? null
   );
 }
