@@ -1947,7 +1947,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           method: "GET",
           cache: "no-store",
         });
-
+        
         const body = (await response.json().catch(() => null)) as { data?: CurrentUserScope | null } | null;
 
         if (!response.ok || !body?.data || cancelled) {

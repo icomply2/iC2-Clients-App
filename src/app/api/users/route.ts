@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
 export async function GET(request: NextRequest) {
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const response = await fetch(new URL("/api/Users", API_BASE_URL), {
+    const response = await fetch(new URL(`/api/Users/`, API_BASE_URL), {
       method: "GET",
       headers: {
         Accept: "application/json",

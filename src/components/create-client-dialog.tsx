@@ -81,8 +81,10 @@ export function CreateClientDialog({
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const isComplianceManager = normalizeText(currentUserScope?.userRole) === "compliance manager";
+  
 
   useEffect(() => {
+    
     if (!isOpen) {
       return;
     }
@@ -100,13 +102,12 @@ export function CreateClientDialog({
     }
 
     let isMounted = true;
-
     async function loadAdviserOptions() {
+      const params = new URLSearchParams();
       const scopedPracticeName = currentUserScope?.practice?.name?.trim() || defaultPracticeName?.trim();
       const normalizedPracticeName = scopedPracticeName?.toLowerCase();
       const licenseeName = currentUserScope?.licensee?.name?.trim() || defaultLicenseeName?.trim();
       const normalizedLicenseeName = licenseeName?.toLowerCase();
-
       if (isComplianceManager ? !normalizedLicenseeName : !normalizedPracticeName) {
         if (isMounted) {
           setAdviserOptions([]);
@@ -114,8 +115,16 @@ export function CreateClientDialog({
         return;
       }
 
+      if (licenseeName) {
+        params.set("licenseeName", licenseeName);
+      }
+
+      if (!isComplianceManager && practiceName) {
+        params.set("practiceName", practiceName);
+      }
+
       try {
-        const usersResponse = await fetch("/api/users", {
+        const usersResponse = await fetch(`/api/advisers${params.size ? `?${params.toString()}` : ""}`, {
           method: "GET",
           cache: "no-store",
         });
@@ -129,8 +138,8 @@ export function CreateClientDialog({
                     name?: string | null;
                     email?: string | null;
                     userRole?: string | null;
-                    practice?: { name?: string | null } | null;
-                    licensee?: { name?: string | null } | null;
+                    practiceName?: string | null;
+                    licenseeName?: string | null;
                   }>
                 | null;
               message?: string;
@@ -146,16 +155,16 @@ export function CreateClientDialog({
           .filter((user) => normalizeText(user.userRole) === "adviser")
           .filter((user) =>
             isComplianceManager
-              ? normalizeText(user.licensee?.name) === normalizedLicenseeName
-              : normalizeText(user.practice?.name) === normalizedPracticeName,
+              ? normalizeText(user.licenseeName) === normalizedLicenseeName
+              : normalizeText(user.practiceName) === normalizedPracticeName,
           )
           .map((user) => ({
             id: "",
             entityId: user.entityId?.trim() ?? "",
             name: user.name?.trim() ?? "",
             email: user.email?.trim() ?? "",
-            practiceName: user.practice?.name?.trim() ?? "",
-            licenseeName: user.licensee?.name?.trim() ?? "",
+            practiceName: user.practiceName?.trim() ?? "",
+            licenseeName: user.licenseeName?.trim() ?? "",
           }))
           .filter((user) => user.name);
 
@@ -166,7 +175,6 @@ export function CreateClientDialog({
         } else if (scopedPracticeName) {
           adviserParams.set("practiceName", scopedPracticeName ?? "");
         }
-
         const advisersResponse = await fetch(`/api/advisers?${adviserParams.toString()}`, {
           method: "GET",
           cache: "no-store",
@@ -350,6 +358,7 @@ export function CreateClientDialog({
             name: primaryName,
             status: "Client",
             accountStatus: "Active",
+            clientStatus: "Client",
             clientCategory: "Draft",
           },
           partner: partnerName.trim()
@@ -358,6 +367,7 @@ export function CreateClientDialog({
                 name: partnerName.trim(),
                 status: "Client",
                 accountStatus: "Active",
+                clientStatus: "Client",
                 clientCategory: "Draft",
               }
             : {},

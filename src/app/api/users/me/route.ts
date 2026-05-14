@@ -21,6 +21,7 @@ function decodeJwtPayload(token: string) {
 }
 
 export async function GET(request: NextRequest) {
+  
   const apiBaseUrl = getApiBaseUrl();
   const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
 
@@ -58,7 +59,6 @@ export async function GET(request: NextRequest) {
 
   try {
     const matchedUser = await resolveCurrentUserFromApi(token);
-
     if (!matchedUser) {
       return NextResponse.json({ message: "Unable to resolve the signed-in user." }, { status: 404 });
     }
@@ -67,7 +67,6 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const message =
       error instanceof Error ? `Current user proxy failed: ${error.message}` : "Current user proxy failed.";
-
     return NextResponse.json({ message }, { status: 502 });
   }
 }

@@ -235,13 +235,11 @@ function ClientsPageContent() {
           method: "GET",
           cache: "no-store",
         });
-
         const body = (await response.json().catch(() => null)) as
           | {
               data?: CurrentUserScope | null;
             }
           | null;
-
         if (!response.ok || !body?.data) {
           return;
         }
