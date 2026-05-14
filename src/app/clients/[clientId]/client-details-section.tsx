@@ -10,7 +10,7 @@ import {
   updatePersonRiskProfile,
   upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
-import type { ClientAdviserRecord, ClientEmploymentRecord, ClientProfile, PersonRecord, UserSummary } from "@/lib/api/types";
+import type { ClientAdviserRecord, ClientEmploymentRecord, ClientProfile, PersonRecord, UserSummary, AdviserSummary } from "@/lib/api/types";
 import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
@@ -572,8 +572,18 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     let isMounted = true;
 
     async function loadAdviserOptions() {
-      const practiceName = currentUserScope?.practice?.name?.trim().toLowerCase();
+      const params = new URLSearchParams();
+      const licenseeName = profile.licensee?.trim();
+      const practiceName = profile.practice?.trim();
 
+      if (licenseeName) {
+        params.set("licenseeName", licenseeName);
+      }
+
+      if (practiceName) {
+        params.set("practiceName", practiceName);
+      }
+      
       if (!practiceName) {
         if (isMounted) {
           setAdviserOptions([]);
@@ -582,17 +592,17 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
       }
 
       try {
-        const response = await fetch("/api/users", {
+        const response = await fetch(`/api/advisers${params.size ? `?${params.toString()}` : ""}`, {
           method: "GET",
           cache: "no-store",
         });
-
+        
         const body = (await response.json().catch(() => null)) as
           | {
-              data?: UserSummary[] | null;
+              data?: AdviserSummary[] | null;
             }
           | null;
-
+        
         if (!response.ok || !isMounted) {
           return;
         }
@@ -600,12 +610,12 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         const nextOptions = Array.from(
           new Map(
             (body?.data ?? [])
-              .filter((user) => user.userRole?.trim().toLowerCase() === "adviser")
-              .filter((user) => user.practice?.name?.trim().toLowerCase() === practiceName)
-              .filter((user) => typeof user.name === "string" && user.name.trim())
-              .map((user) => [
-                user.id ?? user.name!,
-                { id: user.id ?? user.name!, name: user.name!.trim(), email: user.email?.trim() ?? "" },
+              //.filter((adviser) => user.userRole?.trim().toLowerCase() === "adviser")
+              .filter((adviser) => adviser?.practiceName?.trim() === practiceName) 
+              .filter((adviser) => typeof adviser.name === "string" && adviser.name.trim())
+              .map((adviser) => [
+                adviser.id ?? adviser.name!,
+                { id: adviser.id ?? adviser.name!, name: adviser.name!.trim(), email: adviser.email?.trim() ?? "" },
               ]),
           ).values(),
         ).sort((left, right) => left.name.localeCompare(right.name));

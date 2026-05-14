@@ -120,6 +120,7 @@ async function resolveCurrentUserPracticeName(token: string) {
           id?: string | null;
           email?: string | null;
           practice?: { name?: string | null } | null;
+          userRole?: string | null;
         }> | null;
       }
     | null;
@@ -138,7 +139,7 @@ async function resolveCurrentUserPracticeName(token: string) {
     ) ??
     null;
 
-  return matchedUser?.practice?.name?.trim() ?? null;
+  return matchedUser ?? null;
 }
 
 async function loadClientProfile(clientId: string) {
@@ -177,14 +178,14 @@ async function loadClientProfile(clientId: string) {
       };
     }
 
-    const currentUserPracticeName = await resolveCurrentUserPracticeName(token);
+    const currentUserObject = await resolveCurrentUserPracticeName(token);
 
     try {
       const directProfileResult = await getClientProfile(clientId, token);
-
+      
       if (
-        currentUserPracticeName &&
-        directProfileResult.data?.practice?.trim().toLowerCase() !== currentUserPracticeName.trim().toLowerCase()
+        currentUserObject &&
+        directProfileResult.data?.practice?.trim().toLowerCase() !== currentUserObject.practice?.name?.trim().toLowerCase() && currentUserObject.userRole?.trim().toLowerCase() !== "compliance manager"
       ) {
         return {
           profile: mockClientProfile,
@@ -224,8 +225,8 @@ async function loadClientProfile(clientId: string) {
     const profileResult = await getClientProfile(resolvedProfileId, token);
 
     if (
-      currentUserPracticeName &&
-      profileResult.data?.practice?.trim().toLowerCase() !== currentUserPracticeName.trim().toLowerCase()
+      currentUserObject &&
+      profileResult.data?.practice?.trim().toLowerCase() !== currentUserObject.practice?.name?.trim().toLowerCase() && currentUserObject.userRole?.trim().toLowerCase() !== "compliance manager"
     ) {
       return {
         profile: mockClientProfile,

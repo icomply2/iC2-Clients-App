@@ -31,7 +31,7 @@ export function UserInitialsAvatar({ className }: UserInitialsAvatarProps) {
 
   useEffect(() => {
     let isMounted = true;
-
+    
     async function loadCurrentUser() {
       try {
         const response = await fetch("/api/users/me", {
