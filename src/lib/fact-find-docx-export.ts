@@ -255,6 +255,72 @@ function personDetailsXml(title: string, person?: PersonRecord | null) {
   ]);
 }
 
+function compareRiskProfileAnswerIndex(left: string, right: string, leftFallback: number, rightFallback: number) {
+  const leftNumeric = Number(left);
+  const rightNumeric = Number(right);
+
+  if (Number.isFinite(leftNumeric) && Number.isFinite(rightNumeric) && leftNumeric !== rightNumeric) {
+    return leftNumeric - rightNumeric;
+  }
+
+  return (
+    left.localeCompare(right, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }) || leftFallback - rightFallback
+  );
+}
+
+function riskProfileAnswerRows(person: PersonRecord | null | undefined, personLabel: string) {
+  const answers = person?.riskProfileResponse?.answer;
+  if (!Array.isArray(answers)) return [];
+
+  return answers
+    .map((answer, fallbackIndex) => {
+      const index = text(answer?.index) || String(fallbackIndex + 1);
+
+      return {
+        personLabel,
+        index,
+        question: text(answer?.question),
+        choice: text(answer?.choice),
+        fallbackIndex,
+      };
+    })
+    .sort((left, right) =>
+      compareRiskProfileAnswerIndex(left.index, right.index, left.fallbackIndex, right.fallbackIndex),
+    );
+}
+
+function riskProfileXml(profile: ClientProfile) {
+  const people = [
+    { label: "Client", person: profile.client },
+    ...(profile.partner ? [{ label: "Partner", person: profile.partner }] : []),
+  ].filter((entry): entry is { label: string; person: PersonRecord } => Boolean(entry.person));
+
+  if (!people.length) return "";
+
+  const outcomeRows = people.map(({ label, person }) => [
+    label,
+    text(person.riskProfileResponse?.resultDisplay),
+    text(person.riskProfileResponse?.score),
+  ]);
+  const answerRows = people.flatMap(({ label, person }) =>
+    riskProfileAnswerRows(person, label).map((answer) => [
+      answer.personLabel,
+      answer.index,
+      answer.question,
+      answer.choice,
+    ]),
+  );
+
+  return [
+    headingXml("Risk Profile", 2),
+    tableXml(["Person", "Outcome", "Score"], outcomeRows),
+    tableXml(["Person", "Index", "Question", "Answer"], answerRows),
+  ].join("");
+}
+
 function employmentRecords(profile: ClientProfile) {
   const profileEmployment = profile.employment ?? [];
   const nestedEmployment: EmploymentSourceRecord[] = [
@@ -390,6 +456,7 @@ function buildDocumentXml(profile: ClientProfile) {
         text(item.status),
       ]),
     ),
+    riskProfileXml(profile),
   ].join("");
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

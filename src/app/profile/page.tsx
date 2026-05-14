@@ -7,7 +7,6 @@ import {
 } from "@/app/api/integrations/desktop-broker/_shared";
 import { readRexConnectionStateFromCookies } from "@/lib/rex-token";
 import { readUserProfileOverride } from "@/lib/user-profile-overrides-store";
-import { mergeUserSummaryOverride } from "@/lib/user-profile-overrides-shared";
 import {
   DEFAULT_DOCUMENT_STYLE_PROFILE,
   normalizeDocumentStyleProfile,
@@ -75,9 +74,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           return idMatches || emailMatches;
         }) ?? null;
       const profileOverride = apiMatchedUser?.id ? await readUserProfileOverride(apiMatchedUser.id) : null;
-      const matchedUser = apiMatchedUser?.id
-        ? mergeUserSummaryOverride(apiMatchedUser, profileOverride)
-        : apiMatchedUser;
+      const matchedUser = apiMatchedUser;
 
       if (matchedUser) {
         documentStyleProfile = normalizeDocumentStyleProfile(profileOverride?.documentStyleProfile);
@@ -100,7 +97,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         businessName = matchedUser.businessName ?? businessName;
         acn = matchedUser.acn ?? acn;
         abn = matchedUser.abn ?? abn;
-        asicNumber = matchedUser.asicNumber ?? asicNumber;
+        asicNumber = matchedUser.authorizedRepNumber ?? matchedUser.asicNumber ?? asicNumber;
         website = matchedUser.website ?? website;
         xplanSite = matchedUser.xplanSite ?? xplanSite;
         street = matchedUser.address?.street ?? street;

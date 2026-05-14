@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { isArchivedUserToken } from "@/lib/auth-user-status";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
@@ -43,6 +44,13 @@ export async function POST(request: NextRequest) {
     const token = body?.data?.jwtToken;
 
     if (token) {
+      if (await isArchivedUserToken(token)) {
+        return NextResponse.json(
+          { message: "This account has been archived. Please contact your administrator." },
+          { status: 403 },
+        );
+      }
+
       nextResponse.cookies.set(AUTH_COOKIE_NAME, token, {
         httpOnly: true,
         sameSite: "lax",

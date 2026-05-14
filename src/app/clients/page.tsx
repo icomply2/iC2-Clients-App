@@ -14,6 +14,7 @@ type ClientRow = {
   adviser: string;
   category: string;
   practice: string;
+  status: string;
   licensee: string;
 };
 
@@ -31,6 +32,7 @@ function mapClientSummaryToRow(client: ClientSummary): ClientRow {
     adviser: client.clientAdviserName ?? "",
     category: client.category ?? client.clientCategory ?? "",
     practice: client.clientAdviserPracticeName ?? "",
+    status: client.clientStatus ?? client.status ?? "",
     licensee: client.clientAdviserLicenseeName ?? "",
   };
 }
@@ -70,7 +72,9 @@ function ClientsPageContent() {
   const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
   const [adviser, setAdviser] = useState("All advisers");
+  const [statusFilter, setStatusFilter] = useState("All statuses");
   const [adviserOptions, setAdviserOptions] = useState<string[]>(["All advisers"]);
+  const [statusOptions, setStatusOptions] = useState<string[]>(["All statuses"]);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
   const [clients, setClients] = useState<ClientRow[]>([]);
   const [pageSize, setPageSize] = useState(10);
@@ -124,13 +128,15 @@ function ClientsPageContent() {
                 totalPageCount?: number | null;
                 items?: Array<{
                   id?: string | null;
-                  client?: { name?: string | null ; category?: string | null ; clientCategory?: string | null } | null;
-                  partner?: { name?: string | null ; category?: string | null ; clientCategory?: string | null }  | null;
+                  client?: { name?: string | null; clientStatus?: string | null; status?: string | null } | null;
+                  partner?: { name?: string | null } | null;
                   adviser?: { name?: string | null } | null;
                   practice?: string | null;
                   licensee?: string | null;
                   clientAdviserName?: string | null;
                   clientAdviserPracticeName?: string | null;
+                  status?: string | null;
+                  clientStatus?: string | null;
                   clientAdviserLicenseeName?: string | null;
                   category?: string | null;
                   clientCategory?: string | null;
@@ -159,26 +165,31 @@ function ClientsPageContent() {
               name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
               clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
               clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
-              clientAdviserLicenseeName: item.clientAdviserLicenseeName ?? item.licensee,
-              category: item.category ?? item.clientCategory ?? item.client?.category,
-              clientCategory: item.clientCategory ?? item.client?.clientCategory,
+              status: item.status,
+              clientStatus: item.client?.clientStatus ?? item.clientStatus ?? item.client?.status,
+              category: item.category ?? item.clientCategory,
+              clientCategory: item.clientCategory,
+              clientAdviserLicenseeName: item.clientAdviserLicenseeName ?? item.licensee
             }),
           )
           .filter((client) => client.id);
 
-        const filteredClients = filterRowsByCurrentUserScope(nextClients, currentUserScope);
-
-        setClients((currentClients) => {
-          const preservedLocallyCreatedClients = currentClients.filter(
-            (client) =>
-              locallyCreatedClientIdsRef.current.has(client.id) &&
-              !filteredClients.some((nextClient) => nextClient.id === client.id),
+        if (nextClients.length > 0) {
+          const scopedClients = filterRowsByPractice(nextClients, currentUserScope?.practice?.name);
+          setStatusOptions([
+            "All statuses",
+            ...Array.from(new Set(scopedClients.map((client) => client.status.trim()).filter(Boolean))).sort((left, right) =>
+              left.localeCompare(right),
+            ),
+          ]);
+          setClients(
+            statusFilter === "All statuses"
+              ? scopedClients
+              : scopedClients.filter((client) => client.status.trim() === statusFilter),
           );
-
-          return preservedLocallyCreatedClients.length
-            ? [...preservedLocallyCreatedClients, ...filteredClients]
-            : filteredClients;
-        });
+        } else {
+          setClients([]);
+        }
 
         setNextContinuationToken(body?.data?.continuationToken ?? null);
         setTotalPages(Math.max(body?.data?.totalPageCount ?? 1, 1));
@@ -215,16 +226,7 @@ function ClientsPageContent() {
     return () => {
       isMounted = false;
     };
-  }, [
-    adviser,
-    clientListRefreshKey,
-    continuationTokens,
-    currentPage,
-    currentUserScope,
-    pageSize,
-    router,
-    search,
-  ]);
+  }, [adviser, continuationTokens, currentPage, currentUserScope?.practice?.name, pageSize, search, statusFilter]);
 
   useEffect(() => {
     let isMounted = true;
@@ -477,6 +479,18 @@ function ClientsPageContent() {
             />
             <select
               className={styles.filterSelect}
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                resetPagination();
+              }}
+            >
+              {statusOptions.map((option) => (
+                <option key={option}>{option}</option>
+              ))}
+            </select>
+            <select
+              className={styles.filterSelect}
               value={adviser}
               onChange={(event) => {
                 setAdviser(event.target.value);
@@ -497,6 +511,7 @@ function ClientsPageContent() {
             <div>Adviser Name</div>
             <div>Category</div>
             <div>Practice Name</div>
+            <div>Status</div>
             <div />
           </div>
 
@@ -509,6 +524,7 @@ function ClientsPageContent() {
                 <div>{client.adviser}</div>
                 <div>{client.category}</div>
                 <div>{client.practice}</div>
+                <div>{client.status || "No status"}</div>
                 <button
                   type="button"
                   className={styles.deleteButton}

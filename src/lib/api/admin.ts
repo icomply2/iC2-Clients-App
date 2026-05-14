@@ -64,6 +64,28 @@ export async function updateAdminLicensee(licenseeId: string, payload: LicenseeD
   return (await readResponse(response)) as ApiResult<LicenseeDto> | null;
 }
 
+export async function deleteAdminLicensee(licenseeId: string) {
+  const response = await fetch(`/api/admin/licensees/${encodeURIComponent(licenseeId)}`, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  return (await readResponse(response)) as ApiResult<boolean> | null;
+}
+
+export async function deleteAdminPractice(practiceId: string) {
+  const response = await fetch(`/api/admin/practices/${encodeURIComponent(practiceId)}`, {
+    method: "DELETE",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  return (await readResponse(response)) as ApiResult<boolean> | null;
+}
+
 export async function createAdminPractice(payload: PracticeDto) {
   const response = await fetch("/api/admin/practices", {
     method: "POST",

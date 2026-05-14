@@ -466,6 +466,94 @@ function buildCurrentPersonChanges(person: PersonRecord | null | undefined): Rec
   };
 }
 
+function buildRiskProfileEditorCard(profile: ClientProfile | null, includePartner: boolean): FinleyEditorCard {
+  const fields: FinleyEditorCard["fields"] = [
+    {
+      key: "clientRiskProfile",
+      label: "Client Risk Profile",
+      input: "select",
+      value: profile?.client?.riskProfileResponse?.resultDisplay ?? "",
+      options: toCardOptions(RISK_PROFILE_OPTIONS),
+    },
+  ];
+
+  if (includePartner) {
+    fields.push({
+      key: "partnerRiskProfile",
+      label: "Partner Risk Profile",
+      input: "select",
+      value: profile?.partner?.riskProfileResponse?.resultDisplay ?? "",
+      options: toCardOptions(RISK_PROFILE_OPTIONS),
+    });
+  }
+
+  return {
+    kind: "collection_form",
+    title: "Update Risk Profile",
+    toolName: "update_risk_profile",
+    fields,
+  };
+}
+
+function compareRiskProfileAnswerIndex(left: string, right: string, leftFallback: number, rightFallback: number) {
+  const leftNumeric = Number(left);
+  const rightNumeric = Number(right);
+
+  if (Number.isFinite(leftNumeric) && Number.isFinite(rightNumeric) && leftNumeric !== rightNumeric) {
+    return leftNumeric - rightNumeric;
+  }
+
+  return (
+    left.localeCompare(right, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }) || leftFallback - rightFallback
+  );
+}
+
+function readRiskProfileAnswerRows(person: PersonRecord | null | undefined, personLabel: string) {
+  const answers = person?.riskProfileResponse?.answer;
+  if (!Array.isArray(answers)) return [];
+
+  return answers
+    .map((answer, fallbackIndex) => {
+      const index = textValue(answer?.index) || String(fallbackIndex + 1);
+
+      return {
+        id: `${personLabel.toLowerCase()}-${fallbackIndex}-${index}`,
+        index,
+        personLabel,
+        question: textValue(answer?.question) ?? "",
+        choice: textValue(answer?.choice) ?? "",
+        fallbackIndex,
+      };
+    })
+    .sort((left, right) =>
+      compareRiskProfileAnswerIndex(left.index, right.index, left.fallbackIndex, right.fallbackIndex),
+    );
+}
+
+function buildRiskProfileAnswersCard(profile: ClientProfile | null, includePartner: boolean): FinleyDisplayCard | null {
+  const clientRows = readRiskProfileAnswerRows(profile?.client, "Client");
+  const partnerRows = includePartner ? readRiskProfileAnswerRows(profile?.partner, "Partner") : [];
+  const answerRows = [...clientRows, ...partnerRows];
+
+  if (!answerRows.length) return null;
+
+  return {
+    kind: "collection_summary",
+    title: "Risk Profile Answers",
+    columns: includePartner ? ["Person", "Index", "Question", "Answer"] : ["Index", "Question", "Answer"],
+    rows: answerRows.map((answer) => ({
+      id: `risk-profile-answer-${answer.id}`,
+      cells: includePartner
+        ? [answer.personLabel, answer.index, answer.question, answer.choice]
+        : [answer.index, answer.question, answer.choice],
+    })),
+    footer: null,
+  };
+}
+
 function applyFileNoteOverrides(plan: StoredPlan, overrides?: PlanExecutionOverrides | null) {
   if (!overrides) return plan;
 
@@ -3893,6 +3981,14 @@ export async function prepareFinleyFactFindWorkflow(input: {
       "what insurance does this client have",
       liveContext,
     ),
+    {
+      id: "risk-profile",
+      title: "Risk Profile",
+      description: "Review the current risk profile result for the client household.",
+      guidance: null,
+      displayCard: buildRiskProfileAnswersCard(liveContext.profile, hasPartner),
+      editorCard: buildRiskProfileEditorCard(liveContext.profile, hasPartner),
+    },
   );
 
   return {

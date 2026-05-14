@@ -52,6 +52,8 @@ export async function GET(request: NextRequest) {
             licensee: client.clientAdviserLicenseeName,
             clientAdviserName: client.clientAdviserName,
             clientAdviserPracticeName: client.clientAdviserPracticeName,
+            status: client.status,
+            clientStatus: client.clientStatus,
             clientAdviserLicenseeName: client.clientAdviserLicenseeName,
             category: client.category,
             clientCategory: client.clientCategory,
