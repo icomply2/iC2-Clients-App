@@ -31,6 +31,29 @@ export function readStringClaim(payload: Record<string, unknown>, claimNames: st
   return null;
 }
 
+async function resolveUserById(apiBaseUrl: string, token: string, userId: string) {
+  const response = await fetch(new URL(`/api/Users/${encodeURIComponent(userId)}`, apiBaseUrl), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const body = (await response.json().catch(() => null)) as
+    | {
+        data?: UserSummary | null;
+      }
+    | null;
+
+  return body?.data ?? null;
+}
+
 export async function resolveCurrentUserFromApi(token: string) {
   const apiBaseUrl = getApiBaseUrl();
 
@@ -58,6 +81,14 @@ export async function resolveCurrentUserFromApi(token: string) {
         "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
       ])
     : null;
+
+  if (currentUserId) {
+    const currentUser = await resolveUserById(apiBaseUrl, token, currentUserId);
+
+    if (currentUser) {
+      return currentUser;
+    }
+  }
 
   const response = await fetch(new URL("/api/Users", apiBaseUrl), {
     method: "GET",
