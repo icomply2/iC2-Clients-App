@@ -64,7 +64,6 @@ export async function POST(request: NextRequest) {
   if (!apiBaseUrl) {
     return NextResponse.json({ message: "NEXT_PUBLIC_API_BASE_URL is not configured." }, { status: 500 });
   }
-
   try {
     const response = await fetch(new URL("/api/Users/Login", apiBaseUrl), {
       method: "POST",
@@ -83,16 +82,16 @@ export async function POST(request: NextRequest) {
         }
       | null;
 
+     ;
     if (!response.ok) {
       return NextResponse.json(
         { message: body?.message ?? "Login failed." },
         { status: response.status },
       );
     }
-
+    
     const token = body?.data?.jwtToken;
     const requiresTwoFactor = body?.data?.requiresTwoFactorAuthentication ?? false;
-
     if (token && !requiresTwoFactor && await isArchivedUserToken(token)) {
       return NextResponse.json(
         { message: "This account has been archived. Please contact your administrator." },
