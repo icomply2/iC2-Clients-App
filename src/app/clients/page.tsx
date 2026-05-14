@@ -175,7 +175,7 @@ function ClientsPageContent() {
           .filter((client) => client.id);
 
         if (nextClients.length > 0) {
-          const scopedClients = filterRowsByPractice(nextClients, currentUserScope?.practice?.name);
+          const scopedClients = filterRowsByCurrentUserScope(nextClients, currentUserScope);
           setStatusOptions([
             "All statuses",
             ...Array.from(new Set(scopedClients.map((client) => client.status.trim()).filter(Boolean))).sort((left, right) =>
@@ -226,7 +226,7 @@ function ClientsPageContent() {
     return () => {
       isMounted = false;
     };
-  }, [adviser, continuationTokens, currentPage, currentUserScope?.practice?.name, pageSize, search, statusFilter]);
+  }, [adviser, clientListRefreshKey, continuationTokens, currentPage, currentUserScope, pageSize, search, statusFilter]);
 
   useEffect(() => {
     let isMounted = true;
@@ -434,6 +434,7 @@ function ClientsPageContent() {
       name: createdClient.name?.trim() || [primaryName, partnerName].filter(Boolean).join(" & ") || "Unnamed Client",
       adviser: createdClient.clientAdviserName ?? createdClient.adviser?.name ?? currentUserScope?.name ?? "",
       category: "",
+      status: "Client",
       practice:
         createdClient.clientAdviserPracticeName ??
         createdClient.practice ??
