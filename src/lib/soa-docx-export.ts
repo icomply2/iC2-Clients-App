@@ -10,6 +10,11 @@ import {
   type DocumentStyleProfile,
 } from "@/lib/documents/document-style-profile";
 import { getPortfolioAccountViews, getPrimaryAllocationRows } from "@/lib/soa-portfolio-accounts";
+import {
+  INSURANCE_NEEDS_PROVISION_ITEMS,
+  INSURANCE_NEEDS_REQUIREMENT_ITEMS,
+  normalizeInsuranceNeedsLineItems,
+} from "@/lib/soa-insurance-needs";
 import type {
   AdviceCaseV1,
   CommissionItemV1,
@@ -1529,12 +1534,19 @@ function buildInsuranceNeedsAnalysis(input: SoaDocxExportInput, fontFamily: stri
 
       const totals = personAnalyses.reduce(
         (sum, analysis) => {
-          const key = getInsuranceCoverTypeKey(analysis.policyType);
-          if (key) {
-            sum.required[key] += analysis.outputs.targetCoverAmount ?? 0;
-            sum.available[key] += analysis.inputs.existingCoverAmount ?? 0;
-            sum.cover[key] += analysis.outputs.coverGapAmount ?? Math.max((analysis.outputs.targetCoverAmount ?? 0) - (analysis.inputs.existingCoverAmount ?? 0), 0);
-          }
+          const normalized = normalizeInsuranceNeedsLineItems(analysis);
+          sum.required.life += normalized.requiredTotals.life;
+          sum.required.tpd += normalized.requiredTotals.tpd;
+          sum.required.trauma += normalized.requiredTotals.trauma;
+          sum.required.incomeProtection += normalized.requiredTotals.incomeProtection;
+          sum.available.life += normalized.provisionTotals.life;
+          sum.available.tpd += normalized.provisionTotals.tpd;
+          sum.available.trauma += normalized.provisionTotals.trauma;
+          sum.available.incomeProtection += normalized.provisionTotals.incomeProtection;
+          sum.cover.life += normalized.coverGapTotals.life;
+          sum.cover.tpd += normalized.coverGapTotals.tpd;
+          sum.cover.trauma += normalized.coverGapTotals.trauma;
+          sum.cover.incomeProtection += normalized.coverGapTotals.incomeProtection;
           return sum;
         },
         {
@@ -1543,29 +1555,43 @@ function buildInsuranceNeedsAnalysis(input: SoaDocxExportInput, fontFamily: stri
           cover: { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
         },
       );
-      const amountRow = (label: string, analysis: (typeof personAnalyses)[number], amount?: number | null) => {
-        const key = getInsuranceCoverTypeKey(analysis.policyType);
+      const lineItemRow = (
+        label: string,
+        amounts: { life?: number | null; tpd?: number | null; trauma?: number | null; incomeProtection?: number | null },
+      ) => {
         return [
           { text: label, widthPct: 36 },
-          { text: key === "life" ? formatCurrency(amount) : "-", widthPct: 16 },
-          { text: key === "tpd" ? formatCurrency(amount) : "-", widthPct: 16 },
-          { text: key === "trauma" ? formatCurrency(amount) : "-", widthPct: 16 },
-          { text: key === "incomeProtection" ? formatCurrency(amount) : "-", widthPct: 16 },
+          { text: formatCurrency(amounts.life ?? 0), widthPct: 16 },
+          { text: formatCurrency(amounts.tpd ?? 0), widthPct: 16 },
+          { text: formatCurrency(amounts.trauma ?? 0), widthPct: 16 },
+          { text: formatCurrency(amounts.incomeProtection ?? 0), widthPct: 16 },
         ];
       };
+      const getLineItemTotals = (key: string, category: "requirements" | "provisions") =>
+        personAnalyses.reduce(
+          (sum, analysis) => {
+            const lineItem = normalizeInsuranceNeedsLineItems(analysis)[category].find((item) => item.key === key);
+            sum.life += lineItem?.life ?? 0;
+            sum.tpd += lineItem?.tpd ?? 0;
+            sum.trauma += lineItem?.trauma ?? 0;
+            sum.incomeProtection += lineItem?.incomeProtection ?? 0;
+            return sum;
+          },
+          { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
+        );
 
       return [
         heading(person.fullName, 2, fontFamily),
         table(
           [
-            [headerCell(person.fullName, tableHeaderColor, DEFAULT_TEXT_COLOR, 36), headerCell("Life", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), headerCell("TPD", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), headerCell("Trauma", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), headerCell("IP (p.a.)", tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
+            [headerCell(person.fullName, tableHeaderColor, DEFAULT_TEXT_COLOR, 36), headerCell("Life", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), headerCell("TPD", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), headerCell("Trauma", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), headerCell("IP (monthly)", tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
             [totalCell("Capital Requirements", tableHeaderColor, DEFAULT_TEXT_COLOR, 36), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
-            ...personAnalyses.map((analysis) => amountRow(analysis.purpose || `${toTitleCase(analysis.policyType)} cover required`, analysis, analysis.outputs.targetCoverAmount)),
+            ...INSURANCE_NEEDS_REQUIREMENT_ITEMS.map((item) => lineItemRow(item.title, getLineItemTotals(item.key, "requirements"))),
             [totalCell("Total Capital Required", tableHeaderColor, DEFAULT_TEXT_COLOR, 36), totalCell(formatCurrency(totals.required.life), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.required.tpd), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.required.trauma), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.required.incomeProtection), tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
             [totalCell("Capital Provisions", tableHeaderColor, DEFAULT_TEXT_COLOR, 36), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
-            ...personAnalyses.map((analysis) => amountRow("Existing cover and available provisions", analysis, analysis.inputs.existingCoverAmount)),
+            ...INSURANCE_NEEDS_PROVISION_ITEMS.map((item) => lineItemRow(item.title, getLineItemTotals(item.key, "provisions"))),
             [totalCell("Total Capital Available", tableHeaderColor, DEFAULT_TEXT_COLOR, 36), totalCell(formatCurrency(totals.available.life), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.available.tpd), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.available.trauma), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.available.incomeProtection), tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
-            [totalCell("Total Cover Required", tableHeaderColor, DEFAULT_TEXT_COLOR, 36), totalCell(formatCurrency(totals.cover.life), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.cover.tpd), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.cover.trauma), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.cover.incomeProtection), tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
+            [totalCell("Total Cover Gap", tableHeaderColor, DEFAULT_TEXT_COLOR, 36), totalCell(formatCurrency(totals.cover.life), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.cover.tpd), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.cover.trauma), tableHeaderColor, DEFAULT_TEXT_COLOR, 16), totalCell(formatCurrency(totals.cover.incomeProtection), tableHeaderColor, DEFAULT_TEXT_COLOR, 16)],
           ],
           fontFamily,
           textColor,

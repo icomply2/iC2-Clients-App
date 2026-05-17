@@ -17,8 +17,22 @@ import type {
 import type { FinancialCollectionKind, ProfileCollectionRecord } from "@/lib/api/contracts/profile-collections";
 import type { FinleyDisplayCard, FinleyEditorCard, FinleyFactFindWorkflow, FinleyTableEditorCard } from "@/lib/finley-shared";
 import { updateClientDetails, updatePartnerDetails, updatePersonRiskProfile, upsertEmploymentRecords } from "@/lib/services/client-updates";
-import { saveDependantCollection, saveEntityCollection, upsertDependantCollection, upsertEntityCollection } from "@/lib/services/identity-relations";
-import { saveAssetCollection, saveFinancialCollection, upsertAssetCollection, upsertFinancialCollection } from "@/lib/services/profile-collections";
+import {
+  deleteDependantCollectionItem,
+  deleteEntityCollectionItem,
+  saveDependantCollection,
+  saveEntityCollection,
+  upsertDependantCollection,
+  upsertEntityCollection,
+} from "@/lib/services/identity-relations";
+import {
+  deleteAssetCollectionItem,
+  deleteFinancialCollectionItem,
+  saveAssetCollection,
+  saveFinancialCollection,
+  upsertAssetCollection,
+  upsertFinancialCollection,
+} from "@/lib/services/profile-collections";
 import styles from "./page.module.css";
 
 type FactFindSectionProps = {
@@ -48,6 +62,12 @@ type PopupField = {
 type FactFindRecordModalState = {
   section: FactFindPopupSection;
   recordId?: string | null;
+};
+
+type FactFindDeleteConfirmState = {
+  section: FactFindPopupSection;
+  recordId: string;
+  label: string;
 };
 
 const FACT_FIND_POPUP_SECTIONS: Record<FactFindPopupSection, true> = {
@@ -101,6 +121,17 @@ const TAX_TYPE_OPTIONS = ["Taxable", "Non-taxable"];
 
 function isFactFindPopupSection(stepId?: string | null): stepId is FactFindPopupSection {
   return Boolean(stepId && stepId in FACT_FIND_POPUP_SECTIONS);
+}
+
+function isFinancialPopupSection(section: FactFindPopupSection): section is FinancialCollectionKind {
+  return (
+    section === "liabilities" ||
+    section === "income" ||
+    section === "expenses" ||
+    section === "superannuation" ||
+    section === "retirement-income" ||
+    section === "insurance"
+  );
 }
 
 function buildClientName(profile: ClientProfile) {
@@ -598,9 +629,13 @@ function renderEditorField(
 function renderDisplayCard(
   displayCard: FinleyDisplayCard,
   onEditRecord: (section: FactFindPopupSection, recordId: string) => void,
+  onDeleteRecord: (section: FactFindPopupSection, recordId: string, label: string) => void,
 ) {
   const hasActions = displayCard.rows.some((row) => row.editAction);
   const columns = hasActions ? [...displayCard.columns, "Action"] : displayCard.columns;
+  const gridTemplateColumns = hasActions
+    ? `${displayCard.columns.map(() => "minmax(0, 1fr)").join(" ")} minmax(7rem, 8rem)`
+    : `repeat(${columns.length}, minmax(0, 1fr))`;
 
   return (
     <div className={styles.factFindDataCard}>
@@ -608,10 +643,13 @@ function renderDisplayCard(
       <div className={styles.factFindDataTableWrap}>
         <div
           className={styles.factFindDataTableHeader}
-          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+          style={{ gridTemplateColumns }}
         >
           {columns.map((column) => (
-            <div key={column} className={styles.factFindDataTableHeaderCell}>
+            <div
+              key={column}
+              className={`${styles.factFindDataTableHeaderCell} ${column === "Action" ? styles.factFindDataTableActionHeaderCell : ""}`.trim()}
+            >
               {column}
             </div>
           ))}
@@ -620,7 +658,7 @@ function renderDisplayCard(
           <div
             key={row.id}
             className={styles.factFindDataTableRow}
-            style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns }}
           >
             {row.cells.map((cell, cellIndex) => (
               <div key={`${row.id}-${cellIndex}`} className={styles.factFindDataTableCell}>
@@ -630,18 +668,41 @@ function renderDisplayCard(
             {hasActions ? (
               <div className={`${styles.factFindDataTableCell} ${styles.factFindDataTableActionCell}`.trim()}>
                 {row.editAction ? (
-                  <button
-                    type="button"
-                    className={styles.factFindEditButton}
-                    onClick={() => onEditRecord(row.editAction!.kind, row.editAction!.recordId)}
-                    aria-label={`Edit ${row.editAction.kind.replace("-", " ")} record`}
-                    title={`Edit ${row.editAction.kind.replace("-", " ")} record`}
-                  >
-                    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
-                      <path d="M16.9 4.4 19.6 7.1 8.8 17.9 5.3 18.7 6.1 15.2 16.9 4.4Z" />
-                      <path d="M14.9 6.4 17.6 9.1" />
-                    </svg>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={styles.factFindEditButton}
+                      onClick={() => onEditRecord(row.editAction!.kind, row.editAction!.recordId)}
+                      aria-label={`Edit ${row.editAction.kind.replace("-", " ")} record`}
+                      title={`Edit ${row.editAction.kind.replace("-", " ")} record`}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                        <path d="M16.9 4.4 19.6 7.1 8.8 17.9 5.3 18.7 6.1 15.2 16.9 4.4Z" />
+                        <path d="M14.9 6.4 17.6 9.1" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      className={`${styles.factFindEditButton} ${styles.factFindDeleteButton}`.trim()}
+                      onClick={() =>
+                        onDeleteRecord(
+                          row.editAction!.kind,
+                          row.editAction!.recordId,
+                          row.cells.filter(Boolean).slice(0, 2).join(" | ") || row.editAction!.kind.replace("-", " "),
+                        )
+                      }
+                      aria-label={`Delete ${row.editAction.kind.replace("-", " ")} record`}
+                      title={`Delete ${row.editAction.kind.replace("-", " ")} record`}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                        <path d="M4 7h16" />
+                        <path d="M10 11v6" />
+                        <path d="M14 11v6" />
+                        <path d="M6 7l1 13h10l1-13" />
+                        <path d="M9 7V4h6v3" />
+                      </svg>
+                    </button>
+                  </>
                 ) : (
                   <span className={styles.factFindDataTableActionPlaceholder}>—</span>
                 )}
@@ -752,6 +813,9 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
   const [recordValues, setRecordValues] = useState<Record<string, string>>({});
   const [recordError, setRecordError] = useState<string | null>(null);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<FactFindDeleteConfirmState | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
   const clientName = useMemo(() => buildClientName(profileState), [profileState]);
   const currentStep = workflow?.steps?.[stepIndex] ?? null;
   const currentStepPopupSection = isFactFindPopupSection(currentStep?.id) ? currentStep.id : null;
@@ -813,6 +877,17 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
     setRecordModal(null);
     setRecordValues({});
     setRecordError(null);
+  }
+
+  function openDeleteConfirm(section: FactFindPopupSection, recordId: string, label: string) {
+    setDeleteConfirm({ section, recordId, label });
+    setDeleteError(null);
+  }
+
+  function closeDeleteConfirm() {
+    if (isDeletingRecord) return;
+    setDeleteConfirm(null);
+    setDeleteError(null);
   }
 
   function updateRecordValue(fieldKey: string, value: string) {
@@ -1059,6 +1134,83 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
       setRecordError(saveError instanceof Error ? saveError.message : "Unable to save this record right now.");
     } finally {
       setIsSavingRecord(false);
+    }
+  }
+
+  async function handleDeleteConfirmed() {
+    if (!deleteConfirm) return;
+
+    const profileId = profileState.id?.trim() || "";
+    if (!profileId) {
+      setDeleteError("This client profile does not have a profile id yet.");
+      return;
+    }
+
+    setIsDeletingRecord(true);
+    setDeleteError(null);
+
+    try {
+      switch (deleteConfirm.section) {
+        case "dependants":
+          await deleteDependantCollectionItem(profileId, deleteConfirm.recordId);
+          setProfileState((current) => ({
+            ...current,
+            dependants: (current.dependants ?? []).filter((item) => item.id !== deleteConfirm.recordId),
+          }));
+          break;
+        case "entities":
+          await deleteEntityCollectionItem(profileId, deleteConfirm.recordId);
+          setProfileState((current) => ({
+            ...current,
+            entities: (current.entities ?? []).filter((item) => item.id !== deleteConfirm.recordId),
+          }));
+          break;
+        case "assets":
+          await deleteAssetCollectionItem(profileId, deleteConfirm.recordId);
+          setProfileState((current) => ({
+            ...current,
+            assets: (current.assets ?? []).filter((item) => item.id !== deleteConfirm.recordId),
+          }));
+          break;
+        case "employment": {
+          const response = await fetch(
+            `/api/client-profiles/${encodeURIComponent(profileId)}/employments/${encodeURIComponent(deleteConfirm.recordId)}`,
+            {
+              method: "DELETE",
+              cache: "no-store",
+            },
+          );
+          if (!response.ok) {
+            const body = (await response.json().catch(() => null)) as { message?: string; error?: string } | null;
+            throw new Error(body?.message || body?.error || "Unable to delete this employment record right now.");
+          }
+          setProfileState((current) => ({
+            ...current,
+            employment: (current.employment ?? []).filter((item) => item.id !== deleteConfirm.recordId),
+          }));
+          break;
+        }
+        default:
+          if (!isFinancialPopupSection(deleteConfirm.section)) {
+            throw new Error("This fact find section cannot be deleted from here yet.");
+          }
+          const financialSection = deleteConfirm.section;
+          await deleteFinancialCollectionItem(financialSection, profileId, deleteConfirm.recordId);
+          setProfileState((current) =>
+            assignFinancialRecords(
+              current,
+              financialSection,
+              resolveFinancialRecords(current, financialSection).filter((item) => item.id !== deleteConfirm.recordId),
+            ),
+          );
+      }
+
+      setDeleteConfirm(null);
+      await loadWorkflow({ resetStep: false });
+    } catch (deleteRecordError) {
+      setDeleteError(deleteRecordError instanceof Error ? deleteRecordError.message : "Unable to delete this record right now.");
+    } finally {
+      setIsDeletingRecord(false);
     }
   }
 
@@ -1346,7 +1498,7 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
             </div>
 
             {currentStep.editorCard ? renderEditorCard(currentStep.editorCard, updateStepField) : null}
-            {currentStep.displayCard ? renderDisplayCard(currentStep.displayCard, openRecordModal) : null}
+            {currentStep.displayCard ? renderDisplayCard(currentStep.displayCard, openRecordModal, openDeleteConfirm) : null}
 
             <div className={styles.factFindWorkflowActions}>
               <button
@@ -1437,6 +1589,39 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
               </button>
               <button type="button" className={styles.modalPrimary} onClick={() => void handleSaveRecordModal()} disabled={isSavingRecord}>
                 {isSavingRecord ? "Saving..." : "Save record"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteConfirm ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={closeDeleteConfirm}>
+          <div
+            className={styles.confirmDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fact-find-delete-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="fact-find-delete-title" className={styles.confirmTitle}>
+              Delete record?
+            </h2>
+            <p className={styles.confirmText}>
+              This will delete {deleteConfirm.label} from the client profile. This action cannot be undone.
+            </p>
+            {deleteError ? <p className={styles.modalError}>{deleteError}</p> : null}
+            <div className={styles.confirmActions}>
+              <button type="button" className={styles.modalSecondary} onClick={closeDeleteConfirm} disabled={isDeletingRecord}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`${styles.modalPrimary} ${styles.confirmDanger}`.trim()}
+                onClick={() => void handleDeleteConfirmed()}
+                disabled={isDeletingRecord}
+              >
+                {isDeletingRecord ? "Deleting..." : "Delete record"}
               </button>
             </div>
           </div>

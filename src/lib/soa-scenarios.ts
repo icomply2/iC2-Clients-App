@@ -29,6 +29,8 @@ export type SoaScenarioDraftValue = {
   confirmedSections: Record<string, boolean>;
   answeredFollowUpQuestions: string[];
   answeredFollowUpResponses: Record<string, string>;
+  followUpAnswerDrafts?: Record<string, string>;
+  hasUnsyncedFollowUpAnswers?: boolean;
   activeInsurancePersonId: string | null;
   activeRiskPersonId: string | null;
   riskProfilesByPerson: Record<string, RiskProfileV1>;

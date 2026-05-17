@@ -958,6 +958,85 @@
   text-decoration: underline;
 }
 
+.intakeFollowUpHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.intakeQuestionList {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.75rem;
+}
+
+.intakeQuestionItem {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.75rem;
+  background: #fff;
+}
+
+.intakeQuestionPromptRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #113864;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.intakeQuestionTextarea {
+  min-height: 4.8rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  resize: vertical;
+}
+
+.intakeQuestionSaveButton,
+.intakeUpdateBriefButton {
+  justify-self: flex-start;
+  min-height: 2.15rem;
+  padding: 0 0.8rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.7rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.intakeUpdateBriefButton {
+  flex: 0 0 auto;
+  border-color: #0f2e57;
+  background: #0f2e57;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.intakeQuestionSaveButton:disabled,
+.intakeUpdateBriefButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.intakeUnsyncedNotice {
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #f2c500;
+  border-radius: 0.7rem;
+  background: #fff8d9;
+  color: #7c5f00;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .intakeQuestionAnswered {
   display: inline-flex;
   align-items: center;

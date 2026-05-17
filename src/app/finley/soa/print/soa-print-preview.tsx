@@ -28,6 +28,11 @@ import {
 } from "@/lib/documents/document-style-profile";
 import { getPortfolioAccountViews, getPrimaryAllocationRows } from "@/lib/soa-portfolio-accounts";
 import { getSoaScenario } from "@/lib/soa-scenarios";
+import {
+  INSURANCE_NEEDS_PROVISION_ITEMS,
+  INSURANCE_NEEDS_REQUIREMENT_ITEMS,
+  normalizeInsuranceNeedsLineItems,
+} from "@/lib/soa-insurance-needs";
 import styles from "./soa-print.module.css";
 
 const SOA_PRINT_STORAGE_KEY = "finley-soa-print-preview-v1";
@@ -1964,12 +1969,19 @@ export function SoaPrintPreview() {
 
                   const totals = analyses.reduce(
                     (sum, analysis) => {
-                      const key = getInsuranceCoverTypeKey(analysis.policyType);
-                      if (key) {
-                        sum.required[key] += analysis.outputs.targetCoverAmount ?? 0;
-                        sum.available[key] += analysis.inputs.existingCoverAmount ?? 0;
-                        sum.cover[key] += analysis.outputs.coverGapAmount ?? Math.max((analysis.outputs.targetCoverAmount ?? 0) - (analysis.inputs.existingCoverAmount ?? 0), 0);
-                      }
+                      const normalized = normalizeInsuranceNeedsLineItems(analysis);
+                      sum.required.life += normalized.requiredTotals.life;
+                      sum.required.tpd += normalized.requiredTotals.tpd;
+                      sum.required.trauma += normalized.requiredTotals.trauma;
+                      sum.required.incomeProtection += normalized.requiredTotals.incomeProtection;
+                      sum.available.life += normalized.provisionTotals.life;
+                      sum.available.tpd += normalized.provisionTotals.tpd;
+                      sum.available.trauma += normalized.provisionTotals.trauma;
+                      sum.available.incomeProtection += normalized.provisionTotals.incomeProtection;
+                      sum.cover.life += normalized.coverGapTotals.life;
+                      sum.cover.tpd += normalized.coverGapTotals.tpd;
+                      sum.cover.trauma += normalized.coverGapTotals.trauma;
+                      sum.cover.incomeProtection += normalized.coverGapTotals.incomeProtection;
                       return sum;
                     },
                     {
@@ -1989,20 +2001,30 @@ export function SoaPrintPreview() {
                             <th>Life</th>
                             <th>TPD</th>
                             <th>Trauma</th>
-                            <th>IP (p.a.)</th>
+                            <th>IP (monthly)</th>
                           </tr>
                         </thead>
                         <tbody>
                           <tr className={styles.platformSubheadingRow}><td colSpan={5}>Capital Requirements</td></tr>
-                          {analyses.map((analysis) => {
-                            const key = getInsuranceCoverTypeKey(analysis.policyType);
+                          {INSURANCE_NEEDS_REQUIREMENT_ITEMS.map((item) => {
+                            const lineTotals = analyses.reduce(
+                              (sum, analysis) => {
+                                const lineItem = normalizeInsuranceNeedsLineItems(analysis).requirements.find((entry) => entry.key === item.key);
+                                sum.life += lineItem?.life ?? 0;
+                                sum.tpd += lineItem?.tpd ?? 0;
+                                sum.trauma += lineItem?.trauma ?? 0;
+                                sum.incomeProtection += lineItem?.incomeProtection ?? 0;
+                                return sum;
+                              },
+                              { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
+                            );
                             return (
-                              <tr key={`${analysis.analysisId}-required`}>
-                                <td>{analysis.purpose || `${toTitleCase(analysis.policyType)} cover required`}</td>
-                                <td>{key === "life" ? formatCurrency(analysis.outputs.targetCoverAmount) : "—"}</td>
-                                <td>{key === "tpd" ? formatCurrency(analysis.outputs.targetCoverAmount) : "—"}</td>
-                                <td>{key === "trauma" ? formatCurrency(analysis.outputs.targetCoverAmount) : "—"}</td>
-                                <td>{key === "incomeProtection" ? formatCurrency(analysis.outputs.targetCoverAmount) : "—"}</td>
+                              <tr key={`required-${item.key}`}>
+                                <td>{item.title}</td>
+                                <td>{formatCurrency(lineTotals.life)}</td>
+                                <td>{formatCurrency(lineTotals.tpd)}</td>
+                                <td>{formatCurrency(lineTotals.trauma)}</td>
+                                <td>{formatCurrency(lineTotals.incomeProtection)}</td>
                               </tr>
                             );
                           })}
@@ -2014,15 +2036,25 @@ export function SoaPrintPreview() {
                             <td><strong>{formatCurrency(totals.required.incomeProtection)}</strong></td>
                           </tr>
                           <tr className={styles.platformSubheadingRow}><td colSpan={5}>Capital Provisions</td></tr>
-                          {analyses.map((analysis) => {
-                            const key = getInsuranceCoverTypeKey(analysis.policyType);
+                          {INSURANCE_NEEDS_PROVISION_ITEMS.map((item) => {
+                            const lineTotals = analyses.reduce(
+                              (sum, analysis) => {
+                                const lineItem = normalizeInsuranceNeedsLineItems(analysis).provisions.find((entry) => entry.key === item.key);
+                                sum.life += lineItem?.life ?? 0;
+                                sum.tpd += lineItem?.tpd ?? 0;
+                                sum.trauma += lineItem?.trauma ?? 0;
+                                sum.incomeProtection += lineItem?.incomeProtection ?? 0;
+                                return sum;
+                              },
+                              { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
+                            );
                             return (
-                              <tr key={`${analysis.analysisId}-available`}>
-                                <td>Existing cover and available provisions</td>
-                                <td>{key === "life" ? formatCurrency(analysis.inputs.existingCoverAmount) : "—"}</td>
-                                <td>{key === "tpd" ? formatCurrency(analysis.inputs.existingCoverAmount) : "—"}</td>
-                                <td>{key === "trauma" ? formatCurrency(analysis.inputs.existingCoverAmount) : "—"}</td>
-                                <td>{key === "incomeProtection" ? formatCurrency(analysis.inputs.existingCoverAmount) : "—"}</td>
+                              <tr key={`provision-${item.key}`}>
+                                <td>{item.title}</td>
+                                <td>{formatCurrency(lineTotals.life)}</td>
+                                <td>{formatCurrency(lineTotals.tpd)}</td>
+                                <td>{formatCurrency(lineTotals.trauma)}</td>
+                                <td>{formatCurrency(lineTotals.incomeProtection)}</td>
                               </tr>
                             );
                           })}
@@ -2034,7 +2066,7 @@ export function SoaPrintPreview() {
                             <td><strong>{formatCurrency(totals.available.incomeProtection)}</strong></td>
                           </tr>
                           <tr className={styles.totalRow}>
-                            <td><strong>Total Cover Required</strong></td>
+                            <td><strong>Total Cover Gap</strong></td>
                             <td><strong>{formatCurrency(totals.cover.life)}</strong></td>
                             <td><strong>{formatCurrency(totals.cover.tpd)}</strong></td>
                             <td><strong>{formatCurrency(totals.cover.trauma)}</strong></td>

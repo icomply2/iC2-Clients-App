@@ -50,6 +50,12 @@ function buildInsuranceScopeExclusion(text: string) {
   return `Personal insurance advice is outside the scope of this advice${reasonText}. We have not assessed whether existing or new life, TPD, trauma or income protection cover is appropriate, so the client accepts the risk that any personal insurance needs may remain unaddressed.`;
 }
 
+function looksLikeInsuranceAdvice(text: string) {
+  return /\b(insurance|life\s*(?:\/|and)?\s*tpd|tpd|trauma|income protection|ip cover|life cover|cover adequacy|cover gap|sum insured|insured|premium|underwriting|waiting period|benefit period|policy|default cover|in-super cover|insurance needs|needs analysis)\b/i.test(
+    text,
+  );
+}
+
 function uniqueModules(modules: AdviceModuleV1[]) {
   return [...new Set(modules)];
 }
@@ -342,7 +348,7 @@ export function generateIntakeAssessment(input: IntakeEngineInput): IntakeAssess
     candidateStrategies,
     candidateScopeInclusions,
     candidateScopeExclusions,
-    candidateStrategyRecommendations: candidateStrategies.map((item) => item.text),
+    candidateStrategyRecommendations: candidateStrategies.map((item) => item.text).filter((item) => !looksLikeInsuranceAdvice(item)),
     candidateProductReviewNotes: normalizedModules.includes("product-advice")
       ? ["Review the suitability of current products and identify whether replacement or retention is appropriate."]
       : [],
@@ -426,7 +432,7 @@ export function refineIntakeAssessment(
     candidateScopeExclusions: [...new Set([...current.candidateScopeExclusions, ...next.candidateScopeExclusions])],
     candidateStrategyRecommendations: [
       ...new Set([...current.candidateStrategyRecommendations, ...next.candidateStrategyRecommendations]),
-    ],
+    ].filter((item) => !looksLikeInsuranceAdvice(item)),
     candidateProductReviewNotes: [
       ...new Set([...current.candidateProductReviewNotes, ...next.candidateProductReviewNotes]),
     ],

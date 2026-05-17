@@ -60,6 +60,8 @@ export async function readCurrentUserFromCookies(): Promise<CurrentUser | null> 
     "nameid",
     "sub",
     "uid",
+    "Id",
+    "UserId",
     "userId",
     "id",
     "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",

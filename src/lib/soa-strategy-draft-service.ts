@@ -112,6 +112,16 @@ function looksLikeProductAdvice(text: string) {
   return productActionPattern.test(normalized) && productNounPattern.test(normalized);
 }
 
+function looksLikeInsuranceAdvice(text: string) {
+  return /\b(insurance|life\s*(?:\/|and)?\s*tpd|tpd|trauma|income protection|ip cover|life cover|cover adequacy|cover gap|sum insured|insured|premium|underwriting|waiting period|benefit period|policy|default cover|in-super cover|insurance needs|needs analysis)\b/i.test(
+    text,
+  );
+}
+
+function isAllowedStrategyRecommendation(text: string) {
+  return !looksLikeProductAdvice(text) && !looksLikeInsuranceAdvice(text);
+}
+
 function normalizeStrategyDrafts(value: unknown, clientName?: string | null): StrategyRecommendationDraftV1[] | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -140,7 +150,7 @@ function normalizeStrategyDrafts(value: unknown, clientName?: string | null): St
       alternativesConsidered: normalizeStringArray(entry.alternativesConsidered),
       rationale: typeof entry.rationale === "string" ? entry.rationale.trim() : null,
     }))
-    .filter((entry) => entry.recommendationText && !looksLikeProductAdvice(entry.recommendationText));
+    .filter((entry) => entry.recommendationText && isAllowedStrategyRecommendation(entry.recommendationText));
 
   return normalized.length ? normalized : null;
 }
@@ -197,7 +207,7 @@ function buildFallbackStrategyDrafts(request: SoaStrategyDraftRequest): Strategy
     consequences: [],
     alternativesConsidered: [],
     rationale: null,
-  })).filter((recommendation) => !looksLikeProductAdvice(recommendation.recommendationText));
+  })).filter((recommendation) => isAllowedStrategyRecommendation(recommendation.recommendationText));
 }
 
 function fallbackStrategyDrafts(request: SoaStrategyDraftRequest, warning?: string | null): StrategyDraftResponseV1 {
@@ -230,9 +240,10 @@ async function requestOpenAiStrategyDrafts(
               "Draft strategy recommendations only and return JSON matching the provided schema.",
               "Strategy recommendations are non-product strategy advice only.",
               "Do not include advice to retain, replace, rollover, consolidate, establish, commence, switch, dispose of, or alter any superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial product.",
+              "Do not include insurance needs, cover adequacy, cover reviews, Life/TPD, Trauma, Income Protection, policy ownership, funding, premiums, underwriting, default cover, in-super cover, or insurance review triggers in strategy recommendations. Those belong only in Insurance Needs Analysis, Recommended Insurance Policies, Insurance Replacement, or another insurance-specific section.",
               "Do not include investment portfolio construction, asset allocation, model portfolio, risk profile implementation, platform administration, or product-fee comparison recommendations in strategy recommendations.",
               "If a potential recommendation depends on a specific product, provider, account, platform, portfolio, rollover, retention, establishment, consolidation, or replacement action, exclude it from this response. It belongs in Product Recommendations, Portfolio Allocation, Replacement Analysis, or another product-specific section.",
-              "Examples that are NOT strategy recommendations: retain AMP MyNorth Pension, rollover Aware Super, establish an account-based pension, consolidate super accounts, retain a conservative/balanced pension portfolio, change portfolio asset allocation, implement a managed portfolio, or compare product/platform fees.",
+              "Examples that are NOT strategy recommendations: retain AMP MyNorth Pension, rollover Aware Super, establish an account-based pension, consolidate super accounts, retain a conservative/balanced pension portfolio, change portfolio asset allocation, implement a managed portfolio, compare product/platform fees, review Life/TPD cover, reassess income protection, document default cover review triggers, or retain/cancel/increase insurance.",
               "Examples that CAN be strategy recommendations: salary sacrifice as a contribution strategy, commence retirement income planning at a high level without naming a product, manage cashflow/reserves, Centrelink strategy, contribution timing, tax strategy, debt repayment strategy, estate planning referral, or projection/scenario analysis.",
               "Every strategy recommendation must explicitly identify who the strategy is for. Populate recommendedFor with one or more names from clientPeople.",
               "If the strategy applies only to the primary client, address that person by name in recommendationText, for example '<first name>, we recommend you ...'.",
@@ -277,7 +288,7 @@ async function requestOpenAiStrategyDrafts(
                 "practical alternatives",
               ],
               exclusionBoundary:
-                "Exclude product retention, rollover, establishment, consolidation, replacement, platform, portfolio construction, and investment product advice from Strategy Recommendations. These belong in Product Recommendations or related product-specific sections.",
+                "Exclude product retention, rollover, establishment, consolidation, replacement, platform, portfolio construction, investment product advice, insurance needs analysis, insurance cover review, Life/TPD/Trauma/Income Protection, premiums, underwriting, policy ownership, and insurance review triggers from Strategy Recommendations. These belong in Product Recommendations, Insurance Needs Analysis, Recommended Insurance Policies, Insurance Replacement, or related product/insurance-specific sections.",
             },
             objectives: summarizeObjectives(request.objectives),
             scope: request.scope ?? null,
