@@ -324,6 +324,18 @@ export type InsuranceNeedsAnalysisV1 = {
   rationale?: string | null;
 };
 
+export type InsuranceNeedsAnalysisLineItemKeyV1 =
+  | "debt-repayment"
+  | "income-replacement"
+  | "education-costs"
+  | "funeral-final-expenses"
+  | "emergency-reserve"
+  | "existing-cover"
+  | "superannuation-balance"
+  | "available-assets";
+
+export type InsuranceNeedsAnalysisLineItemCategoryV1 = "requirement" | "provision";
+
 export type InsuranceCoverAmountSetV1 = {
   life?: number | null;
   tpd?: number | null;
@@ -333,6 +345,8 @@ export type InsuranceCoverAmountSetV1 = {
 
 export type InsuranceNeedsAnalysisLineItemV1 = InsuranceCoverAmountSetV1 & {
   itemId: string;
+  key?: InsuranceNeedsAnalysisLineItemKeyV1 | null;
+  category?: InsuranceNeedsAnalysisLineItemCategoryV1 | null;
   title: string;
 };
 

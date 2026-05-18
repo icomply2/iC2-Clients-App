@@ -10,6 +10,14 @@ export type ProjectionPerson = {
   isHomeowner: boolean;
 };
 
+export type ProjectionDependant = {
+  dependantId: string;
+  ownerPersonId: string;
+  name: string;
+  relationship?: string | null;
+  dateOfBirth?: string | null;
+};
+
 export type ProjectionAsset = {
   assetId: string;
   ownerPersonId: string;
@@ -72,6 +80,7 @@ export type ProjectionScenario = {
   startYear: number;
   startMonth: number;
   people: ProjectionPerson[];
+  dependants?: ProjectionDependant[];
   primaryPersonId: string;
   projectionEnd: {
     type: "life-expectancy";

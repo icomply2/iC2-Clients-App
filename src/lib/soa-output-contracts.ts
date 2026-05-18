@@ -110,8 +110,29 @@ export type IntakeInsuranceNeedsAnalysisV1 = {
   suggestedWaitingPeriod?: string | null;
   suggestedBenefitPeriod?: string | null;
   suggestedPolicyOwnership?: "super" | "retail" | "either" | "unknown" | null;
+  requirements?: IntakeInsuranceNeedsAnalysisLineItemV1[] | null;
+  provisions?: IntakeInsuranceNeedsAnalysisLineItemV1[] | null;
   rationale?: string | null;
   sourceNote?: string | null;
+};
+
+export type IntakeInsuranceNeedsAnalysisLineItemV1 = {
+  key?:
+    | "debt-repayment"
+    | "income-replacement"
+    | "education-costs"
+    | "funeral-final-expenses"
+    | "emergency-reserve"
+    | "existing-cover"
+    | "superannuation-balance"
+    | "available-assets"
+    | null;
+  title: string;
+  category?: "requirement" | "provision" | null;
+  life?: number | null;
+  tpd?: number | null;
+  trauma?: number | null;
+  incomeProtection?: number | null;
 };
 
 export type IntakeInsurancePolicyReplacementV1 = {

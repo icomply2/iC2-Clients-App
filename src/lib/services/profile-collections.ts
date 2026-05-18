@@ -92,7 +92,7 @@ function buildFinancialSavePayload<K extends FinancialCollectionKind>(kind: K, r
           joint: Boolean(item.joint),
           repaymentFrequency: normalizeFrequency(item.repaymentFrequency),
           owner: normalizeOwner(item.owner),
-          securityAssets: normalizeLinkedRecord(item.securityAssets),
+          securityAssets: normalizeLinkedRecord(item.securityAssets) ?? { id: "", type: "", description: null },
         };
       }
       case "income": {
@@ -104,7 +104,7 @@ function buildFinancialSavePayload<K extends FinancialCollectionKind>(kind: K, r
           joint: Boolean(item.joint),
           amount: item.amount ?? null,
           taxType: item.taxType ?? null,
-          pension: normalizeLinkedRecord(item.pension),
+          pension: normalizeLinkedRecord(item.pension) ?? { id: "", type: "" },
           owner: normalizeOwner(item.owner),
           frequency: normalizeFrequency(item.frequency),
         };
@@ -118,7 +118,7 @@ function buildFinancialSavePayload<K extends FinancialCollectionKind>(kind: K, r
           joint: Boolean(item.joint),
           amount: item.amount ?? null,
           indexation: item.indexation ?? null,
-          liability: normalizeLinkedRecord(item.liability),
+          liability: normalizeLinkedRecord(item.liability) ?? { id: "", type: "" },
           owner: normalizeOwner(item.owner),
           frequency: normalizeFrequency(item.frequency),
         };
@@ -162,7 +162,7 @@ function buildFinancialSavePayload<K extends FinancialCollectionKind>(kind: K, r
           joint: Boolean(item.joint),
           insurer: item.insurer ?? null,
           status: item.status ?? null,
-          superFund: normalizeLinkedRecord(item.superFund),
+          superFund: normalizeLinkedRecord(item.superFund) ?? { id: "", type: "" },
           owner: normalizeOwner(item.owner),
         };
       }

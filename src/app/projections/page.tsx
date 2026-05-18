@@ -32,7 +32,6 @@ type ProjectionSection =
 
 type ScenarioInputTab =
   | "scenario-details"
-  | "scenario-assumptions"
   | "cashflow"
   | "assets-liabilities"
   | "superannuation"
@@ -80,7 +79,7 @@ type StoredProjectionWorkspaceState = {
   activeScenarioId: string | null;
   scenarioAssumptionOverrides: ScenarioAssumptionOverrides;
   activeSection: ProjectionSection;
-  activeScenarioInputTab: ScenarioInputTab;
+  activeScenarioInputTab: ScenarioInputTab | "scenario-assumptions";
   updatedAt: string;
 };
 
@@ -97,12 +96,15 @@ const projectionSections: Array<{ id: ProjectionSection; label: string }> = [
 
 const scenarioInputTabs: Array<{ id: ScenarioInputTab; label: string }> = [
   { id: "scenario-details", label: "Scenario details" },
-  { id: "scenario-assumptions", label: "Scenario assumptions" },
   { id: "cashflow", label: "Cashflow" },
   { id: "assets-liabilities", label: "Assets and liabilities" },
   { id: "superannuation", label: "Superannuation" },
   { id: "pensions", label: "Pensions" },
 ];
+
+function normalizeScenarioInputTab(tab: StoredProjectionWorkspaceState["activeScenarioInputTab"] | null | undefined): ScenarioInputTab {
+  return scenarioInputTabs.some((candidate) => candidate.id === tab) ? tab as ScenarioInputTab : "scenario-details";
+}
 
 const editableRiskProfileNames = ["Cash", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"];
 const jointOwnerId = "joint";
@@ -130,6 +132,7 @@ const blankProjectionScenario: ProjectionScenario = {
       isHomeowner: false,
     },
   ],
+  dependants: [],
   assets: [],
   liabilities: [],
   retirementAccounts: [],
@@ -260,6 +263,17 @@ function personName(person?: PersonRecord | null, fallback = "Client") {
   return textValue(person?.name) || fallback;
 }
 
+function formatProjectionDate(value: string | null | undefined) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("en-AU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 function personGender(person?: PersonRecord | null): ProjectionScenario["people"][number]["gender"] {
   const gender = textValue(person?.gender).toLowerCase();
   if (gender.includes("female")) return "female";
@@ -312,6 +326,13 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     }
     return "client";
   };
+  const dependants: NonNullable<ProjectionScenario["dependants"]> = (profile.dependants ?? []).map((dependant, index) => ({
+    dependantId: dependant.id ?? `dependant-${index + 1}`,
+    ownerPersonId: ownerPersonId({ owner: dependant.owner }),
+    name: dependant.name ?? `Dependant ${index + 1}`,
+    relationship: dependant.type ?? null,
+    dateOfBirth: dependant.birthday ?? null,
+  }));
   const assetType = (value: string): ProjectionScenario["assets"][number]["type"] => {
     const normalized = value.toLowerCase();
     if (/home|residence|property.*home|principal|primary/.test(normalized)) return "primary-residence";
@@ -471,6 +492,7 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     startYear,
     startMonth,
     people,
+    dependants,
     primaryPersonId: "client",
     projectionEnd: { type: "life-expectancy", personId: "client" },
     assets,
@@ -1107,7 +1129,7 @@ function ProjectionsPageContent() {
           },
         });
         setActiveSection(stored.activeSection ?? "scenario-inputs");
-        setActiveScenarioInputTab(stored.activeScenarioInputTab ?? "scenario-details");
+        setActiveScenarioInputTab(normalizeScenarioInputTab(stored.activeScenarioInputTab));
       }
     } catch {
       // Ignore corrupted local workspace state and start clean.
@@ -1315,7 +1337,7 @@ function ProjectionsPageContent() {
 
   function renderPercentInput(input: { value: number; onChange: (value: number) => void; compact?: boolean }) {
     return (
-      <div className={`${styles.affixInput} ${input.compact ? styles.compactAffixInput : ""}`.trim()}>
+      <div className={`${styles.affixInput} ${styles.percentAffixInput} ${input.compact ? styles.compactAffixInput : ""}`.trim()}>
         <input
           type="number"
           step="0.1"
@@ -1357,6 +1379,18 @@ function ProjectionsPageContent() {
       const person = draft.people.find((entry) => entry.personId === personId);
       if (person) {
         applyUpdate(person);
+      }
+    });
+  }
+
+  function updateDependant(
+    dependantId: string,
+    applyUpdate: (dependant: NonNullable<ProjectionScenario["dependants"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      const dependant = (draft.dependants ?? []).find((entry) => entry.dependantId === dependantId);
+      if (dependant) {
+        applyUpdate(dependant);
       }
     });
   }
@@ -1956,6 +1990,135 @@ function ProjectionsPageContent() {
     );
   }
 
+  function renderScenarioAssumptionInputs() {
+    return (
+      <div className={styles.inputStack}>
+        <div className={styles.inputCard}>
+          <h4>Core modelling assumptions</h4>
+          <div className={styles.inputGrid}>
+            <label>
+              CPI indexation (% p.a.)
+              {renderPercentInput({
+                value: activeAssumptions.economic.cpiRate,
+                onChange: (value) => setScenarioAssumptionOverrides((current) => ({
+                  ...current,
+                  cpiRate: value,
+                })),
+              })}
+            </label>
+            <label>
+              Employer SG (%)
+              {renderPercentInput({
+                value: activeAssumptions.legislative.superannuation.superGuaranteeRate,
+                onChange: (value) => setScenarioAssumptionOverrides((current) => ({
+                  ...current,
+                  superGuaranteeRate: value,
+                })),
+              })}
+            </label>
+            <label>
+              Concessional cap
+              {renderCurrencyInput({
+                value: activeAssumptions.legislative.superannuation.concessionalContributionsCap,
+                onChange: (value) => setScenarioAssumptionOverrides((current) => ({
+                  ...current,
+                  concessionalContributionsCap: value,
+                })),
+              })}
+            </label>
+            <label>
+              Contributions tax (%)
+              {renderPercentInput({
+                value: activeAssumptions.legislative.superannuation.contributionsTaxRate,
+                onChange: (value) => setScenarioAssumptionOverrides((current) => ({
+                  ...current,
+                  contributionsTaxRate: value,
+                })),
+              })}
+            </label>
+            <label>
+              Super earnings tax (%)
+              {renderPercentInput({
+                value: activeAssumptions.legislative.superannuation.investmentEarningsTaxRate,
+                onChange: (value) => setScenarioAssumptionOverrides((current) => ({
+                  ...current,
+                  investmentEarningsTaxRate: value,
+                })),
+              })}
+            </label>
+          </div>
+        </div>
+
+        <div className={styles.inputCard}>
+          <h4>Risk profile return assumptions</h4>
+          <div className={styles.tableWrap}>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Risk profile</th>
+                  <th>Income return</th>
+                  <th>Growth return</th>
+                  <th>Total return</th>
+                  <th>Volatility</th>
+                  <th>Defensive assets</th>
+                  <th>Growth assets</th>
+                </tr>
+              </thead>
+              <tbody>
+                {editableRiskProfileNames.map((profileName) => {
+                  const profile = scenarioAssumptionOverrides.riskProfiles[profileName];
+                  const incomeRate = profile?.incomeRate ?? 0;
+                  const growthRate = profile?.growthRate ?? 0;
+
+                  return (
+                    <tr key={profileName}>
+                      <td>{profileName}</td>
+                      <td>
+                        {renderPercentInput({
+                          value: incomeRate,
+                          onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
+                            draft.incomeRate = value;
+                          }),
+                        })}
+                      </td>
+                      <td>
+                        {renderPercentInput({
+                          value: growthRate,
+                          onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
+                            draft.growthRate = value;
+                          }),
+                        })}
+                      </td>
+                      <td>{percentInputValue(incomeRate + growthRate)}%</td>
+                      <td>
+                        {renderPercentInput({
+                          value: profile?.standardDeviation ?? 0,
+                          onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
+                            draft.standardDeviation = value;
+                          }),
+                        })}
+                      </td>
+                      <td>
+                        {renderPercentInput({
+                          value: profile?.defensivePct ?? 0,
+                          onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
+                            draft.defensivePct = value;
+                            draft.growthPct = Math.max(0, 1 - value);
+                          }),
+                        })}
+                      </td>
+                      <td>{percentInputValue(profile?.growthPct ?? 0)}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderScenarioInputContent() {
     if (activeScenarioInputTab === "scenario-details") {
       return (
@@ -2024,6 +2187,7 @@ function ProjectionsPageContent() {
                   <tr>
                     <th>Name</th>
                     <th>Role</th>
+                    <th>Date of birth</th>
                     <th>Start age</th>
                     <th>Retirement age</th>
                     <th>Homeowner</th>
@@ -2034,6 +2198,19 @@ function ProjectionsPageContent() {
                     <tr key={person.personId}>
                       <td>{person.name}</td>
                       <td>{person.role}</td>
+                      <td>
+                        <input
+                          className={styles.compactInput}
+                          type="date"
+                          value={person.dateOfBirth?.slice(0, 10) ?? ""}
+                          onChange={(event) => updatePerson(person.personId, (draft) => {
+                            draft.dateOfBirth = event.target.value || null;
+                            if (event.target.value) {
+                              draft.startAge = calculateStartAge(event.target.value, activeScenario.startYear, activeScenario.startMonth);
+                            }
+                          })}
+                        />
+                      </td>
                       <td>
                         <input
                           className={styles.compactInput}
@@ -2070,131 +2247,45 @@ function ProjectionsPageContent() {
               </table>
             </div>
           </div>
-        </div>
-      );
-    }
-
-    if (activeScenarioInputTab === "scenario-assumptions") {
-      return (
-        <div className={styles.inputStack}>
-          <div className={styles.inputCard}>
-            <h4>Core modelling assumptions</h4>
-            <div className={styles.inputGrid}>
-              <label>
-                CPI indexation (% p.a.)
-                {renderPercentInput({
-                  value: activeAssumptions.economic.cpiRate,
-                  onChange: (value) => setScenarioAssumptionOverrides((current) => ({
-                    ...current,
-                    cpiRate: value,
-                  })),
-                })}
-              </label>
-              <label>
-                Employer SG (%)
-                {renderPercentInput({
-                  value: activeAssumptions.legislative.superannuation.superGuaranteeRate,
-                  onChange: (value) => setScenarioAssumptionOverrides((current) => ({
-                    ...current,
-                    superGuaranteeRate: value,
-                  })),
-                })}
-              </label>
-              <label>
-                Concessional cap
-                {renderCurrencyInput({
-                  value: activeAssumptions.legislative.superannuation.concessionalContributionsCap,
-                  onChange: (value) => setScenarioAssumptionOverrides((current) => ({
-                    ...current,
-                    concessionalContributionsCap: value,
-                  })),
-                })}
-              </label>
-              <label>
-                Contributions tax (%)
-                {renderPercentInput({
-                  value: activeAssumptions.legislative.superannuation.contributionsTaxRate,
-                  onChange: (value) => setScenarioAssumptionOverrides((current) => ({
-                    ...current,
-                    contributionsTaxRate: value,
-                  })),
-                })}
-              </label>
-              <label>
-                Super earnings tax (%)
-                {renderPercentInput({
-                  value: activeAssumptions.legislative.superannuation.investmentEarningsTaxRate,
-                  onChange: (value) => setScenarioAssumptionOverrides((current) => ({
-                    ...current,
-                    investmentEarningsTaxRate: value,
-                  })),
-                })}
-              </label>
-            </div>
-          </div>
 
           <div className={styles.inputCard}>
-            <h4>Risk profile return assumptions</h4>
+            <h4>Dependants</h4>
             <div className={styles.tableWrap}>
               <table className={styles.dataTable}>
                 <thead>
                   <tr>
-                    <th>Risk profile</th>
-                    <th>Income return</th>
-                    <th>Growth return</th>
-                    <th>Total return</th>
-                    <th>Volatility</th>
-                    <th>Defensive assets</th>
-                    <th>Growth assets</th>
+                    <th>Name</th>
+                    <th>Relationship</th>
+                    <th>Date of birth</th>
+                    <th>Owner</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {editableRiskProfileNames.map((profileName) => {
-                    const profile = scenarioAssumptionOverrides.riskProfiles[profileName];
-                    const incomeRate = profile?.incomeRate ?? 0;
-                    const growthRate = profile?.growthRate ?? 0;
-
-                    return (
-                      <tr key={profileName}>
-                        <td>{profileName}</td>
+                  {(activeScenario.dependants ?? []).length ? (
+                    (activeScenario.dependants ?? []).map((dependant) => (
+                      <tr key={dependant.dependantId}>
+                        <td>{dependant.name}</td>
+                        <td>{dependant.relationship ?? "Dependant"}</td>
                         <td>
-                          {renderPercentInput({
-                            value: incomeRate,
-                            onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
-                              draft.incomeRate = value;
-                            }),
-                          })}
+                          <input
+                            className={styles.compactInput}
+                            type="date"
+                            value={dependant.dateOfBirth?.slice(0, 10) ?? ""}
+                            onChange={(event) => updateDependant(dependant.dependantId, (draft) => {
+                              draft.dateOfBirth = event.target.value || null;
+                            })}
+                          />
                         </td>
                         <td>
-                          {renderPercentInput({
-                            value: growthRate,
-                            onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
-                              draft.growthRate = value;
-                            }),
-                          })}
+                          {activeScenario.people.find((person) => person.personId === dependant.ownerPersonId)?.name ?? "Client"}
                         </td>
-                        <td>{percentInputValue(incomeRate + growthRate)}%</td>
-                        <td>
-                          {renderPercentInput({
-                            value: profile?.standardDeviation ?? 0,
-                            onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
-                              draft.standardDeviation = value;
-                            }),
-                          })}
-                        </td>
-                        <td>
-                          {renderPercentInput({
-                            value: profile?.defensivePct ?? 0,
-                            onChange: (value) => updateRiskProfileAssumption(profileName, (draft) => {
-                              draft.defensivePct = value;
-                              draft.growthPct = Math.max(0, 1 - value);
-                            }),
-                          })}
-                        </td>
-                        <td>{percentInputValue(profile?.growthPct ?? 0)}%</td>
                       </tr>
-                    );
-                  })}
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4}>No dependants recorded.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -2807,18 +2898,6 @@ function ProjectionsPageContent() {
     if (activeSection === "personal-cashflow") {
       return (
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Personal cash flow</p>
-              <h3>Cashflow to life expectancy</h3>
-            </div>
-            <span className={styles.badge}>Deterministic prototype</span>
-          </div>
-          <div className={styles.assumptionStrip}>
-            <span>Mapped income and expenses from the scenario</span>
-            <span>Loan repayments itemised where supplied</span>
-            <span>Calculated income rows appear only where relevant</span>
-          </div>
           {renderProjectionTable(cashflowProjectionRows, true)}
         </section>
       );
@@ -2827,18 +2906,6 @@ function ProjectionsPageContent() {
     if (activeSection === "taxation") {
       return (
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Taxation</p>
-              <h3>Tax payable under legislative assumptions</h3>
-            </div>
-            <span className={styles.badge}>Feeds cashflow</span>
-          </div>
-          <div className={styles.assumptionStrip}>
-            <span>Resident rates: 0%, 16%, 30%, 37%, 45%</span>
-            <span>Medicare levy: 2.00%</span>
-            <span>Age Pension excluded from taxable income in this prototype</span>
-          </div>
           <div className={styles.tableControls}>
             <label>
               View tax for
@@ -2862,13 +2929,6 @@ function ProjectionsPageContent() {
     if (activeSection === "assets-liabilities") {
       return (
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Asset and liabilities</p>
-              <h3>Assets, liabilities and net worth to life expectancy</h3>
-            </div>
-            <span className={styles.badge}>Balance sheet</span>
-          </div>
           {renderProjectionTable(balanceSheetProjectionRows)}
         </section>
       );
@@ -2877,19 +2937,6 @@ function ProjectionsPageContent() {
     if (activeSection === "superannuation") {
       return (
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Superannuation</p>
-              <h3>Accumulation balances and employer contributions</h3>
-            </div>
-            <span className={styles.badge}>SG calculated</span>
-          </div>
-          <div className={styles.assumptionStrip}>
-            <span>Employer SG: 12.00%</span>
-            <span>Concessional cap: $30,000</span>
-            <span>Contributions tax: 15.00%</span>
-            <span>Account fees: configured per fund</span>
-          </div>
           <div className={styles.tableControls}>
             <label>
               View funds for
@@ -2911,17 +2958,6 @@ function ProjectionsPageContent() {
     if (activeSection === "pensions") {
       return (
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Pensions</p>
-              <h3>Account-based pension drawdowns and balances</h3>
-            </div>
-            <span className={styles.badge}>Account based</span>
-          </div>
-          <div className={styles.assumptionStrip}>
-            <span>Account fees: configured per account</span>
-            <span>Drawdowns use mapped scenario values and fallback funding where required</span>
-          </div>
           <div className={styles.tableControls}>
             <label>
               View pensions for
@@ -2943,60 +2979,27 @@ function ProjectionsPageContent() {
     if (activeSection === "centrelink") {
       return (
         <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Centrelink</p>
-              <h3>Age Pension under legislative assumptions</h3>
-            </div>
-            <span className={styles.badge}>Eligibility gated</span>
-          </div>
-          <div className={styles.assumptionStrip}>
-            <span>Qualifying age: 67</span>
-            <span>Assets and income tests apply only once eligible</span>
-            <span>Age Pension excluded from taxable income in this prototype</span>
-          </div>
           {renderProjectionTable(agePensionProjectionRows)}
         </section>
       );
     }
 
-    return (
-      <section className={styles.twoColumn}>
-        <div className={styles.panel}>
+    if (activeSection === "assumptions") {
+      return (
+        <section className={styles.panel}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.eyebrow}>Assumptions</p>
-              <h3>Files driving the model</h3>
+              <h3>Configure scenario assumptions</h3>
             </div>
-            <span className={styles.badge}>Version required</span>
+            <span className={styles.badge}>Editable inputs</span>
           </div>
-          <div className={styles.assumptionList}>
-            {assumptions.map((assumption) => (
-              <div key={assumption.layer} className={styles.assumptionItem}>
-                <strong>{assumption.layer}</strong>
-                <span>{assumption.source}</span>
-                <p>{assumption.use}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+          {renderScenarioAssumptionInputs()}
+        </section>
+      );
+    }
 
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.eyebrow}>Before relying on outputs</p>
-              <h3>Required checks</h3>
-            </div>
-            <span className={styles.badge}>Adviser review</span>
-          </div>
-          <ul className={styles.checkList}>
-            {projectionChecks.map((check) => (
-              <li key={check}>{check}</li>
-            ))}
-          </ul>
-        </div>
-      </section>
-    );
+    return null;
   }
 
   function renderStartProjectionPanel() {

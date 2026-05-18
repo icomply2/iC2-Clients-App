@@ -1,5 +1,5 @@
 import type { AdviceModuleV1 } from "@/lib/soa-types";
-import type { IntakeAssessmentV1 } from "@/lib/soa-output-contracts";
+import type { IntakeAssessmentV1, IntakeInsuranceNeedsAnalysisLineItemV1 } from "@/lib/soa-output-contracts";
 import {
   generateIntakeAssessment,
   refineIntakeAssessment,
@@ -239,6 +239,62 @@ const intakeAssessmentJsonSchema = {
             suggestedPolicyOwnership: {
               anyOf: [{ type: "string", enum: ["super", "retail", "either", "unknown"] }, { type: "null" }],
             },
+            requirements: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  key: {
+                    anyOf: [
+                      {
+                        type: "string",
+                        enum: [
+                          "debt-repayment",
+                          "income-replacement",
+                          "education-costs",
+                          "funeral-final-expenses",
+                          "emergency-reserve",
+                        ],
+                      },
+                      { type: "null" },
+                    ],
+                  },
+                  title: { type: "string" },
+                  category: { anyOf: [{ type: "string", enum: ["requirement"] }, { type: "null" }] },
+                  life: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  tpd: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  trauma: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  incomeProtection: { anyOf: [{ type: "number" }, { type: "null" }] },
+                },
+                required: ["key", "title", "category", "life", "tpd", "trauma", "incomeProtection"],
+              },
+            },
+            provisions: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  key: {
+                    anyOf: [
+                      {
+                        type: "string",
+                        enum: ["existing-cover", "superannuation-balance", "available-assets"],
+                      },
+                      { type: "null" },
+                    ],
+                  },
+                  title: { type: "string" },
+                  category: { anyOf: [{ type: "string", enum: ["provision"] }, { type: "null" }] },
+                  life: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  tpd: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  trauma: { anyOf: [{ type: "number" }, { type: "null" }] },
+                  incomeProtection: { anyOf: [{ type: "number" }, { type: "null" }] },
+                },
+                required: ["key", "title", "category", "life", "tpd", "trauma", "incomeProtection"],
+              },
+            },
             rationale: { anyOf: [{ type: "string" }, { type: "null" }] },
             sourceNote: { anyOf: [{ type: "string" }, { type: "null" }] },
           },
@@ -261,6 +317,8 @@ const intakeAssessmentJsonSchema = {
             "suggestedWaitingPeriod",
             "suggestedBenefitPeriod",
             "suggestedPolicyOwnership",
+            "requirements",
+            "provisions",
             "rationale",
             "sourceNote",
           ],
@@ -675,6 +733,12 @@ function looksLikeProductAdvice(text: string) {
   return productActionPattern.test(normalized) && productNounPattern.test(normalized);
 }
 
+function looksLikeInsuranceAdvice(text: string) {
+  return /\b(insurance|life\s*(?:\/|and)?\s*tpd|tpd|trauma|income protection|ip cover|life cover|cover adequacy|cover gap|sum insured|insured|premium|underwriting|waiting period|benefit period|policy|default cover|in-super cover|insurance needs|needs analysis)\b/i.test(
+    text,
+  );
+}
+
 function normalizeNullableNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -818,6 +882,47 @@ function normalizeInsuranceSuggestedOwnership(
   value: unknown,
 ): IntakeAssessmentV1["candidateInsuranceNeedsAnalyses"][number]["suggestedPolicyOwnership"] {
   return value === "super" || value === "retail" || value === "either" || value === "unknown" ? value : "unknown";
+}
+
+function normalizeInsuranceNeedsLineItemKey(
+  value: unknown,
+): IntakeInsuranceNeedsAnalysisLineItemV1["key"] {
+  return value === "debt-repayment" ||
+    value === "income-replacement" ||
+    value === "education-costs" ||
+    value === "funeral-final-expenses" ||
+    value === "emergency-reserve" ||
+    value === "existing-cover" ||
+    value === "superannuation-balance" ||
+    value === "available-assets"
+    ? value
+    : null;
+}
+
+function normalizeInsuranceNeedsLineItemCategory(
+  value: unknown,
+): IntakeInsuranceNeedsAnalysisLineItemV1["category"] {
+  return value === "requirement" || value === "provision" ? value : null;
+}
+
+function normalizeInsuranceNeedsLineItems(
+  value: unknown,
+  category: "requirement" | "provision",
+): IntakeInsuranceNeedsAnalysisLineItemV1[] {
+  return Array.isArray(value)
+    ? value
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+        .map((entry) => ({
+          key: normalizeInsuranceNeedsLineItemKey(entry.key),
+          title: normalizeNullableString(entry.title) ?? "",
+          category: normalizeInsuranceNeedsLineItemCategory(entry.category) ?? category,
+          life: normalizeNullableNumber(entry.life),
+          tpd: normalizeNullableNumber(entry.tpd),
+          trauma: normalizeNullableNumber(entry.trauma),
+          incomeProtection: normalizeNullableNumber(entry.incomeProtection),
+        }))
+        .filter((entry) => entry.title || entry.key)
+    : [];
 }
 
 function normalizeInsurancePremiumType(
@@ -976,10 +1081,20 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
           suggestedWaitingPeriod: normalizeNullableString(entry.suggestedWaitingPeriod),
           suggestedBenefitPeriod: normalizeNullableString(entry.suggestedBenefitPeriod),
           suggestedPolicyOwnership: normalizeInsuranceSuggestedOwnership(entry.suggestedPolicyOwnership),
+          requirements: normalizeInsuranceNeedsLineItems(entry.requirements, "requirement"),
+          provisions: normalizeInsuranceNeedsLineItems(entry.provisions, "provision"),
           rationale: normalizeNullableString(entry.rationale),
           sourceNote: normalizeNullableString(entry.sourceNote),
         }))
-        .filter((entry) => entry.ownerName || entry.purpose || entry.targetCoverAmount !== null || entry.coverGapAmount !== null)
+        .filter(
+          (entry) =>
+            entry.ownerName ||
+            entry.purpose ||
+            entry.targetCoverAmount !== null ||
+            entry.coverGapAmount !== null ||
+            entry.requirements.length ||
+            entry.provisions.length,
+        )
     : [];
   const candidateInsurancePolicyRecommendations = Array.isArray(record.candidateInsurancePolicyRecommendations)
     ? record.candidateInsurancePolicyRecommendations
@@ -1068,9 +1183,12 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
     normalizeRecommendationLanguage(item, clientName),
   );
   const productAdviceFromStrategyCandidates = rawCandidateStrategyRecommendations.filter(looksLikeProductAdvice);
+  const insuranceAdviceFromStrategyCandidates = rawCandidateStrategyRecommendations.filter(looksLikeInsuranceAdvice);
   const rawCandidateProductReviewNotes = normalizeStringArray(record.candidateProductReviewNotes).map((item) =>
     normalizeRecommendationLanguage(item, clientName),
   );
+  const insuranceAdviceFromProductCandidates = rawCandidateProductReviewNotes.filter(looksLikeInsuranceAdvice);
+  const rawCandidateInsuranceReviewNotes = normalizeStringArray(record.candidateInsuranceReviewNotes);
 
   return {
     matterSummary,
@@ -1082,9 +1200,18 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
     candidateStrategies,
     candidateScopeInclusions: normalizeStringArray(record.candidateScopeInclusions),
     candidateScopeExclusions: normalizeStringArray(record.candidateScopeExclusions),
-    candidateStrategyRecommendations: rawCandidateStrategyRecommendations.filter((item) => !looksLikeProductAdvice(item)),
-    candidateProductReviewNotes: [...rawCandidateProductReviewNotes, ...productAdviceFromStrategyCandidates],
-    candidateInsuranceReviewNotes: normalizeStringArray(record.candidateInsuranceReviewNotes),
+    candidateStrategyRecommendations: rawCandidateStrategyRecommendations.filter(
+      (item) => !looksLikeProductAdvice(item) && !looksLikeInsuranceAdvice(item),
+    ),
+    candidateProductReviewNotes: [
+      ...rawCandidateProductReviewNotes.filter((item) => !looksLikeInsuranceAdvice(item)),
+      ...productAdviceFromStrategyCandidates.filter((item) => !looksLikeInsuranceAdvice(item)),
+    ],
+    candidateInsuranceReviewNotes: [
+      ...rawCandidateInsuranceReviewNotes,
+      ...insuranceAdviceFromStrategyCandidates,
+      ...insuranceAdviceFromProductCandidates,
+    ],
     candidateInsuranceNeedsAnalyses,
     candidateInsurancePolicyRecommendations,
     candidateInsurancePolicyReplacements,
@@ -1139,10 +1266,13 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
               "For candidateStrategyRecommendations and candidateProductReviewNotes, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'. Do not use 'you should', 'you need to', or 'you must'.",
               "Keep candidateStrategyRecommendations strictly non-product. Strategy recommendations are for strategy-level advice such as contribution strategy, retirement income strategy at a high level, Centrelink strategy, cashflow/reserve strategy, tax strategy, debt repayment strategy, estate planning referral, or projection/scenario analysis.",
               "Do not place product advice in candidateStrategyRecommendations. Product advice includes retaining, replacing, rolling over, consolidating, establishing, commencing, switching, disposing of, or altering superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial products.",
+              "Do not place insurance advice in candidateStrategyRecommendations. Insurance advice includes insurance needs analysis, cover adequacy or review, Life/TPD, Trauma, Income Protection, policy ownership or funding, premiums, underwriting, default cover, in-super cover, insurance review triggers, retention, cancellation, variation, replacement, or applications for cover. Put those items in candidateInsuranceReviewNotes, candidateInsuranceNeedsAnalyses, candidateInsurancePolicyRecommendations, or candidateInsurancePolicyReplacements.",
+              "Do not place insurance advice in candidateProductReviewNotes. Product review notes are only for investment, superannuation, pension, annuity, platform, wrap, managed account, portfolio, and related non-insurance product matters. All Life/TPD, Trauma, Income Protection, default cover, in-super cover, policy ownership, premiums, underwriting, insurance retention, insurance replacement, or applications for cover belong in the insurance-specific candidate fields.",
               "Any recommendation involving a named product, provider, platform, account, portfolio, rollover, retention, establishment, consolidation, replacement, product fee comparison, asset allocation implementation, model portfolio, or investment approach must go into candidateProductReviewNotes, candidateInsurancePolicyRecommendations, candidateInsurancePolicyReplacements, candidateProjectionNotes, portfolio/replacement sections, or another product-specific section instead.",
               "Do not turn product advice into a strategy recommendation by removing the product name if the substance remains product advice.",
               "Avoid third-person phrasing such as 'the client', 'Guy's', 'their objectives', 'he', 'she', or 'they' in candidate recommendation wording unless a name is strictly needed to identify account ownership or who takes a specific action.",
               "For insurance needs analysis documents, populate candidateInsuranceNeedsAnalyses with one entry per insured person and cover type. Extract calculated and agreed sums insured, existing cover, cover gaps, policy ownership, waiting and benefit periods, annual income, liabilities, super balances, education or dependant support costs, living expenses, and the rationale for the recommended cover level. Preserve adviser overrides where the agreed cover differs from the calculated amount.",
+              "For each candidateInsuranceNeedsAnalyses item, also populate requirements and provisions using the fixed line-item rows when evidence supports them. Requirements are debt-repayment, income-replacement, education-costs, funeral-final-expenses, and emergency-reserve. Provisions are existing-cover, superannuation-balance, and available-assets. Fill Life, TPD, Trauma, and Income Protection amounts separately; Income Protection amounts must be monthly benefit amounts, not annual amounts.",
               "For insurance quote documents, populate candidateInsurancePolicyRecommendations with one recommendation per insured person and insurer/product package where the evidence supports it. Extract insurer name, product or policy name, ownership/funding structure, cover types, sum insured or monthly benefit, premium type, waiting period, benefit period, premium amount and frequency, annualised premiums, optional benefits, premium breakdown, underwriting notes, and replacement or retention notes.",
               "For insurance replacement or comparison evidence, populate candidateInsurancePolicyReplacements with current versus recommended insurer, cover levels, annual premiums, premium difference, replacement reasons, costs/trade-offs, benefits gained, and benefits lost. If an existing insurer quote is provided as an alternative/current comparison, use it as the current policy evidence unless the adviser clearly says otherwise.",
               "For insurance commission disclosure, extract both upfront and ongoing commission amounts and percentages from quote documents into commercialsAndAgreements.insuranceCommissionDetails. Set insuranceCommissionsIncluded to true whenever commission disclosure figures are present or commission consent wording is required.",

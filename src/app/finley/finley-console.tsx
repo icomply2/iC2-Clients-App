@@ -19,6 +19,7 @@ import {
 import { cacheFileNoteAttachments } from "@/lib/file-note-attachment-cache";
 import { DEFAULT_SERVICE_AGREEMENT_SERVICES, groupServiceAgreementServices } from "@/lib/documents/document-sections";
 import { getFactFindImportCounts, type FactFindImportCandidate } from "@/lib/fact-find-import";
+import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "./finley-avatar.png";
 import styles from "./page.module.css";
 
@@ -166,6 +167,7 @@ type ConciergeUpload = {
   name: string;
   mimeType?: string | null;
   extractedText?: string | null;
+  file?: File | null;
   tags: ConciergeDocumentTag[];
 };
 
@@ -1695,6 +1697,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [fileNoteAttachmentFiles, setFileNoteAttachmentFiles] = useState<File[]>([]);
   const [conciergeUploads, setConciergeUploads] = useState<ConciergeUpload[]>([]);
   const [isUploadingConciergeFiles, setIsUploadingConciergeFiles] = useState(false);
+  const [isUploadsModalOpen, setIsUploadsModalOpen] = useState(false);
+  const [isConciergeSuggestionDismissed, setIsConciergeSuggestionDismissed] = useState(false);
   const [isExtractingFactFindImport, setIsExtractingFactFindImport] = useState(false);
   const [isApplyingFactFindImport, setIsApplyingFactFindImport] = useState(false);
   const [factFindImportCandidate, setFactFindImportCandidate] = useState<FactFindImportCandidate | null>(null);
@@ -1725,6 +1729,13 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const primaryFactFindUpload = useMemo(
     () => getUploadsWithTag(conciergeUploads, "fact-find")[0] ?? null,
     [conciergeUploads],
+  );
+  const primaryFactFindReviewUpload = useMemo(
+    () =>
+      primaryFactFindUpload ??
+      [...conciergeUploads].reverse().find((upload) => Boolean(upload.file || upload.extractedText?.trim())) ??
+      null,
+    [conciergeUploads, primaryFactFindUpload],
   );
   const conciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
     const tasks: ConciergeSuggestedTask[] = [];
@@ -1826,6 +1837,38 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }, [activeClient?.name, conciergeUploadTags, conciergeUploads.length]);
   const primaryConciergeTask = conciergeSuggestedTasks[0] ?? null;
   const secondaryConciergeTasks = conciergeSuggestedTasks.slice(1, 4);
+  const uploadedFilesModalFiles = useMemo<UploadedFilesModalFile[]>(
+    () =>
+      conciergeUploads.map((upload) => ({
+        id: upload.id,
+        name: upload.name,
+        badges: upload.tags.map((tag) => ({
+          label: getConciergeTagLabel(tag),
+          tone:
+            tag === "fact-find"
+              ? "fact-find" as const
+              : tag === "productrex"
+                ? "product" as const
+                : tag === "insurance-quote" || tag === "insurance-needs-analysis"
+                  ? "insurance" as const
+                  : "default" as const,
+        })),
+        actions:
+          upload.tags.includes("fact-find") || upload.file || upload.extractedText?.trim()
+            ? [
+                {
+                  label:
+                    isExtractingFactFindImport && factFindImportSourceFile === upload.name
+                      ? "Inspecting..."
+                      : "Map to profile",
+                  onClick: () => void inspectFactFindUpload(upload),
+                  disabled: isExtractingFactFindImport,
+                },
+              ]
+            : [],
+      })),
+    [conciergeUploads, factFindImportSourceFile, isExtractingFactFindImport],
+  );
   const currentFactFindStep = useMemo(
     () =>
       factFindWorkflow && factFindWorkflow.steps.length
@@ -2014,6 +2057,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setFileNoteAttachments([]);
     setFileNoteAttachmentFiles([]);
     setConciergeUploads([]);
+    setIsConciergeSuggestionDismissed(false);
   }
 
   function clearLiveRenderOutputs() {
@@ -2161,7 +2205,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function inspectFactFindUpload(upload: ConciergeUpload) {
-    if (!upload.extractedText?.trim()) {
+    if (!upload.file && !upload.extractedText?.trim()) {
       setFactFindImportError("Finley could not read text from this fact find. Try uploading the original DOCX or a text-based file rather than a scanned PDF.");
       setFactFindImportCandidate(null);
       setIsFactFindImportModalOpen(true);
@@ -2174,14 +2218,26 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setFactFindImportSourceFile(upload.name);
 
     try {
+      const requestBody = upload.file
+        ? (() => {
+            const formData = new FormData();
+            formData.append("file", upload.file);
+            formData.append("clientName", activeClient?.name ?? "");
+            return formData;
+          })()
+        : null;
       const response = await fetch("/api/finley/fact-find/extract-import", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          fileName: upload.name,
-          extractedText: upload.extractedText,
-          clientName: activeClient?.name ?? null,
-        }),
+        ...(requestBody
+          ? { body: requestBody }
+          : {
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                fileName: upload.name,
+                extractedText: upload.extractedText,
+                clientName: activeClient?.name ?? null,
+              }),
+            }),
       });
       const body = (await response.json().catch(() => null)) as FactFindImportResponse | null;
 
@@ -2275,8 +2331,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     if (!activeClient || isSending) return;
 
     if (action === "fact_find") {
-      if (primaryFactFindUpload) {
-        await inspectFactFindUpload(primaryFactFindUpload);
+      if (primaryFactFindReviewUpload) {
+        await inspectFactFindUpload(primaryFactFindReviewUpload);
         return;
       }
 
@@ -2543,6 +2599,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             name: file.name,
             mimeType: file.type || null,
             extractedText,
+            file,
             tags,
           } satisfies ConciergeUpload;
         }),
@@ -2557,6 +2614,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       );
 
       setConciergeUploads((current) => [...current, ...nextUploads]);
+      setIsConciergeSuggestionDismissed(false);
       setMessages((current) => [
         ...current,
         {
@@ -2567,6 +2625,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             : `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClient.name}. I can review the documents and suggest what to do next.`,
         },
       ]);
+      setIsUploadsModalOpen(true);
     } finally {
       setIsUploadingConciergeFiles(false);
     }
@@ -2583,8 +2642,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return;
     }
 
-    if (task.action === "fact_find" && primaryFactFindUpload) {
-      await inspectFactFindUpload(primaryFactFindUpload);
+    if (task.action === "fact_find" && primaryFactFindReviewUpload) {
+      await inspectFactFindUpload(primaryFactFindReviewUpload);
       return;
     }
 
@@ -3666,13 +3725,21 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           ) : null}
 
-          {activeClient && conciergeUploads.length ? (
+          {activeClient && conciergeUploads.length && !isConciergeSuggestionDismissed ? (
             <section className={styles.conciergeSuggestionPanel} aria-label="Suggested next steps">
               <div className={styles.conciergeSuggestionHeader}>
                 <div>
                   <div className={styles.suggestionTitle}>Finley noticed something useful</div>
                   <div className={styles.conciergeSuggestionText}>{conciergeInsightText}</div>
                 </div>
+                <button
+                  type="button"
+                  className={styles.conciergeSuggestionClose}
+                  onClick={() => setIsConciergeSuggestionDismissed(true)}
+                  aria-label="Close suggested next steps"
+                >
+                  ×
+                </button>
               </div>
               <div className={styles.conciergeUploadList}>
                 {conciergeUploads.map((upload) => (
@@ -3893,7 +3960,13 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 <button
                   type="button"
                   className={styles.refreshButton}
-                  onClick={() => conciergeUploadInputRef.current?.click()}
+                  onClick={() => {
+                    if (conciergeUploads.length) {
+                      setIsUploadsModalOpen(true);
+                      return;
+                    }
+                    conciergeUploadInputRef.current?.click();
+                  }}
                   disabled={!activeClient || isUploadingConciergeFiles}
                 >
                   {isUploadingConciergeFiles
@@ -4865,6 +4938,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {isUploadsModalOpen && activeClient ? (
+        <UploadedFilesModal
+          clientName={activeClient.name ?? "this client"}
+          files={uploadedFilesModalFiles}
+          onClose={() => setIsUploadsModalOpen(false)}
+          onAddMore={() => {
+            setIsUploadsModalOpen(false);
+            conciergeUploadInputRef.current?.click();
+          }}
+        />
       ) : null}
 
       <CreateClientDialog
