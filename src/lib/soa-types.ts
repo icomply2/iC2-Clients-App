@@ -505,6 +505,23 @@ export type ProjectionTableV1 = {
   rows: ProjectionTableRowV1[];
 };
 
+export type ProjectionChartSeriesV1 = {
+  label: string;
+  values: number[];
+  color?: string | null;
+};
+
+export type ProjectionChartV1 = {
+  chartId: string;
+  title: string;
+  columns: string[];
+  series: ProjectionChartSeriesV1[];
+  lineLabel?: string | null;
+  lineValues?: number[] | null;
+  axisMax?: number | null;
+  axisStep?: number | null;
+};
+
 export type FinancialProjectionV1 = {
   projectionId: string;
   name: string;
@@ -535,6 +552,10 @@ export type FinancialProjectionV1 = {
     yearlySeries?: ProjectionYearV1[] | null;
     cashflowTable?: ProjectionTableV1 | null;
     assumptionTables?: ProjectionTableV1[] | null;
+    assetLiabilityTable?: ProjectionTableV1 | null;
+    assetLiabilityChart?: ProjectionChartV1 | null;
+    superTables?: ProjectionTableV1[] | null;
+    pensionTables?: ProjectionTableV1[] | null;
   };
   linkedRecommendationIds: string[];
   rationale?: string | null;
@@ -567,7 +588,19 @@ export type ProductFeeItemV1 = {
   productRexReportId?: string | null;
   amount?: number | null;
   percentage?: number | null;
-  feeType: "investment" | "admin" | "platform" | "other";
+  feeType:
+    | "investment"
+    | "admin"
+    | "platform"
+    | "other"
+    | "investment-fee"
+    | "sliding-admin-fee"
+    | "admin-fee-flat"
+    | "admin-fee-floating"
+    | "expense-recovery-fee-flat"
+    | "expense-recovery-fee-floating"
+    | "orr-levy"
+    | "buy-sell-fees";
 };
 
 export type CommissionItemV1 = {

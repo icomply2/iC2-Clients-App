@@ -15,6 +15,9 @@ import {
   INSURANCE_NEEDS_REQUIREMENT_ITEMS,
   normalizeInsuranceNeedsLineItems,
 } from "@/lib/soa-insurance-needs";
+import { parseRecommendationMarkdown } from "@/lib/recommendation-markdown";
+import { sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
+import { getProductFeeTypeLabel } from "@/lib/soa-fee-types";
 import type {
   AdviceCaseV1,
   CommissionItemV1,
@@ -22,6 +25,7 @@ import type {
   InsurancePolicyOwnershipGroupV1,
   InsurancePolicyReplacementV1,
   PortfolioHoldingV1,
+  ProjectionChartV1,
   ProjectionTableV1,
   ProductRexTransactionRowV1,
 } from "@/lib/soa-types";
@@ -52,8 +56,13 @@ type ParagraphOptions = {
   spacingBefore?: number;
 };
 
+type NormalOptions = {
+  gapAfter?: boolean;
+};
+
 type TableCell = {
   text: string;
+  bulletItems?: string[];
   bold?: boolean;
   fill?: string;
   color?: string;
@@ -68,6 +77,7 @@ type AllocationChartSlice = {
 
 type DocxBuildAssets = {
   allocationChartPng?: Uint8Array | null;
+  assetLiabilityChartPngs?: Array<Uint8Array | null>;
 };
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -76,8 +86,23 @@ const DEFAULT_TEXT_COLOR = "#2F4A6D";
 const DEFAULT_TABLE_HEADER_COLOR = "#faf7eb";
 let activeHeadingColor = DEFAULT_HEADING_COLOR;
 const DEFAULT_BODY_FONT_SIZE = 11;
+const COMPACT_TABLE_FONT_SIZE = 8;
+const APPENDIX_PROJECTION_YEAR_LIMIT = 5;
+const PARAGRAPH_SPACING = {
+  normalAfter: 0,
+  headingBefore: 0,
+  headingAfter: 0,
+  bulletAfter: 0,
+  tableAfter: 0,
+  imageAfter: 0,
+  line: 240,
+};
 const PIE_SLICE_COLORS = ["#113864", "#f2c500", "#2f855a", "#c05621", "#6b46c1", "#00897b", "#c53030", "#4a5568"];
 const ALLOCATION_CHART_RELATIONSHIP_ID = "rIdAssetAllocationChart";
+const ASSET_LIABILITY_CHART_RELATIONSHIP_PREFIX = "rIdProjectionAssetLiabilityChart";
+const BULLET_NUMBERING_RELATIONSHIP_ID = "rIdNumbering";
+const BULLET_NUMBERING_ID = 1;
+const BULLET_INDENT_TWIPS = 360;
 const STRATEGY_RECOMMENDATIONS_INTRO =
   "This section outlines our recommendations, the benefits to you, how these strategies place you in a better position and other key information.";
 const FEES_AND_DISCLOSURES_INTRO =
@@ -111,6 +136,10 @@ const ABOUT_ADVICE_WARNINGS = [
   },
 ];
 
+function includesAdviceModule(adviceCase: AdviceCaseV1, moduleId: AdviceCaseV1["blueprint"]["includedModules"][number]) {
+  return adviceCase.blueprint.includedModules.includes(moduleId);
+}
+
 const CONTENT_TYPES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -118,6 +147,7 @@ const CONTENT_TYPES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
 </Types>`;
 
 const ROOT_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -125,15 +155,27 @@ const ROOT_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
 
-function documentRelsXml(includeAllocationChart: boolean) {
+function assetLiabilityChartRelationshipId(index: number) {
+  return `${ASSET_LIABILITY_CHART_RELATIONSHIP_PREFIX}${index + 1}`;
+}
+
+function documentRelsXml(includeAllocationChart: boolean, assetLiabilityChartPngs: Array<Uint8Array | null> = []) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="${BULLET_NUMBERING_RELATIONSHIP_ID}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
   ${
     includeAllocationChart
       ? `<Relationship Id="${ALLOCATION_CHART_RELATIONSHIP_ID}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/asset-allocation.png"/>`
       : ""
   }
+  ${assetLiabilityChartPngs
+    .map((chartPng, index) =>
+      chartPng
+        ? `<Relationship Id="${assetLiabilityChartRelationshipId(index)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/projection-asset-liability-${index + 1}.png"/>`
+        : "",
+    )
+    .join("")}
 </Relationships>`;
 }
 
@@ -144,6 +186,28 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <w:qFormat/>
   </w:style>
 </w:styles>`;
+
+const NUMBERING_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="1">
+    <w:multiLevelType w:val="singleLevel"/>
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="bullet"/>
+      <w:lvlText w:val="•"/>
+      <w:lvlJc w:val="left"/>
+      <w:pPr>
+        <w:ind w:left="${BULLET_INDENT_TWIPS}" w:hanging="${BULLET_INDENT_TWIPS}"/>
+      </w:pPr>
+      <w:rPr>
+        <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri" w:hint="default"/>
+      </w:rPr>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="${BULLET_NUMBERING_ID}">
+    <w:abstractNumId w:val="1"/>
+  </w:num>
+</w:numbering>`;
 
 function escapeXml(value: string) {
   return value
@@ -226,6 +290,31 @@ function formatCurrency(value?: number | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function niceChartAxisStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) {
+    return 1;
+  }
+
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceNormalized =
+    normalized <= 1
+      ? 1
+      : normalized <= 2
+        ? 2
+        : normalized <= 2.5
+          ? 2.5
+          : normalized <= 5
+            ? 5
+            : 10;
+
+  return niceNormalized * magnitude;
+}
+
+function chartAxisStepFor(maxValue: number, targetTickCount = 5) {
+  return niceChartAxisStep(Math.max(1, maxValue) / targetTickCount);
 }
 
 function calculateAge(value?: string | null) {
@@ -332,21 +421,6 @@ function getInsuranceAnnualisedPremium(group: InsurancePolicyOwnershipGroupV1) {
                 : 0;
 
   return multiplier && group.premiumAmount != null ? group.premiumAmount * multiplier : null;
-}
-
-function getInsuranceCoverTypeKey(policyType?: string | null) {
-  switch (policyType) {
-    case "life":
-      return "life";
-    case "tpd":
-      return "tpd";
-    case "trauma":
-      return "trauma";
-    case "income-protection":
-      return "incomeProtection";
-    default:
-      return null;
-  }
 }
 
 function getInsurancePolicySnapshotValue(
@@ -492,15 +566,15 @@ function run(text: string, options: ParagraphOptions, fontFamily: string, defaul
 
 function paragraph(text: string, options: ParagraphOptions, fontFamily: string, defaultColor: string) {
   const alignment = options.align ? `<w:jc w:val="${options.align}"/>` : "";
-  const before = options.spacingBefore ?? 0;
-  const after = options.spacingAfter ?? (options.heading ? 180 : 120);
-  const spacing = `<w:spacing w:before="${before}" w:after="${after}" w:line="276" w:lineRule="auto"/>`;
+  const before = 0;
+  const after = 0;
+  const spacing = `<w:spacing w:before="${before}" w:after="${after}" w:line="${PARAGRAPH_SPACING.line}" w:lineRule="auto"/>`;
 
   return `<w:p><w:pPr>${alignment}${spacing}</w:pPr>${run(text, options, fontFamily, defaultColor)}</w:p>`;
 }
 
 function emptyParagraph() {
-  return "<w:p/>";
+  return `<w:p><w:pPr><w:spacing w:before="0" w:after="${PARAGRAPH_SPACING.tableAfter}" w:line="${PARAGRAPH_SPACING.line}" w:lineRule="auto"/></w:pPr></w:p>`;
 }
 
 function pageBreak() {
@@ -508,10 +582,10 @@ function pageBreak() {
 }
 
 function bullet(text: string, fontFamily: string, defaultColor: string) {
-  return `<w:p><w:pPr><w:spacing w:after="80" w:line="276" w:lineRule="auto"/><w:ind w:left="360" w:hanging="180"/></w:pPr>${run(`• ${text}`, {}, fontFamily, defaultColor)}</w:p>`;
+  return `<w:p><w:pPr><w:spacing w:before="0" w:after="${PARAGRAPH_SPACING.bulletAfter}" w:line="${PARAGRAPH_SPACING.line}" w:lineRule="auto"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="${BULLET_NUMBERING_ID}"/></w:numPr><w:ind w:left="${BULLET_INDENT_TWIPS}" w:hanging="${BULLET_INDENT_TWIPS}"/></w:pPr>${run(text, {}, fontFamily, defaultColor)}</w:p>`;
 }
 
-function table(rows: TableCell[][], fontFamily: string, defaultColor: string) {
+function table(rows: TableCell[][], fontFamily: string, defaultColor: string, fontSize = DEFAULT_BODY_FONT_SIZE) {
   const rowXml = rows
     .map(
       (row) =>
@@ -519,17 +593,21 @@ function table(rows: TableCell[][], fontFamily: string, defaultColor: string) {
           .map((cell) => {
             const fill = cell.fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${wordColor(cell.fill, DEFAULT_TABLE_HEADER_COLOR)}"/>` : "";
             const width = cell.widthPct ? `<w:tcW w:w="${Math.round(cell.widthPct * 50)}" w:type="pct"/>` : "";
-            return `<w:tc><w:tcPr>${width}${fill}<w:vAlign w:val="top"/></w:tcPr>${paragraph(
-              cell.text,
-              {
-                bold: cell.bold,
-                color: cell.color,
-                fontSize: DEFAULT_BODY_FONT_SIZE,
-                spacingAfter: 0,
-              },
-              fontFamily,
-              defaultColor,
-            )}</w:tc>`;
+            const cellBody = cell.bulletItems?.length
+              ? cell.bulletItems.map((item) => bullet(item, fontFamily, defaultColor)).join("")
+              : paragraph(
+                  cell.text,
+                  {
+                    bold: cell.bold,
+                    color: cell.color,
+                    fontSize,
+                    spacingAfter: 0,
+                  },
+                  fontFamily,
+                  defaultColor,
+                );
+
+            return `<w:tc><w:tcPr>${width}${fill}<w:vAlign w:val="top"/></w:tcPr>${cellBody}</w:tc>`;
           })
           .join("")}</w:tr>`,
     )
@@ -539,7 +617,7 @@ function table(rows: TableCell[][], fontFamily: string, defaultColor: string) {
 }
 
 function imageParagraph(relationshipId: string, name: string, widthEmu: number, heightEmu: number) {
-  return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="180"/></w:pPr><w:r><w:drawing>
+  return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="${PARAGRAPH_SPACING.imageAfter}"/></w:pPr><w:r><w:drawing>
     <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">
       <wp:extent cx="${widthEmu}" cy="${heightEmu}"/>
       <wp:effectExtent l="0" t="0" r="0" b="0"/>
@@ -571,15 +649,54 @@ function imageParagraph(relationshipId: string, name: string, widthEmu: number, 
 
 function heading(text: string, level: 1 | 2 | 3, fontFamily: string) {
   const size = level === 1 ? 18 : 14;
-  return paragraph(text, { bold: true, color: activeHeadingColor, fontSize: size, heading: true, spacingBefore: level === 1 ? 0 : 180 }, fontFamily, DEFAULT_TEXT_COLOR);
+  const xml = paragraph(
+    text,
+    {
+      bold: true,
+      color: activeHeadingColor,
+      fontSize: size,
+      heading: true,
+      spacingBefore: level === 1 ? 0 : PARAGRAPH_SPACING.headingBefore,
+    },
+    fontFamily,
+    DEFAULT_TEXT_COLOR,
+  );
+  return `${emptyParagraph()}${xml}`;
 }
 
 function sectionTitle(text: string, fontFamily: string) {
   return heading(text, 1, fontFamily);
 }
 
-function normal(text: string, fontFamily: string, defaultColor: string) {
-  return paragraph(text, {}, fontFamily, defaultColor);
+function normal(text: string, fontFamily: string, defaultColor: string, options: NormalOptions = {}) {
+  const xml = paragraph(text, {}, fontFamily, defaultColor);
+  return options.gapAfter === false ? xml : `${xml}${emptyParagraph()}`;
+}
+
+function recommendationMarkdown(text: string | null | undefined, fontFamily: string, defaultColor: string, tableHeaderColor: string, emptyLabel: string) {
+  const blocks = parseRecommendationMarkdown(text);
+  if (!blocks.length) {
+    return normal(emptyLabel, fontFamily, defaultColor);
+  }
+
+  return blocks
+    .map((block) => {
+      if (block.type === "paragraph") {
+        return normal(sanitizeClientFacingResearchLanguage(block.text), fontFamily, defaultColor);
+      }
+
+      const widthPct = Math.floor(100 / Math.max(block.headers.length, 1));
+      return table(
+        [
+          block.headers.map((header) => headerCell(sanitizeClientFacingResearchLanguage(header), tableHeaderColor, DEFAULT_TEXT_COLOR, widthPct)),
+          ...block.rows.map((row) => row.map((cell) => ({ text: sanitizeClientFacingResearchLanguage(cell), widthPct }))),
+        ],
+        fontFamily,
+        defaultColor,
+        9,
+      );
+    })
+    .join("");
 }
 
 function headerCell(text: string, fill: string, color: string, widthPct?: number): TableCell {
@@ -887,6 +1004,117 @@ async function buildAllocationChartPng(slices: AllocationChartSlice[]) {
   return dataUrlToBytes(canvas.toDataURL("image/png"));
 }
 
+async function buildProjectionStackedBarLineChartPng(chart?: ProjectionChartV1 | null) {
+  if (!chart?.columns.length || !chart.series.length || typeof document === "undefined") {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  const scale = 2;
+  const width = 880;
+  const height = 420;
+  canvas.width = width * scale;
+  canvas.height = height * scale;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    return null;
+  }
+
+  const axisMax =
+    chart.axisMax && chart.axisMax > 0
+      ? chart.axisMax
+      : Math.max(
+          1,
+          ...chart.columns.map((_, index) => chart.series.reduce((sum, series) => sum + Math.max(series.values[index] ?? 0, 0), 0)),
+          ...(chart.lineValues ?? []),
+        );
+  const axisStep = chart.axisStep && chart.axisStep > 0 ? chart.axisStep : chartAxisStepFor(axisMax);
+  const gridValues = Array.from({ length: Math.floor(axisMax / axisStep) + 1 }, (_, index) => index * axisStep);
+  const plotLeft = 86;
+  const plotTop = 82;
+  const plotWidth = 748;
+  const plotHeight = 230;
+  const barGap = 8;
+  const barWidth = Math.max(18, (plotWidth - barGap * (chart.columns.length - 1)) / chart.columns.length);
+  const palette = PIE_SLICE_COLORS;
+
+  context.scale(scale, scale);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.font = "700 20px Calibri, Arial, sans-serif";
+  context.fillStyle = "#B3742A";
+  context.fillText(chart.title || "Asset and liability chart", plotLeft, 34);
+
+  context.font = "12px Calibri, Arial, sans-serif";
+  chart.series.slice(0, 8).forEach((series, index) => {
+    const x = plotLeft + (index % 4) * 190;
+    const y = 58 + Math.floor(index / 4) * 18;
+    context.fillStyle = series.color || palette[index % palette.length];
+    context.fillRect(x, y - 10, 10, 10);
+    context.fillStyle = "#2F4A6D";
+    context.fillText(series.label.length > 22 ? `${series.label.slice(0, 21)}...` : series.label, x + 16, y);
+  });
+
+  context.strokeStyle = "#D5DDE7";
+  context.lineWidth = 1;
+  context.fillStyle = "#2F4A6D";
+  context.font = "11px Calibri, Arial, sans-serif";
+  gridValues.forEach((value) => {
+    const y = plotTop + plotHeight - (value / axisMax) * plotHeight;
+    context.beginPath();
+    context.moveTo(plotLeft, y);
+    context.lineTo(plotLeft + plotWidth, y);
+    context.stroke();
+    context.fillText(formatCurrency(value).replace(".00", ""), 8, y + 4);
+  });
+
+  chart.columns.forEach((column, columnIndex) => {
+    const x = plotLeft + columnIndex * (barWidth + barGap);
+    let stackedHeight = 0;
+
+    chart.series.forEach((series, seriesIndex) => {
+      const value = Math.max(series.values[columnIndex] ?? 0, 0);
+      const segmentHeight = (value / axisMax) * plotHeight;
+      context.fillStyle = series.color || palette[seriesIndex % palette.length];
+      context.fillRect(x, plotTop + plotHeight - stackedHeight - segmentHeight, barWidth, segmentHeight);
+      stackedHeight += segmentHeight;
+    });
+
+    context.save();
+    context.translate(x + barWidth / 2, plotTop + plotHeight + 16);
+    context.rotate(-Math.PI / 5);
+    context.textAlign = "right";
+    context.fillStyle = "#2F4A6D";
+    context.fillText(column, 0, 0);
+    context.restore();
+  });
+
+  const lineValues = chart.lineValues ?? [];
+  if (lineValues.some((value) => value > 0)) {
+    context.strokeStyle = "#13D90B";
+    context.lineWidth = 4;
+    context.beginPath();
+    lineValues.forEach((value, index) => {
+      const x = plotLeft + index * (barWidth + barGap) + barWidth / 2;
+      const y = plotTop + plotHeight - (Math.max(value, 0) / axisMax) * plotHeight;
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.stroke();
+    context.fillStyle = "#13D90B";
+    context.fillRect(plotLeft, height - 28, 18, 4);
+    context.fillStyle = "#2F4A6D";
+    context.font = "12px Calibri, Arial, sans-serif";
+    context.fillText(chart.lineLabel || "Line value", plotLeft + 28, height - 24);
+  }
+
+  return dataUrlToBytes(canvas.toDataURL("image/png"));
+}
+
 function documentXml(bodyXml: string) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -959,9 +1187,10 @@ function buildCover(input: SoaDocxExportInput, fontFamily: string, textColor: st
 
 function buildContents(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const hasReplacementAnalysis = input.adviceCase.recommendations.replacement.length > 0;
-  const hasInsuranceNeedsAnalysis = Boolean(input.adviceCase.recommendations.insuranceNeedsAnalyses?.length);
-  const hasInsuranceRecommendations = Boolean(input.adviceCase.recommendations.insurancePolicies?.length);
-  const hasInsuranceReplacement = Boolean(input.adviceCase.recommendations.insuranceReplacements?.length);
+  const includesInsuranceAdvice = includesAdviceModule(input.adviceCase, "insurance-advice");
+  const hasInsuranceNeedsAnalysis = includesInsuranceAdvice && Boolean(input.adviceCase.recommendations.insuranceNeedsAnalyses?.length);
+  const hasInsuranceRecommendations = includesInsuranceAdvice && Boolean(input.adviceCase.recommendations.insurancePolicies?.length);
+  const hasInsuranceReplacement = includesInsuranceAdvice && Boolean(input.adviceCase.recommendations.insuranceReplacements?.length);
   const feeAgreement = input.adviceCase.agreements.feeAgreement;
   const hasServiceAgreement = Boolean(feeAgreement?.present);
   const isFixedTermAgreement = feeAgreement?.agreementType === "fixed-term";
@@ -1010,9 +1239,9 @@ function buildLetter(input: SoaDocxExportInput, fontFamily: string, textColor: s
   const practiceName = input.practiceName || adviceCase.practice.name || "<<practice>>";
 
   return [
-    normal(formatDate(input.savedAt), fontFamily, textColor),
-    normal(clientNames, fontFamily, textColor),
-    ...addressLines.map((line) => normal(line, fontFamily, textColor)),
+    normal(formatDate(input.savedAt), fontFamily, textColor, { gapAfter: false }),
+    normal(clientNames, fontFamily, textColor, { gapAfter: false }),
+    ...addressLines.map((line) => normal(line, fontFamily, textColor, { gapAfter: false })),
     emptyParagraph(),
     normal(`Dear ${addressee},`, fontFamily, textColor),
     heading("Statement of Advice", 1, fontFamily),
@@ -1022,10 +1251,10 @@ function buildLetter(input: SoaDocxExportInput, fontFamily: string, textColor: s
     normal("It is very important that you take full ownership of your financial decisions. To that end, we can assist you in making the appropriate decisions, but those decisions remain yours. If necessary, please seek more information and advice from us until you are comfortable to do so.", fontFamily, textColor),
     normal("We look forward to being of service to you in implementing the recommended strategies and assisting you in the attainment of your personal and investment objectives.", fontFamily, textColor),
     emptyParagraph(),
-    normal("Yours sincerely,", fontFamily, textColor),
+    normal("Yours sincerely,", fontFamily, textColor, { gapAfter: false }),
     paragraph(adviserName, { bold: true, fontSize: 14 }, fontFamily, textColor),
-    normal(adviserName, fontFamily, textColor),
-    normal(practiceName, fontFamily, textColor),
+    normal(adviserName, fontFamily, textColor, { gapAfter: false }),
+    normal(practiceName, fontFamily, textColor, { gapAfter: false }),
   ].join("");
 }
 
@@ -1037,23 +1266,19 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
   const betterPositionRows = [
     ...adviceCase.recommendations.strategic.map((recommendation) => ({
       recommendation: recommendation.recommendationText || "Draft strategy recommendation not yet written.",
-      betterPosition:
+      betterPositionItems:
         [
           ...recommendation.clientBenefits.map((benefit) => benefit.text).filter(Boolean),
           recommendation.rationale ?? "",
-        ]
-          .filter(Boolean)
-          .join(" ") || "Benefits to be confirmed.",
+        ].filter(Boolean),
     })),
     ...adviceCase.recommendations.product.map((recommendation) => ({
       recommendation: recommendation.recommendationText || "Draft product recommendation not yet written.",
-      betterPosition:
+      betterPositionItems:
         [
           ...recommendation.clientBenefits.map((benefit) => benefit.text).filter(Boolean),
           recommendation.suitabilityRationale ?? "",
-        ]
-          .filter(Boolean)
-          .join(" ") || "Benefits to be confirmed.",
+        ].filter(Boolean),
     })),
   ];
 
@@ -1076,7 +1301,11 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
         ...(betterPositionRows.length
           ? betterPositionRows.map((row) => [
               { text: row.recommendation, widthPct: 50 },
-              { text: row.betterPosition, widthPct: 50 },
+              {
+                text: "",
+                bulletItems: row.betterPositionItems.length ? row.betterPositionItems : ["Benefits to be confirmed."],
+                widthPct: 50,
+              },
             ])
           : [[{ text: "No recommendations have been drafted yet.", widthPct: 50 }, { text: "-", widthPct: 50 }]]),
       ],
@@ -1140,10 +1369,12 @@ function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: st
   return [
     sectionTitle("About This Advice", fontFamily),
     heading("Scope of Advice", 2, fontFamily),
+    emptyParagraph(),
     paragraph("Included scope", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingAfter: 20 }, fontFamily, textColor),
     ...(adviceCase.scope.included.length
       ? adviceCase.scope.included.map((item) => bullet(item.topic, fontFamily, textColor))
       : [normal("No included scope has been recorded.", fontFamily, textColor)]),
+    emptyParagraph(),
     paragraph("Limitations and exclusions", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingBefore: 120, spacingAfter: 20 }, fontFamily, textColor),
     ...(limitationsAndExclusions.length
       ? limitationsAndExclusions.map((item) => bullet(item, fontFamily, textColor))
@@ -1154,6 +1385,7 @@ function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: st
       : [normal("No client objectives have been recorded.", fontFamily, textColor)]),
     heading("Warnings and Limitations", 2, fontFamily),
     ...ABOUT_ADVICE_WARNINGS.flatMap((warning) => [
+      emptyParagraph(),
       paragraph(warning.title, { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingAfter: 20 }, fontFamily, textColor),
       normal(warning.text, fontFamily, textColor),
     ]),
@@ -1408,7 +1640,7 @@ function buildRiskProfile(input: SoaDocxExportInput, fontFamily: string, textCol
   ].join("");
 }
 
-function buildStrategyRecommendations(input: SoaDocxExportInput, fontFamily: string, textColor: string) {
+function buildStrategyRecommendations(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const recommendations = input.adviceCase.recommendations.strategic;
 
   if (!recommendations.length) {
@@ -1420,22 +1652,22 @@ function buildStrategyRecommendations(input: SoaDocxExportInput, fontFamily: str
       const benefits = [
         ...recommendation.clientBenefits.map((benefit) => benefit.text).filter(Boolean),
         recommendation.rationale ?? "",
-      ].filter(Boolean);
+      ].filter(Boolean).map(sanitizeClientFacingResearchLanguage);
       const consequences = recommendation.consequences.map((consequence) =>
         [consequence.type ? toTitleCase(consequence.type) : null, consequence.text].filter(Boolean).join(": "),
-      );
+      ).map(sanitizeClientFacingResearchLanguage);
       const alternatives = recommendation.alternativesConsidered.map((alternative) =>
         [alternative.optionText, alternative.reasonNotRecommended ? `Reason not recommended: ${alternative.reasonNotRecommended}` : null]
           .filter(Boolean)
           .join(" - "),
-      );
+      ).map(sanitizeClientFacingResearchLanguage);
 
       return [
         index === 0 ? sectionTitle("Strategy Recommendations", fontFamily) : pageBreak(),
         index === 0 ? normal(STRATEGY_RECOMMENDATIONS_INTRO, fontFamily, textColor) : "",
         heading(`Recommendation ${index + 1}`, 2, fontFamily),
         normal(`Recommended for: ${getRecommendationAudience(input.adviceCase, recommendation.ownerPersonIds)}`, fontFamily, textColor),
-        normal(recommendation.recommendationText || "Draft recommendation not yet written.", fontFamily, textColor),
+        recommendationMarkdown(recommendation.recommendationText, fontFamily, textColor, tableHeaderColor, "Draft recommendation not yet written."),
         heading("Benefits", 2, fontFamily),
         ...(benefits.length ? benefits.map((benefit) => bullet(benefit, fontFamily, textColor)) : [normal("No benefits have been drafted.", fontFamily, textColor)]),
         heading("Consequences and trade-offs", 2, fontFamily),
@@ -1468,15 +1700,15 @@ function buildProductRecommendations(
       const benefits = [
         ...recommendation.clientBenefits.map((benefit) => benefit.text).filter(Boolean),
         recommendation.suitabilityRationale ?? "",
-      ].filter(Boolean);
+      ].filter(Boolean).map(sanitizeClientFacingResearchLanguage);
       const consequences = recommendation.consequences.map((consequence) =>
         [consequence.type ? toTitleCase(consequence.type) : null, consequence.text].filter(Boolean).join(": "),
-      );
+      ).map(sanitizeClientFacingResearchLanguage);
       const alternatives = recommendation.alternativesConsidered.map((alternative) =>
         [alternative.productName, alternative.reasonDiscounted ? `Reason not recommended: ${alternative.reasonDiscounted}` : null]
           .filter(Boolean)
           .join(" - "),
-      );
+      ).map(sanitizeClientFacingResearchLanguage);
       const summaryRows = [
         [
           headerCell("Action", tableHeaderColor, DEFAULT_TEXT_COLOR, 25),
@@ -1497,7 +1729,7 @@ function buildProductRecommendations(
         heading(`Product Recommendation ${index + 1}`, 2, fontFamily),
         table(summaryRows, fontFamily, textColor),
         normal(`Recommended for: ${getRecommendationAudience(input.adviceCase, recommendation.ownerPersonIds)}`, fontFamily, textColor),
-        normal(recommendation.recommendationText || "Draft product recommendation not yet written.", fontFamily, textColor),
+        recommendationMarkdown(recommendation.recommendationText, fontFamily, textColor, tableHeaderColor, "Draft product recommendation not yet written."),
         heading("Benefits", 2, fontFamily),
         ...(benefits.length ? benefits.map((benefit) => bullet(benefit, fontFamily, textColor)) : [normal("No benefits have been drafted.", fontFamily, textColor)]),
         heading("Consequences and trade-offs", 2, fontFamily),
@@ -1516,7 +1748,7 @@ function buildProductRecommendations(
 function buildInsuranceNeedsAnalysis(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const analyses = input.adviceCase.recommendations.insuranceNeedsAnalyses ?? [];
 
-  if (!analyses.length) {
+  if (!includesAdviceModule(input.adviceCase, "insurance-advice") || !analyses.length) {
     return "";
   }
 
@@ -1607,7 +1839,7 @@ function buildInsuranceNeedsAnalysis(input: SoaDocxExportInput, fontFamily: stri
 function buildInsuranceRecommendations(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const policies = input.adviceCase.recommendations.insurancePolicies ?? [];
 
-  if (!policies.length) {
+  if (!includesAdviceModule(input.adviceCase, "insurance-advice") || !policies.length) {
     return "";
   }
 
@@ -1680,7 +1912,7 @@ function buildInsuranceRecommendations(input: SoaDocxExportInput, fontFamily: st
 function buildInsuranceReplacement(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const replacements = input.adviceCase.recommendations.insuranceReplacements ?? [];
 
-  if (!replacements.length) {
+  if (!includesAdviceModule(input.adviceCase, "insurance-advice") || !replacements.length) {
     return "";
   }
 
@@ -1758,8 +1990,12 @@ function buildInsuranceReplacement(input: SoaDocxExportInput, fontFamily: string
               headerCell("Lost", tableHeaderColor, DEFAULT_TEXT_COLOR, 50),
             ],
             [
-              { text: replacement.benefitsGained.length ? replacement.benefitsGained.map((benefit) => `• ${benefit}`).join("\n") : "-", widthPct: 50 },
-              { text: replacement.benefitsLost.length ? replacement.benefitsLost.map((benefit) => `• ${benefit}`).join("\n") : "-", widthPct: 50 },
+              replacement.benefitsGained.length
+                ? { text: "", bulletItems: replacement.benefitsGained, widthPct: 50 }
+                : { text: "-", widthPct: 50 },
+              replacement.benefitsLost.length
+                ? { text: "", bulletItems: replacement.benefitsLost, widthPct: 50 }
+                : { text: "-", widthPct: 50 },
             ],
           ],
           fontFamily,
@@ -2040,19 +2276,21 @@ function buildProjectionOutputTable(
   fontFamily: string,
   textColor: string,
   tableHeaderColor: string,
+  options: { labelHeader?: string; compact?: boolean; maxColumns?: number } = {},
 ) {
   if (!projectionTable.columns.length || !projectionTable.rows.length) {
     return "";
   }
 
-  const labelWidth = projectionTable.columns.length > 4 ? 18 : 35;
-  const valueWidth = (100 - labelWidth) / projectionTable.columns.length;
+  const columns = options.maxColumns ? projectionTable.columns.slice(0, options.maxColumns) : projectionTable.columns;
+  const labelWidth = columns.length > 8 ? 16 : columns.length > 4 ? 18 : 35;
+  const valueWidth = (100 - labelWidth) / columns.length;
 
   return table(
     [
       [
-        headerCell("Assumption", tableHeaderColor, DEFAULT_TEXT_COLOR, labelWidth),
-        ...projectionTable.columns.map((column) => headerCell(column, tableHeaderColor, DEFAULT_TEXT_COLOR, valueWidth)),
+        headerCell(options.labelHeader ?? "Item", tableHeaderColor, DEFAULT_TEXT_COLOR, labelWidth),
+        ...columns.map((column) => headerCell(column, tableHeaderColor, DEFAULT_TEXT_COLOR, valueWidth)),
       ],
       ...projectionTable.rows.map((row) => {
         const buildCell = row.isTotal || row.isSection ? totalCell : (text: string, _fill: string, _color: string, widthPct?: number) => ({ text, widthPct });
@@ -2060,7 +2298,7 @@ function buildProjectionOutputTable(
 
         return [
           buildCell(row.label, fill, DEFAULT_TEXT_COLOR, labelWidth),
-          ...projectionTable.columns.map((_, columnIndex) =>
+          ...columns.map((_, columnIndex) =>
             buildCell(row.isSection ? "" : row.values[columnIndex] || "-", fill, DEFAULT_TEXT_COLOR, valueWidth),
           ),
         ];
@@ -2068,10 +2306,37 @@ function buildProjectionOutputTable(
     ],
     fontFamily,
     textColor,
+    options.compact ? COMPACT_TABLE_FONT_SIZE : DEFAULT_BODY_FONT_SIZE,
   );
 }
 
-function buildProjections(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
+function buildProjectionCapitalSection(
+  projectionIndex: number,
+  assets: DocxBuildAssets,
+  fontFamily: string,
+  textColor: string,
+) {
+  const assetLiabilityChartPng = assets.assetLiabilityChartPngs?.[projectionIndex] ?? null;
+
+  return [
+    heading("Capital Projections", 2, fontFamily),
+    normal(
+      "The chart below projects your asset and liability position over time. The stacked bars show projected assets, while the line shows total liabilities.",
+      fontFamily,
+      textColor,
+    ),
+    normal("These projections assume the following:", fontFamily, textColor),
+    bullet("Cost of living and indexed cashflow items are adjusted for inflation where selected.", fontFamily, textColor),
+    bullet("Surplus cashflow is directed according to the scenario allocation settings.", fontFamily, textColor),
+    bullet("Superannuation, pension and investment assets are projected using the nominated investment profiles.", fontFamily, textColor),
+    bullet("Please refer to the projection assumptions in the appendix for underlying return and legislative assumptions.", fontFamily, textColor),
+    assetLiabilityChartPng
+      ? imageParagraph(assetLiabilityChartRelationshipId(projectionIndex), "Projection asset and liability chart", 6035040, 2880360)
+      : normal("The capital projection chart will be included once asset and liability projection data is available.", fontFamily, textColor),
+  ].join("");
+}
+
+function buildProjections(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string, assets: DocxBuildAssets) {
   const projections = input.adviceCase.financialProjections ?? [];
 
   if (!projections.length) {
@@ -2100,6 +2365,7 @@ function buildProjections(input: SoaDocxExportInput, fontFamily: string, textCol
         textColor,
       ),
       buildProjectionCashflowTable(projection, fontFamily, textColor, tableHeaderColor),
+      buildProjectionCapitalSection(index, assets, fontFamily, textColor),
       heading("Key Outcome", 2, fontFamily),
       projection.outputs.currentPositionSummary ? normal(`Current position: ${projection.outputs.currentPositionSummary}`, fontFamily, textColor) : "",
       projection.outputs.recommendedPositionSummary ? normal(`Recommended position: ${projection.outputs.recommendedPositionSummary}`, fontFamily, textColor) : "",
@@ -2128,12 +2394,92 @@ function buildProjections(input: SoaDocxExportInput, fontFamily: string, textCol
   ].join("");
 }
 
+function buildAppendixProjectionTables(
+  title: string,
+  tablesValue: ProjectionTableV1[] | null | undefined,
+  fontFamily: string,
+  textColor: string,
+  tableHeaderColor: string,
+) {
+  const tablesValueList = tablesValue?.filter((projectionTable) => projectionTable.columns.length && projectionTable.rows.length) ?? [];
+
+  if (!tablesValueList.length) {
+    return "";
+  }
+
+  return [
+    heading(title, 2, fontFamily),
+    ...tablesValueList.flatMap((projectionTable) => [
+      paragraph(projectionTable.title, { bold: true, spacingBefore: 80, spacingAfter: 40 }, fontFamily, textColor),
+      buildProjectionOutputTable(projectionTable, fontFamily, textColor, tableHeaderColor, {
+        labelHeader: "Date",
+        compact: true,
+        maxColumns: APPENDIX_PROJECTION_YEAR_LIMIT,
+      }),
+    ]),
+  ].join("");
+}
+
+function buildAppendixProjectionEvidence(
+  projection: FinancialProjectionV1,
+  projectionIndex: number,
+  assets: DocxBuildAssets,
+  fontFamily: string,
+  textColor: string,
+  tableHeaderColor: string,
+) {
+  const assetLiabilityTable = projection.outputs.assetLiabilityTable;
+  const assetLiabilityChartPng = assets.assetLiabilityChartPngs?.[projectionIndex] ?? null;
+  const hasAssetLiabilityTable = Boolean(assetLiabilityTable?.columns.length && assetLiabilityTable.rows.length);
+  const superTables = projection.outputs.superTables ?? [];
+  const pensionTables = projection.outputs.pensionTables ?? [];
+  const hasEvidence = hasAssetLiabilityTable || assetLiabilityChartPng || superTables.length || pensionTables.length;
+
+  if (!hasEvidence) {
+    return "";
+  }
+
+  return [
+    projection.name ? paragraph(projection.name, { bold: true, spacingBefore: 120, spacingAfter: 40 }, fontFamily, textColor) : "",
+    hasAssetLiabilityTable && assetLiabilityTable
+      ? [
+          heading("Asset and Liability Projections", 2, fontFamily),
+          buildProjectionOutputTable(assetLiabilityTable, fontFamily, textColor, tableHeaderColor, {
+            labelHeader: "Date",
+            compact: true,
+            maxColumns: APPENDIX_PROJECTION_YEAR_LIMIT,
+          }),
+        ].join("")
+      : "",
+    assetLiabilityChartPng
+      ? [
+          heading("Asset and Liability Chart", 2, fontFamily),
+          imageParagraph(assetLiabilityChartRelationshipId(projectionIndex), "Projection asset and liability chart", 6035040, 2880360),
+        ].join("")
+      : "",
+    buildAppendixProjectionTables("Superannuation Projections", superTables, fontFamily, textColor, tableHeaderColor),
+    buildAppendixProjectionTables("Pension Projections", pensionTables, fontFamily, textColor, tableHeaderColor),
+  ].join("");
+}
+
+function hasAppendixProjectionEvidence(projection: FinancialProjectionV1) {
+  const outputs = projection.outputs;
+  return Boolean(
+    (outputs.assetLiabilityTable?.columns.length && outputs.assetLiabilityTable.rows.length) ||
+      (outputs.assetLiabilityChart?.columns.length && outputs.assetLiabilityChart.series.length) ||
+      outputs.superTables?.some((projectionTable) => projectionTable.columns.length && projectionTable.rows.length) ||
+      outputs.pensionTables?.some((projectionTable) => projectionTable.columns.length && projectionTable.rows.length),
+  );
+}
+
 function buildFees(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const adviceCase = input.adviceCase;
   const adviceFeeTotal = adviceCase.fees.adviceFees.reduce((sum, fee) => sum + (fee.amount ?? 0), 0);
   const productFeeTotal = adviceCase.fees.productFees.reduce((sum, fee) => sum + (fee.amount ?? 0), 0);
   const productFeeGroups = getProductFeeGroups(adviceCase);
-  const insuranceCommissions = adviceCase.fees.commissions.filter((commission) => commission.productType === "insurance");
+  const insuranceCommissions = includesAdviceModule(adviceCase, "insurance-advice")
+    ? adviceCase.fees.commissions.filter((commission) => commission.productType === "insurance")
+    : [];
   const upfrontTotal = insuranceCommissions.reduce((sum, commission) => sum + (getCommissionUpfrontAmount(commission) ?? 0), 0);
   const ongoingTotal = insuranceCommissions.reduce((sum, commission) => sum + (getCommissionOngoingAmount(commission) ?? 0), 0);
   const serviceAgreementFeeItems = adviceCase.agreements.feeAgreement?.feeItems ?? [];
@@ -2167,7 +2513,7 @@ function buildFees(input: SoaDocxExportInput, fontFamily: string, textColor: str
               ],
               ...group.fees.map((fee) => [
                 { text: fee.productName || "-", widthPct: 38 },
-                { text: fee.feeType, widthPct: 24 },
+                { text: getProductFeeTypeLabel(fee.feeType), widthPct: 24 },
                 { text: formatPercent(fee.percentage), widthPct: 18 },
                 { text: formatCurrency(fee.amount), widthPct: 20 },
               ]),
@@ -2272,9 +2618,13 @@ function buildFees(input: SoaDocxExportInput, fontFamily: string, textColor: str
 function buildAuthorityToProceed(input: SoaDocxExportInput, fontFamily: string, textColor: string) {
   const adviceCase = input.adviceCase;
   const clientNames = getClientNames(adviceCase, input.clientName);
+  const addressPerson = input.clientProfile?.client ?? input.clientProfile?.partner ?? null;
+  const addressLines = buildAddress(addressPerson);
   const practiceName = input.practiceName || adviceCase.practice.name || "<<practice>>";
   const adviserName = input.adviserName || adviceCase.metadata.createdBy?.name || "<<adviser>>";
-  const hasInsuranceCommission = adviceCase.fees.commissions.some((commission) => commission.productType === "insurance");
+  const hasInsuranceCommission =
+    includesAdviceModule(adviceCase, "insurance-advice") &&
+    adviceCase.fees.commissions.some((commission) => commission.productType === "insurance");
   const signaturePeople = adviceCase.clientGroup.clients.length
     ? adviceCase.clientGroup.clients.slice(0, 2)
     : [{ personId: "client", fullName: clientNames }];
@@ -2283,8 +2633,11 @@ function buildAuthorityToProceed(input: SoaDocxExportInput, fontFamily: string, 
 
   return [
     sectionTitle("Authority to Proceed", fontFamily),
-    normal(formatDate(input.savedAt), fontFamily, textColor),
-    normal(clientNames, fontFamily, textColor),
+    normal(formatDate(input.savedAt), fontFamily, textColor, { gapAfter: false }),
+    emptyParagraph(),
+    normal(clientNames, fontFamily, textColor, { gapAfter: false }),
+    ...addressLines.map((line) => normal(line, fontFamily, textColor, { gapAfter: false })),
+    emptyParagraph(),
     bullet(`I have read and understood this Statement of Advice (SOA) prepared by my adviser and dated ${formatDate(input.savedAt)}, including the disclosure of fees and commission.`, fontFamily, textColor),
     bullet("I confirm that the information provided by me and restated in this SOA accurately summarises my current circumstances.", fontFamily, textColor),
     bullet("I understand that the recommendations in this SOA have been prepared for my sole use and are current for a period of 60 days from the date of the SOA.", fontFamily, textColor),
@@ -2373,8 +2726,8 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
 
   return [
     sectionTitle(agreementTitle, fontFamily),
-    normal(formatDate(input.savedAt), fontFamily, textColor),
-    normal(clientNames, fontFamily, textColor),
+    normal(formatDate(input.savedAt), fontFamily, textColor, { gapAfter: false }),
+    normal(clientNames, fontFamily, textColor, { gapAfter: false }),
     normal(
       isFixedTermAgreement
         ? "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. The purpose of this letter is to establish an Annual Advice Agreement."
@@ -2485,11 +2838,11 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
       .join(""),
     heading("Who is my financial adviser under this agreement?", 2, fontFamily),
     normal("Your financial adviser and fee recipient is as follows:", fontFamily, textColor),
-    normal(adviserName, fontFamily, textColor),
-    normal(practiceName, fontFamily, textColor),
-    normal(adviserEmail, fontFamily, textColor),
-    normal(adviserPhone, fontFamily, textColor),
-    normal(`Authorised Representative of ${licenseeName}`, fontFamily, textColor),
+    normal(adviserName, fontFamily, textColor, { gapAfter: false }),
+    normal(practiceName, fontFamily, textColor, { gapAfter: false }),
+    normal(adviserEmail, fontFamily, textColor, { gapAfter: false }),
+    normal(adviserPhone, fontFamily, textColor, { gapAfter: false }),
+    normal(`Authorised Representative of ${licenseeName}`, fontFamily, textColor, { gapAfter: false }),
     normal("AFSL No: 368175", fontFamily, textColor),
     heading("How long will my consent last?", 2, fontFamily),
     normal(`Your ongoing fee arrangement reference day is ${formatDate(referenceDate)}.`, fontFamily, textColor),
@@ -2511,10 +2864,15 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
   ].join("");
 }
 
-function buildAppendix(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
+function buildAppendix(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string, assets: DocxBuildAssets) {
   const investmentPdsGroups = getInvestmentPdsGroups(input.adviceCase);
-  const insurancePdsRows = getInsurancePdsRows(input.adviceCase);
+  const insurancePdsRows = includesAdviceModule(input.adviceCase, "insurance-advice")
+    ? getInsurancePdsRows(input.adviceCase)
+    : [];
   const projections = input.adviceCase.financialProjections ?? [];
+  const projectionEvidenceItems = projections
+    .map((projection, index) => ({ projection, index }))
+    .filter(({ projection }) => hasAppendixProjectionEvidence(projection));
   const transactionRows = (input.adviceCase.productRexReports ?? []).flatMap((report) => report.transactionRows);
   const transactionTotal = transactionRows.reduce((sum, row) => sum + (row.buySellSpreadAmount ?? 0) + (row.brokerageAmount ?? 0), 0);
 
@@ -2528,11 +2886,21 @@ function buildAppendix(input: SoaDocxExportInput, fontFamily: string, textColor:
           ...(projection.outputs.assumptionTables?.length
             ? projection.outputs.assumptionTables.flatMap((assumptionTable) => [
                 paragraph(assumptionTable.title, { bold: true, spacingBefore: 180, spacingAfter: 80 }, fontFamily, textColor),
-                buildProjectionOutputTable(assumptionTable, fontFamily, textColor, tableHeaderColor),
+                buildProjectionOutputTable(assumptionTable, fontFamily, textColor, tableHeaderColor, {
+                  labelHeader: "Assumption",
+                }),
               ])
             : [buildProjectionAssumptionsTable(projection, fontFamily, textColor, tableHeaderColor)]),
         ])
       : [normal("Projection assumptions will be included here once the projection modelling has been completed.", fontFamily, textColor)]),
+    ...(projectionEvidenceItems.length
+      ? [
+          heading("Projection Evidence", 2, fontFamily),
+          ...projectionEvidenceItems.map(({ projection, index }) =>
+            buildAppendixProjectionEvidence(projection, index, assets, fontFamily, textColor, tableHeaderColor),
+          ),
+        ]
+      : []),
     pageBreak(),
     sectionTitle("Product Disclosure Statements (PDS)", fontFamily),
     normal("The following Product Disclosure Statements should be provided where applicable.", fontFamily, textColor),
@@ -2637,7 +3005,7 @@ function buildDocument(input: SoaDocxExportInput, assets: DocxBuildAssets) {
     pageBreak(),
     buildRiskProfile(input, fontFamily, textColor, tableHeaderColor),
     pageBreak(),
-    buildStrategyRecommendations(input, fontFamily, textColor),
+    buildStrategyRecommendations(input, fontFamily, textColor, tableHeaderColor),
     pageBreak(),
     buildProductRecommendations(input, fontFamily, textColor, tableHeaderColor),
     pageBreak(),
@@ -2649,14 +3017,14 @@ function buildDocument(input: SoaDocxExportInput, assets: DocxBuildAssets) {
     ...(insuranceNeedsAnalysis ? [insuranceNeedsAnalysis, pageBreak()] : []),
     ...(insuranceRecommendations ? [insuranceRecommendations, pageBreak()] : []),
     ...(insuranceReplacement ? [insuranceReplacement, pageBreak()] : []),
-    buildProjections(input, fontFamily, textColor, tableHeaderColor),
+    buildProjections(input, fontFamily, textColor, tableHeaderColor, assets),
     pageBreak(),
     buildFees(input, fontFamily, textColor, tableHeaderColor),
     pageBreak(),
     buildAuthorityToProceed(input, fontFamily, textColor),
     pageBreak(),
     ...(serviceAgreement ? [serviceAgreement, pageBreak()] : []),
-    buildAppendix(input, fontFamily, textColor, tableHeaderColor),
+    buildAppendix(input, fontFamily, textColor, tableHeaderColor, assets),
   ].join("");
 
   return documentXml(body);
@@ -2665,17 +3033,28 @@ function buildDocument(input: SoaDocxExportInput, assets: DocxBuildAssets) {
 export async function buildSoaDocx(input: SoaDocxExportInput) {
   const allocationChartSlices = buildAllocationChartSlices(getPrimaryAllocationRows(input.adviceCase));
   const allocationChartPng = await buildAllocationChartPng(allocationChartSlices);
-  const assets: DocxBuildAssets = { allocationChartPng };
+  const assetLiabilityChartPngs = await Promise.all(
+    (input.adviceCase.financialProjections ?? []).map((projection) =>
+      buildProjectionStackedBarLineChartPng(projection.outputs.assetLiabilityChart),
+    ),
+  );
+  const assets: DocxBuildAssets = { allocationChartPng, assetLiabilityChartPngs };
   const zip = new JSZip();
   zip.file("[Content_Types].xml", CONTENT_TYPES_XML);
   zip.folder("_rels")?.file(".rels", ROOT_RELS_XML);
   const word = zip.folder("word");
   word?.file("document.xml", buildDocument(input, assets));
   word?.file("styles.xml", STYLES_XML);
-  word?.folder("_rels")?.file("document.xml.rels", documentRelsXml(Boolean(allocationChartPng)));
+  word?.file("numbering.xml", NUMBERING_XML);
+  word?.folder("_rels")?.file("document.xml.rels", documentRelsXml(Boolean(allocationChartPng), assetLiabilityChartPngs));
   if (allocationChartPng) {
     word?.folder("media")?.file("asset-allocation.png", allocationChartPng);
   }
+  assetLiabilityChartPngs.forEach((chartPng, index) => {
+    if (chartPng) {
+      word?.folder("media")?.file(`projection-asset-liability-${index + 1}.png`, chartPng);
+    }
+  });
 
   const blob = await zip.generateAsync({ type: "blob", mimeType: DOCX_MIME_TYPE });
   const fileName = `${sanitizeOutputName(getClientNames(input.adviceCase, input.clientName))}-Statement-of-Advice.docx`;

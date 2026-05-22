@@ -13,6 +13,8 @@ import type {
   InsurancePolicyReplacementV1,
   ProductAlternativeConsideredV1,
   PortfolioHoldingV1,
+  ProjectionChartV1,
+  ProjectionTableV1,
   RecommendationConsequenceV1,
 } from "@/lib/soa-types";
 import type { IntakeAssessmentV1 } from "@/lib/soa-output-contracts";
@@ -33,6 +35,9 @@ import {
   INSURANCE_NEEDS_REQUIREMENT_ITEMS,
   normalizeInsuranceNeedsLineItems,
 } from "@/lib/soa-insurance-needs";
+import { parseRecommendationMarkdown } from "@/lib/recommendation-markdown";
+import { sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
+import { getProductFeeTypeLabel } from "@/lib/soa-fee-types";
 import styles from "./soa-print.module.css";
 
 const SOA_PRINT_STORAGE_KEY = "finley-soa-print-preview-v1";
@@ -260,21 +265,6 @@ function getInsurancePolicySnapshotValue(
   return typeof value === "number" ? formatCurrency(value) : value || "—";
 }
 
-function getInsuranceCoverTypeKey(policyType?: string | null) {
-  switch (policyType) {
-    case "life":
-      return "life";
-    case "tpd":
-      return "tpd";
-    case "trauma":
-      return "trauma";
-    case "income-protection":
-      return "incomeProtection";
-    default:
-      return null;
-  }
-}
-
 function formatDateValue(value?: string | null) {
   if (!value) {
     return "—";
@@ -290,6 +280,31 @@ function formatDateValue(value?: string | null) {
     month: "2-digit",
     year: "numeric",
   }).format(date);
+}
+
+function niceChartAxisStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) {
+    return 1;
+  }
+
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceNormalized =
+    normalized <= 1
+      ? 1
+      : normalized <= 2
+        ? 2
+        : normalized <= 2.5
+          ? 2.5
+          : normalized <= 5
+            ? 5
+            : 10;
+
+  return niceNormalized * magnitude;
+}
+
+function chartAxisStepFor(maxValue: number, targetTickCount = 5) {
+  return niceChartAxisStep(Math.max(1, maxValue) / targetTickCount);
 }
 
 function calculateAge(value?: string | null) {
@@ -365,7 +380,7 @@ function renderBulletList(items: string[], emptyLabel: string) {
   return (
     <ul className={styles.bulletList}>
       {items.map((item, index) => (
-        <li key={`${index}-${item}`}>{item}</li>
+        <li key={`${index}-${item}`}>{sanitizeClientFacingResearchLanguage(item)}</li>
       ))}
     </ul>
   );
@@ -400,6 +415,49 @@ function renderAlternatives(
     .filter((item): item is string => Boolean(item));
 
   return renderBulletList(values, emptyLabel);
+}
+
+function renderRecommendationMarkdown(text?: string | null, emptyLabel = "Draft recommendation not yet written.") {
+  const blocks = parseRecommendationMarkdown(text);
+
+  if (!blocks.length) {
+    return <p className={styles.recommendationText}>{emptyLabel}</p>;
+  }
+
+  return (
+    <div className={styles.recommendationMarkdown}>
+      {blocks.map((block, blockIndex) => {
+        if (block.type === "paragraph") {
+          return (
+            <p key={`paragraph-${blockIndex}`} className={styles.recommendationText}>
+              {sanitizeClientFacingResearchLanguage(block.text)}
+            </p>
+          );
+        }
+
+        return (
+          <table key={`table-${blockIndex}`} className={`${styles.table} ${styles.recommendationMarkdownTable}`}>
+            <thead>
+              <tr>
+                {block.headers.map((header, headerIndex) => (
+                  <th key={`${header}-${headerIndex}`}>{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={`row-${rowIndex}`}>
+                  {row.map((cell, cellIndex) => (
+                    <td key={`cell-${rowIndex}-${cellIndex}`}>{sanitizeClientFacingResearchLanguage(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      })}
+    </div>
+  );
 }
 
 function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
@@ -757,6 +815,16 @@ export function SoaPrintPreview() {
   const projectionOutput = adviceCase.financialProjections?.[0] ?? null;
   const projectionCashflowTable = projectionOutput?.outputs.cashflowTable ?? null;
   const projectionAssumptionTables = projectionOutput?.outputs.assumptionTables ?? [];
+  const projectionAssetLiabilityTable = projectionOutput?.outputs.assetLiabilityTable ?? null;
+  const projectionAssetLiabilityChart = projectionOutput?.outputs.assetLiabilityChart ?? null;
+  const projectionSuperTables = projectionOutput?.outputs.superTables ?? [];
+  const projectionPensionTables = projectionOutput?.outputs.pensionTables ?? [];
+  const hasProjectionEvidence = Boolean(
+    (projectionAssetLiabilityTable?.columns.length && projectionAssetLiabilityTable.rows.length) ||
+      (projectionAssetLiabilityChart?.columns.length && projectionAssetLiabilityChart.series.length) ||
+      projectionSuperTables.some((table) => table.columns.length && table.rows.length) ||
+      projectionPensionTables.some((table) => table.columns.length && table.rows.length),
+  );
   const addresseeLine = addresseeNames.length > 1 ? addresseeNames.join(" and ") : addresseeNames[0] ?? "<<clientname>>";
   const address = buildAddress(pickAddressPerson(clientProfile));
   const adviserName = clientProfile?.adviser?.name?.trim() || payload.adviserName || "<<adviser>>";
@@ -848,29 +916,29 @@ export function SoaPrintPreview() {
     ...adviceCase.recommendations.strategic.map((recommendation) => ({
       id: recommendation.recommendationId,
       recommendation: recommendation.recommendationText || "Draft strategy recommendation not yet written.",
-      betterPosition:
+      betterPositionItems:
         [
           ...recommendation.clientBenefits.map((benefit) => benefit.text).filter(Boolean),
           recommendation.rationale ?? "",
-        ]
-          .filter(Boolean)
-          .join(" ") || "Benefits to be confirmed.",
+        ].filter(Boolean),
     })),
     ...adviceCase.recommendations.product.map((recommendation) => ({
       id: recommendation.recommendationId,
       recommendation: recommendation.recommendationText || "Draft product recommendation not yet written.",
-      betterPosition:
+      betterPositionItems:
         [
           ...recommendation.clientBenefits.map((benefit) => benefit.text).filter(Boolean),
           recommendation.suitabilityRationale ?? "",
-        ]
-          .filter(Boolean)
-          .join(" ") || "Benefits to be confirmed.",
+        ].filter(Boolean),
     })),
   ];
-  const hasInsurancePolicyRecommendations = Boolean(adviceCase.recommendations.insurancePolicies?.length);
-  const hasInsuranceNeedsAnalysis = Boolean(adviceCase.recommendations.insuranceNeedsAnalyses?.length);
-  const hasInsuranceReplacement = Boolean(adviceCase.recommendations.insuranceReplacements?.length);
+  const includesInsuranceAdvice = adviceCase.blueprint.includedModules.includes("insurance-advice");
+  const hasInsurancePolicyRecommendations =
+    includesInsuranceAdvice && Boolean(adviceCase.recommendations.insurancePolicies?.length);
+  const hasInsuranceNeedsAnalysis =
+    includesInsuranceAdvice && Boolean(adviceCase.recommendations.insuranceNeedsAnalyses?.length);
+  const hasInsuranceReplacement =
+    includesInsuranceAdvice && Boolean(adviceCase.recommendations.insuranceReplacements?.length);
   const contentsItems = [
     "Statement of Advice",
     "Executive Summary",
@@ -1019,7 +1087,9 @@ export function SoaPrintPreview() {
   const serviceAgreementReferenceDate = serviceAgreementSection?.referenceDate ?? payload.savedAt;
   const serviceAgreementExpiryDate = serviceAgreementSection?.expiryDate ?? addDays(serviceAgreementReferenceDate, 150);
   const serviceAgreementArrangementLabel = serviceAgreementSection?.arrangementLabel ?? "ongoing fee arrangement";
-  const insuranceCommissions = adviceCase.fees.commissions;
+  const insuranceCommissions = includesInsuranceAdvice
+    ? adviceCase.fees.commissions.filter((commission) => commission.productType === "insurance")
+    : [];
   const hasInsuranceCommissionConsent = insuranceCommissions.length > 0;
   const getCommissionOwnerLabel = (ownerPersonId?: string | null) => {
     const owner = adviceCase.clientGroup.clients.find((person) => person.personId === ownerPersonId);
@@ -1128,51 +1198,185 @@ export function SoaPrintPreview() {
       ? [...accountGroups, { key: "other-investment-pds", label: accountGroups.length ? "Other recommended products" : "Investment products", rows: ungroupedRows }]
       : accountGroups;
   })();
-  const insurancePdsRows = Array.from(
-    new Map(
-      [
-        ...(adviceCase.recommendations.insurance ?? []).map((recommendation) => [
+  const insurancePdsRows = includesInsuranceAdvice
+    ? Array.from(
+        new Map(
           [
-            recommendation.recommendedProvider?.trim(),
-            recommendation.recommendedProductName?.trim(),
-          ].filter(Boolean).join(" - ") || recommendation.recommendedProductName?.trim() || recommendation.recommendationText,
-          {
-            insurer: recommendation.recommendedProvider?.trim() || recommendation.recommendedProductName?.trim() || "Insurance product",
-            pdsLink: "To be provided",
-          },
-        ] as const),
-        ...adviceCase.recommendations.product
-          .filter((recommendation) => recommendation.productType === "insurance")
-          .map((recommendation) => [
-            [
-              recommendation.recommendedProvider?.trim(),
-              recommendation.recommendedProductName?.trim(),
-            ].filter(Boolean).join(" - ") || recommendation.recommendedProductName?.trim() || recommendation.recommendationText,
-            {
-              insurer: recommendation.recommendedProvider?.trim() || recommendation.recommendedProductName?.trim() || "Insurance product",
-              pdsLink: "To be provided",
-            },
-          ] as const),
-        ...(adviceCase.recommendations.insurancePolicies ?? []).map((recommendation) => [
-          [
-            recommendation.insurerName?.trim(),
-            recommendation.productName?.trim(),
-            recommendation.policyName?.trim(),
-          ].filter(Boolean).join(" - ") || recommendation.recommendationText,
-          {
-            insurer:
+            ...(adviceCase.recommendations.insurance ?? []).map((recommendation) => [
+              [
+                recommendation.recommendedProvider?.trim(),
+                recommendation.recommendedProductName?.trim(),
+              ].filter(Boolean).join(" - ") || recommendation.recommendedProductName?.trim() || recommendation.recommendationText,
+              {
+                insurer: recommendation.recommendedProvider?.trim() || recommendation.recommendedProductName?.trim() || "Insurance product",
+                pdsLink: "To be provided",
+              },
+            ] as const),
+            ...adviceCase.recommendations.product
+              .filter((recommendation) => recommendation.productType === "insurance")
+              .map((recommendation) => [
+                [
+                  recommendation.recommendedProvider?.trim(),
+                  recommendation.recommendedProductName?.trim(),
+                ].filter(Boolean).join(" - ") || recommendation.recommendedProductName?.trim() || recommendation.recommendationText,
+                {
+                  insurer: recommendation.recommendedProvider?.trim() || recommendation.recommendedProductName?.trim() || "Insurance product",
+                  pdsLink: "To be provided",
+                },
+              ] as const),
+            ...(adviceCase.recommendations.insurancePolicies ?? []).map((recommendation) => [
               [
                 recommendation.insurerName?.trim(),
                 recommendation.productName?.trim(),
                 recommendation.policyName?.trim(),
-              ].filter(Boolean).join(" - ") || "Insurance product",
-            pdsLink: "To be provided",
-          },
-        ] as const),
-      ].filter(([key]) => Boolean(key)),
-    ).values(),
-  );
+              ].filter(Boolean).join(" - ") || recommendation.recommendationText,
+              {
+                insurer:
+                  [
+                    recommendation.insurerName?.trim(),
+                    recommendation.productName?.trim(),
+                    recommendation.policyName?.trim(),
+                  ].filter(Boolean).join(" - ") || "Insurance product",
+                pdsLink: "To be provided",
+              },
+            ] as const),
+          ].filter(([key]) => Boolean(key)),
+        ).values(),
+      )
+    : [];
   const hasInsuranceRecommendations = insurancePdsRows.length > 0;
+  const renderProjectionTable = (projectionTable: ProjectionTableV1, labelHeader = "Date", compact = false) => (
+    <div className={styles.projectionTableWrap}>
+      <table className={`${styles.table} ${compact ? styles.compactProjectionTable : ""}`.trim()}>
+        <thead>
+          <tr>
+            <th>{labelHeader}</th>
+            {projectionTable.columns.map((column) => (
+              <th key={column}>{column}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {projectionTable.rows.map((row) =>
+            row.isSection ? (
+              <tr key={row.label} className={styles.projectionSectionRow}>
+                <td colSpan={projectionTable.columns.length + 1}>{row.label}</td>
+              </tr>
+            ) : (
+              <tr key={row.label} className={row.isTotal ? styles.totalRow : undefined}>
+                <td>{row.label}</td>
+                {projectionTable.columns.map((column, columnIndex) => (
+                  <td key={`${row.label}-${column}`}>{row.values[columnIndex] || "—"}</td>
+                ))}
+              </tr>
+            ),
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+  const shortCurrency = (value: number) => {
+    const absoluteValue = Math.abs(value);
+    if (absoluteValue >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+    if (absoluteValue >= 1_000) return `$${Math.round(value / 1_000)}k`;
+    return formatCurrency(value).replace(".00", "");
+  };
+  const renderProjectionChart = (chart: ProjectionChartV1 | null | undefined) => {
+    if (!chart?.columns.length || !chart.series.length) {
+      return <p>The capital projection chart will be included once asset and liability projection data is available.</p>;
+    }
+
+    const width = 780;
+    const height = 360;
+    const plotLeft = 74;
+    const plotTop = 34;
+    const plotWidth = 650;
+    const plotHeight = 230;
+    const barGap = 7;
+    const barWidth = Math.max(14, (plotWidth - barGap * Math.max(chart.columns.length - 1, 0)) / chart.columns.length);
+    const maxValue =
+      chart.axisMax && chart.axisMax > 0
+        ? chart.axisMax
+        : Math.max(
+            1,
+            ...chart.columns.map((_, index) =>
+              chart.series.reduce((sum, series) => sum + Math.max(series.values[index] ?? 0, 0), 0),
+            ),
+            ...(chart.lineValues ?? []),
+          );
+    const axisStep = chart.axisStep && chart.axisStep > 0 ? chart.axisStep : chartAxisStepFor(maxValue);
+    const gridValues = Array.from({ length: Math.floor(maxValue / axisStep) + 1 }, (_, index) => index * axisStep);
+    const lineValues = chart.lineValues ?? [];
+    const linePoints = lineValues
+      .map((value, index) => {
+        const x = plotLeft + index * (barWidth + barGap) + barWidth / 2;
+        const y = plotTop + plotHeight - (Math.max(value, 0) / maxValue) * plotHeight;
+        return `${x},${y}`;
+      })
+      .join(" ");
+
+    return (
+      <div className={styles.projectionChartBox}>
+        <div className={styles.projectionChartLegend}>
+          {chart.series.slice(0, 10).map((series, index) => (
+            <span key={series.label}>
+              <i style={{ backgroundColor: series.color ?? `hsl(${index * 47}, 60%, 52%)` }} />
+              {series.label}
+            </span>
+          ))}
+          {lineValues.some((value) => value > 0) ? (
+            <span>
+              <i className={styles.projectionChartLineLegend} />
+              {chart.lineLabel ?? "Total liabilities"}
+            </span>
+          ) : null}
+        </div>
+        <svg className={styles.projectionChartSvg} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={chart.title}>
+          {gridValues.map((value) => {
+            const y = plotTop + plotHeight - (value / maxValue) * plotHeight;
+            return (
+              <g key={value}>
+                <line x1={plotLeft} y1={y} x2={plotLeft + plotWidth} y2={y} className={styles.projectionChartGridLine} />
+                <text x={plotLeft - 10} y={y + 4} textAnchor="end" className={styles.projectionChartAxisLabel}>
+                  {shortCurrency(value)}
+                </text>
+              </g>
+            );
+          })}
+          {chart.columns.map((column, columnIndex) => {
+            const x = plotLeft + columnIndex * (barWidth + barGap);
+            let stackedHeight = 0;
+
+            return (
+              <g key={column}>
+                {chart.series.map((series, seriesIndex) => {
+                  const value = Math.max(series.values[columnIndex] ?? 0, 0);
+                  const segmentHeight = (value / maxValue) * plotHeight;
+                  const y = plotTop + plotHeight - stackedHeight - segmentHeight;
+                  stackedHeight += segmentHeight;
+
+                  return (
+                    <rect
+                      key={`${column}-${series.label}`}
+                      x={x}
+                      y={y}
+                      width={barWidth}
+                      height={segmentHeight}
+                      fill={series.color ?? `hsl(${seriesIndex * 47}, 60%, 52%)`}
+                    />
+                  );
+                })}
+                <text x={x + barWidth / 2} y={plotTop + plotHeight + 24} textAnchor="middle" className={styles.projectionChartYear}>
+                  {column}
+                </text>
+              </g>
+            );
+          })}
+          {linePoints ? <polyline points={linePoints} className={styles.projectionChartLine} /> : null}
+        </svg>
+      </div>
+    );
+  };
 
   return (
     <main className={`${styles.previewPage} ${isEmbedded ? styles.previewPageEmbedded : ""}`.trim()} style={previewStyle}>
@@ -1327,7 +1531,13 @@ export function SoaPrintPreview() {
                   betterPositionRows.map((row) => (
                     <tr key={row.id}>
                       <td>{row.recommendation}</td>
-                      <td>{row.betterPosition}</td>
+                      <td>
+                        <ul className={styles.tableBulletList}>
+                          {(row.betterPositionItems.length ? row.betterPositionItems : ["Benefits to be confirmed."]).map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </td>
                     </tr>
                   ))
                 ) : (
@@ -1865,7 +2075,7 @@ export function SoaPrintPreview() {
                 <p className={styles.recommendationText}>
                   <strong>Recommended for:</strong> {getRecommendationAudience(recommendation.ownerPersonIds)}
                 </p>
-                <p className={styles.recommendationText}>{recommendation.recommendationText || "Draft recommendation not yet written."}</p>
+                {renderRecommendationMarkdown(recommendation.recommendationText)}
                 <div className={styles.recommendationDetailStack}>
                   <div className={styles.card}>
                     <h4>Benefits</h4>
@@ -1916,7 +2126,7 @@ export function SoaPrintPreview() {
                 <p className={styles.metaLine}>
                   <strong>Recommended for:</strong> {getRecommendationAudience(recommendation.ownerPersonIds)}
                 </p>
-                <p className={styles.recommendationText}>{recommendation.recommendationText || "Draft product recommendation not yet written."}</p>
+                {renderRecommendationMarkdown(recommendation.recommendationText, "Draft product recommendation not yet written.")}
                 <div className={styles.recommendationDetailStack}>
                   <div className={styles.card}>
                     <h4>Benefits</h4>
@@ -2487,43 +2697,58 @@ export function SoaPrintPreview() {
                 Maintaining adequate cashflow to meet living expenses is fundamental to the success of your plan. A summary of estimated income, expenses, tax and overall cashflow after implementing our recommendations will be included here.
               </p>
               {projectionCashflowTable?.columns.length && projectionCashflowTable.rows.length ? (
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      {projectionCashflowTable.columns.map((column) => (
-                        <th key={column}>{column}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {projectionCashflowTable.rows.map((row) =>
-                      row.isSection ? (
-                        <tr key={row.label} className={styles.projectionSectionRow}>
-                          <td colSpan={projectionCashflowTable.columns.length + 1}>{row.label}</td>
-                        </tr>
-                      ) : (
-                        <tr key={row.label} className={row.isTotal ? styles.totalRow : undefined}>
-                          <td>{row.label}</td>
-                          {projectionCashflowTable.columns.map((column, columnIndex) => (
-                            <td key={`${row.label}-${column}`}>{row.values[columnIndex] || "-"}</td>
-                          ))}
-                        </tr>
-                      ),
-                    )}
-                  </tbody>
-                </table>
+                renderProjectionTable(projectionCashflowTable)
               ) : null}
             </div>
             <div className={styles.card}>
               <h3>Capital Projections</h3>
               <p>
-                Charts showing your projected cashflow and capital position will be included here. Values will be adjusted for inflation and shown in today&apos;s dollars where applicable.
+                The chart below projects your asset and liability position over time. The stacked bars show projected assets, while the line shows total liabilities.
               </p>
+              <p>These projections assume the following:</p>
+              <ul className={styles.bulletList}>
+                <li>Cost of living and indexed cashflow items are adjusted for inflation where selected.</li>
+                <li>Surplus cashflow is directed according to the scenario allocation settings.</li>
+                <li>Superannuation, pension and investment assets are projected using the nominated investment profiles.</li>
+                <li>Please refer to the projection assumptions in the appendix for underlying return and legislative assumptions.</li>
+              </ul>
+              {renderProjectionChart(projectionAssetLiabilityChart)}
             </div>
             <div className={styles.card}>
               <h3>Key Outcome</h3>
-              <p>The key projected outcome will be included here once the projection analysis has been completed.</p>
+              {projectionOutput?.outputs.currentPositionSummary ? (
+                <p>Current position: {projectionOutput.outputs.currentPositionSummary}</p>
+              ) : null}
+              {projectionOutput?.outputs.recommendedPositionSummary ? (
+                <p>Recommended position: {projectionOutput.outputs.recommendedPositionSummary}</p>
+              ) : null}
+              {projectionOutput?.outputs.betterPositionSummary ? (
+                <p>Better position: {projectionOutput.outputs.betterPositionSummary}</p>
+              ) : null}
+              {projectionOutput?.outputs.keyMetrics.length ? (
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Current</th>
+                      <th>Recommended</th>
+                      <th>Difference</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projectionOutput.outputs.keyMetrics.map((metric) => (
+                      <tr key={metric.metricId}>
+                        <td>{metric.name}</td>
+                        <td>{metric.currentValue === null || metric.currentValue === undefined ? "—" : formatCurrency(metric.currentValue)}</td>
+                        <td>{metric.recommendedValue === null || metric.recommendedValue === undefined ? "—" : formatCurrency(metric.recommendedValue)}</td>
+                        <td>{metric.differenceValue === null || metric.differenceValue === undefined ? "—" : formatCurrency(metric.differenceValue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : !projectionOutput ? (
+                <p>The key projected outcome will be included here once the projection analysis has been completed.</p>
+              ) : null}
             </div>
           </div>
           {renderPageNumber(projectionsPageNumber)}
@@ -2578,7 +2803,7 @@ export function SoaPrintPreview() {
                         {group.fees.map((fee) => (
                           <tr key={fee.feeId}>
                             <td>{fee.productName ?? "—"}</td>
-                            <td>{fee.feeType}</td>
+                            <td>{getProductFeeTypeLabel(fee.feeType)}</td>
                             <td>{formatPercent(fee.percentage)}</td>
                             <td>{formatCurrency(fee.amount)}</td>
                           </tr>
@@ -3049,32 +3274,52 @@ export function SoaPrintPreview() {
               projectionAssumptionTables.map((assumptionTable) => (
                 <div key={assumptionTable.tableId} className={styles.appendixSubsection}>
                   <h4>{assumptionTable.title}</h4>
-                  <table className={styles.table}>
-                    <thead>
-                      <tr>
-                        <th>Assumption</th>
-                        {assumptionTable.columns.map((column) => (
-                          <th key={column}>{column}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {assumptionTable.rows.map((row) => (
-                        <tr key={row.label} className={row.isTotal ? styles.totalRow : undefined}>
-                          <td>{row.label}</td>
-                          {assumptionTable.columns.map((column, columnIndex) => (
-                            <td key={`${row.label}-${column}`}>{row.values[columnIndex] || "—"}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  {renderProjectionTable(assumptionTable, "Assumption")}
                 </div>
               ))
             ) : (
               <p>Projection assumptions will be included here once the projection modelling has been completed.</p>
             )}
           </div>
+          {hasProjectionEvidence ? (
+            <div className={styles.card}>
+              <h3>Projection Evidence</h3>
+              {projectionAssetLiabilityTable?.columns.length && projectionAssetLiabilityTable.rows.length ? (
+                <div className={styles.appendixSubsection}>
+                  <h4>Asset and Liability Projections</h4>
+                  {renderProjectionTable(projectionAssetLiabilityTable, "Date", true)}
+                </div>
+              ) : null}
+              {projectionAssetLiabilityChart?.columns.length && projectionAssetLiabilityChart.series.length ? (
+                <div className={styles.appendixSubsection}>
+                  <h4>Asset and Liability Chart</h4>
+                  {renderProjectionChart(projectionAssetLiabilityChart)}
+                </div>
+              ) : null}
+              {projectionSuperTables.length ? (
+                <div className={styles.appendixSubsection}>
+                  <h4>Superannuation Projections</h4>
+                  {projectionSuperTables.map((projectionTable) => (
+                    <div key={projectionTable.tableId} className={styles.appendixSubsection}>
+                      <h5>{projectionTable.title}</h5>
+                      {renderProjectionTable(projectionTable, "Date", true)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {projectionPensionTables.length ? (
+                <div className={styles.appendixSubsection}>
+                  <h4>Pension Projections</h4>
+                  {projectionPensionTables.map((projectionTable) => (
+                    <div key={projectionTable.tableId} className={styles.appendixSubsection}>
+                      <h5>{projectionTable.title}</h5>
+                      {renderProjectionTable(projectionTable, "Date", true)}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {renderPageNumber(appendixPageNumber)}
         </section>
 

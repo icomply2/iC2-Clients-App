@@ -26,18 +26,65 @@ export function calculateMedicareLevy(taxableIncome: number, assumptions: Legisl
   return taxableIncome * medicare.medicareLevyRate;
 }
 
+export function calculateLowIncomeTaxOffset(taxableIncome: number, assumptions: LegislativeAssumptions) {
+  const lito = assumptions.tax.offsets.lowIncomeTaxOffset;
+
+  if (taxableIncome <= lito.firstThreshold) {
+    return lito.maximumOffset;
+  }
+
+  if (taxableIncome <= lito.secondThreshold) {
+    return Math.max(lito.maximumOffset - (taxableIncome - lito.firstThreshold) * lito.firstTaperRate, 0);
+  }
+
+  if (taxableIncome <= lito.upperThreshold) {
+    const secondTierMaximum = lito.maximumOffset - (lito.secondThreshold - lito.firstThreshold) * lito.firstTaperRate;
+    return Math.max(secondTierMaximum - (taxableIncome - lito.secondThreshold) * lito.secondTaperRate, 0);
+  }
+
+  return 0;
+}
+
+export function calculateSeniorsAndPensionersTaxOffset(input: {
+  taxableIncome: number;
+  isEligible: boolean;
+  relationshipStatus?: string | null;
+  assumptions: LegislativeAssumptions;
+}) {
+  if (!input.isEligible) {
+    return 0;
+  }
+
+  const sapto = input.assumptions.tax.offsets.seniorsAndPensionersTaxOffset;
+  const rate = input.relationshipStatus === "couple" ? sapto.coupleEach : sapto.single;
+
+  if (input.taxableIncome >= rate.cutOutThreshold) {
+    return 0;
+  }
+
+  return Math.max(rate.maximumOffset - Math.max(input.taxableIncome - rate.shadeOutThreshold, 0) * sapto.taperRate, 0);
+}
+
 export function calculatePersonalTax(input: {
   taxableAgePension: number;
   taxableBankInterest: number;
   taxableOtherIncome: number;
   taxFreeAccountBasedPension: number;
+  seniorsAndPensionersTaxOffsetEligible?: boolean;
+  relationshipStatus?: string | null;
   assumptions: LegislativeAssumptions;
 }): TaxProjectionYear {
   const taxableIncome = input.taxableAgePension + input.taxableBankInterest + input.taxableOtherIncome;
   const grossTax = calculateMarginalTax(taxableIncome, input.assumptions);
   const medicareLevy = calculateMedicareLevy(taxableIncome, input.assumptions);
-  const taxOffsets =
-    input.assumptions.tax.offsets.lowIncomeTaxOffset + input.assumptions.tax.offsets.seniorsAndPensionersTaxOffset;
+  const lowIncomeTaxOffset = calculateLowIncomeTaxOffset(taxableIncome, input.assumptions);
+  const seniorsAndPensionersTaxOffset = calculateSeniorsAndPensionersTaxOffset({
+    taxableIncome,
+    isEligible: input.seniorsAndPensionersTaxOffsetEligible ?? false,
+    relationshipStatus: input.relationshipStatus,
+    assumptions: input.assumptions,
+  });
+  const taxOffsets = lowIncomeTaxOffset + seniorsAndPensionersTaxOffset;
   const taxPayable = Math.max(0, grossTax + medicareLevy - taxOffsets);
 
   return {
@@ -48,6 +95,8 @@ export function calculatePersonalTax(input: {
     taxableIncome,
     grossTax,
     medicareLevy,
+    lowIncomeTaxOffset,
+    seniorsAndPensionersTaxOffset,
     taxOffsets,
     taxPayable,
   };

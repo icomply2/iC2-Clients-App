@@ -273,12 +273,33 @@ const projectionScenarioSchema = {
         properties: {
           assetId: { type: "string" },
           ownerPersonId: { type: "string" },
-          type: { type: "string", enum: ["primary-residence", "cash", "funeral-bond", "personal-asset", "investment"] },
+          type: {
+            type: "string",
+            enum: [
+              "primary-residence",
+              "cash",
+              "bank-account",
+              "offset-account",
+              "term-deposit",
+              "investment",
+              "investment-property",
+              "australian-shares",
+              "international-shares",
+              "managed-fund",
+              "etf",
+              "funeral-bond",
+              "home-contents",
+              "motor-vehicle",
+              "personal-asset",
+              "business",
+              "other",
+            ],
+          },
           name: { type: "string" },
           openingValue: { type: "number" },
           annualIncome: { type: "number" },
           growthRateKey: { type: "string", enum: ["cpi", "cash", "none", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"] },
-          centrelink: { type: "string", enum: ["exempt", "financial-asset", "assessable", "unknown"] },
+          centrelink: { type: "string", enum: ["exempt", "financial-asset", "assessable"] },
           reserveTarget: { anyOf: [{ type: "number" }, { type: "null" }] },
         },
         required: [
@@ -334,6 +355,7 @@ const projectionScenarioSchema = {
           productName: { type: "string" },
           openingBalance: { type: "number" },
           annualFeeRate: { type: "number" },
+          annualInsurancePremium: { type: "number" },
           annualContribution: { type: "number" },
           annualContributionType: { type: "string", enum: ["concessional", "non-concessional"] },
           rolloverToPensionDate: nullableString,
@@ -354,6 +376,7 @@ const projectionScenarioSchema = {
           "productName",
           "openingBalance",
           "annualFeeRate",
+          "annualInsurancePremium",
           "annualContribution",
           "annualContributionType",
           "rolloverToPensionDate",
@@ -368,6 +391,11 @@ const projectionScenarioSchema = {
         ],
       },
     },
+    assetSaleEvents: { type: "array", items: { type: "object" } },
+    liabilityPaymentEvents: { type: "array", items: { type: "object" } },
+    superContributionStrategies: { type: "array", items: { type: "object" } },
+    superRolloverEvents: { type: "array", items: { type: "object" } },
+    pensionWithdrawalEvents: { type: "array", items: { type: "object" } },
     cashflowItems: {
       type: "array",
       items: {
@@ -409,7 +437,12 @@ const projectionScenarioSchema = {
     "dependants",
     "assets",
     "liabilities",
+    "assetSaleEvents",
+    "liabilityPaymentEvents",
     "retirementAccounts",
+    "superContributionStrategies",
+    "superRolloverEvents",
+    "pensionWithdrawalEvents",
     "cashflowItems",
   ],
 };
@@ -723,6 +756,15 @@ export function normalizeProjectionScenario(record: ProjectionScenario, fileName
         asset.type === "personal-asset" && /etf|portfolio|shares|managed fund|investment/i.test(asset.name)
           ? "investment"
           : asset.type;
+      const isCashLikeAsset = ["cash", "bank-account", "offset-account", "term-deposit"].includes(assetType);
+      const isInvestmentLikeAsset = [
+        "investment",
+        "investment-property",
+        "australian-shares",
+        "international-shares",
+        "managed-fund",
+        "etf",
+      ].includes(assetType);
 
       return {
         ...asset,
@@ -731,12 +773,12 @@ export function normalizeProjectionScenario(record: ProjectionScenario, fileName
         type: assetType,
         annualIncome: Number.isFinite(asset.annualIncome) ? asset.annualIncome : 0,
         growthRateKey:
-          assetType === "cash" && /offset/i.test(asset.name)
+          assetType === "offset-account" || (assetType === "cash" && /offset/i.test(asset.name))
             ? "none"
-            : assetType === "investment"
+            : isInvestmentLikeAsset
               ? normalizeInvestmentProfile(asset.growthRateKey)
               : asset.growthRateKey,
-        reserveTarget: assetType === "cash" ? (asset.reserveTarget ?? 60000) : null,
+        reserveTarget: isCashLikeAsset ? (asset.reserveTarget ?? 60000) : null,
       };
     }),
     liabilities: normalizedLiabilities,
@@ -745,6 +787,10 @@ export function normalizeProjectionScenario(record: ProjectionScenario, fileName
       accountId: slug(account.accountId || account.productName || `retirement-${index + 1}`) || `retirement-${index + 1}`,
       ownerPersonId: people.some((person) => person.personId === account.ownerPersonId) ? account.ownerPersonId : primaryPersonId,
       annualFeeRate: Number.isFinite(account.annualFeeRate) ? account.annualFeeRate : 0.015,
+      annualInsurancePremium:
+        account.accountType === "super-accumulation" && Number.isFinite(account.annualInsurancePremium)
+          ? account.annualInsurancePremium
+          : 0,
       annualContribution:
         account.accountType === "super-accumulation" && Number.isFinite(account.annualContribution)
           ? account.annualContribution
@@ -939,13 +985,6 @@ function textBetween(text: string, start: string, end: string) {
   return text.slice(startIndex + start.length, endIndex >= 0 ? endIndex : undefined).trim();
 }
 
-function matchAfterTableHeader(text: string, section: string, firstHeader: string, nextHeader: string) {
-  const block = textBetween(text, section, nextHeader) ?? text;
-  const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const headerIndex = lines.findIndex((line) => line === firstHeader);
-  return headerIndex >= 0 ? lines[headerIndex + 5] ?? null : null;
-}
-
 function parseFactFindRows(text: string, start: string, end: string, columns: number) {
   const block = textBetween(text, start, end);
   if (!block) return [] as string[][];
@@ -1043,6 +1082,8 @@ function fallbackScenario(fileName: string, extractedText: string): ProjectionSc
         : []),
     ],
     liabilities: [],
+    assetSaleEvents: [],
+    liabilityPaymentEvents: [],
     retirementAccounts: superBalance
       ? [
           {
@@ -1053,6 +1094,7 @@ function fallbackScenario(fileName: string, extractedText: string): ProjectionSc
             productName: "Superannuation / pension account",
             openingBalance: superBalance,
             annualFeeRate: 0.015,
+            annualInsurancePremium: 0,
             annualContribution: 0,
             annualContributionType: "concessional",
             rolloverToPensionDate: null,
@@ -1067,6 +1109,9 @@ function fallbackScenario(fileName: string, extractedText: string): ProjectionSc
           },
         ]
       : [],
+    superContributionStrategies: [],
+    superRolloverEvents: [],
+    pensionWithdrawalEvents: [],
     cashflowItems: [
       {
         itemId: "living-expenses",
