@@ -733,6 +733,105 @@
   justify-content: flex-end;
 }
 
+.recommendationProposalCard {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  border: 1px solid #cbdcf0;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+}
+
+.recommendationProposalTitle {
+  color: #113864;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.recommendationProposalList {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #314966;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.recommendationProposalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.recommendationProposalModal {
+  max-width: min(46rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.recommendationProposalModalBody {
+  min-height: 0;
+  max-height: min(42rem, calc(100vh - 11rem));
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  scrollbar-gutter: stable;
+}
+
+.recommendationProposalPreviewText {
+  color: #1f3551;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.recommendationMarkdown {
+  display: grid;
+  gap: 0.65rem;
+  color: #1f3551;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.recommendationMarkdown p {
+  margin: 0;
+}
+
+.recommendationMarkdownTableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.recommendationMarkdownTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.recommendationMarkdownTable th,
+.recommendationMarkdownTable td {
+  padding: 0.5rem 0.55rem;
+  border: 1px solid #d5e1ef;
+  text-align: left;
+  vertical-align: top;
+}
+
+.recommendationMarkdownTable th {
+  color: #113864;
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: #faf7eb;
+}
+
+.recommendationProposalMeta {
+  color: #6b7c93;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
 .llmLoaderCard {
   display: flex;
   align-items: center;

@@ -2,10 +2,16 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import JSZip from "jszip";
 import { currentProjectionAssumptions } from "@/lib/projections/assumptions";
+import { isCashAssetType, isInvestmentAssetType } from "@/lib/projections/assets-engine";
 import { runProjection } from "@/lib/projections/engine";
 import type { ProjectionScenario } from "@/lib/projections/types";
-import { writeSoaProjectionScenarioOptions } from "@/lib/projections/soa-projection-package";
+import {
+  readSoaProjectionPackage,
+  writeSoaProjectionPackage,
+  writeSoaProjectionScenarioOptions,
+} from "@/lib/projections/soa-projection-package";
 import type { ClientProfile, PersonRecord } from "@/lib/api/types";
 import type { FinancialProjectionV1 } from "@/lib/soa-types";
 import styles from "./projections.module.css";
@@ -72,6 +78,26 @@ type ProjectionTableGroup = {
   rows: ProjectionTableRow[];
 };
 
+type ProjectionChartSeries = {
+  label: string;
+  values: number[];
+  color: string;
+};
+
+type WorkbookCell = string | number | boolean | null | undefined;
+
+type WorkbookChart = {
+  title: string;
+  barSeriesCount: number;
+  lineColumnIndex: number;
+};
+
+type WorkbookSheet = {
+  name: string;
+  rows: WorkbookCell[][];
+  chart?: WorkbookChart;
+};
+
 type ClientImportStatus = "idle" | "importing" | "imported" | "error";
 
 type StoredProjectionWorkspaceState = {
@@ -94,6 +120,38 @@ const projectionSections: Array<{ id: ProjectionSection; label: string }> = [
   { id: "assumptions", label: "Assumptions" },
 ];
 
+const cashflowChartPalette = [
+  "#2fb9bc",
+  "#f4766c",
+  "#4d8ed8",
+  "#f0b33b",
+  "#6f74d9",
+  "#46a56f",
+  "#c76aa7",
+  "#7b8794",
+];
+
+const projectionAssetTypeOptions: Array<{ value: ProjectionScenario["assets"][number]["type"]; label: string }> = [
+  { value: "primary-residence", label: "Primary residence" },
+  { value: "cash", label: "Cash" },
+  { value: "bank-account", label: "Bank account" },
+  { value: "offset-account", label: "Offset account" },
+  { value: "term-deposit", label: "Term deposit" },
+  { value: "investment", label: "Investment portfolio" },
+  { value: "investment-property", label: "Investment property" },
+  { value: "australian-shares", label: "Australian shares" },
+  { value: "international-shares", label: "International shares" },
+  { value: "managed-fund", label: "Managed fund" },
+  { value: "etf", label: "ETF" },
+  { value: "funeral-bond", label: "Funeral bond" },
+  { value: "home-contents", label: "Home contents" },
+  { value: "motor-vehicle", label: "Motor vehicle" },
+  { value: "personal-asset", label: "Personal asset" },
+  { value: "business", label: "Business asset" },
+  { value: "other", label: "Other asset" },
+];
+const defaultChartTickCount = 5;
+
 const scenarioInputTabs: Array<{ id: ScenarioInputTab; label: string }> = [
   { id: "scenario-details", label: "Scenario details" },
   { id: "cashflow", label: "Cashflow" },
@@ -104,6 +162,237 @@ const scenarioInputTabs: Array<{ id: ScenarioInputTab; label: string }> = [
 
 function normalizeScenarioInputTab(tab: StoredProjectionWorkspaceState["activeScenarioInputTab"] | null | undefined): ScenarioInputTab {
   return scenarioInputTabs.some((candidate) => candidate.id === tab) ? tab as ScenarioInputTab : "scenario-details";
+}
+
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function columnName(index: number) {
+  let name = "";
+  let current = index;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+  return name;
+}
+
+function safeSheetName(name: string) {
+  const invalidSheetNameChars = new Set(["[", "]", ":", "*", "?", "/", "\\"]);
+  const sanitized = Array.from(name)
+    .map((character) => (invalidSheetNameChars.has(character) ? " " : character))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim() || "Sheet";
+  return sanitized.slice(0, 31);
+}
+
+function uniqueSheetName(name: string, usedNames: Set<string>) {
+  const baseName = safeSheetName(name);
+  let candidate = baseName;
+  let index = 2;
+
+  while (usedNames.has(candidate.toLowerCase())) {
+    const suffix = ` ${index}`;
+    candidate = `${baseName.slice(0, 31 - suffix.length)}${suffix}`;
+    index += 1;
+  }
+
+  usedNames.add(candidate.toLowerCase());
+  return candidate;
+}
+
+function workbookSheetReference(sheetName: string) {
+  return `'${sheetName.replace(/'/g, "''")}'`;
+}
+
+function buildWorksheetXml(sheet: WorkbookSheet, sheetIndex: number) {
+  const rowsXml = sheet.rows
+    .map((row, rowIndex) => {
+      const cellsXml = row
+        .map((cell, columnIndex) => {
+          const cellRef = `${columnName(columnIndex + 1)}${rowIndex + 1}`;
+          if (typeof cell === "number" && Number.isFinite(cell)) {
+            return `<c r="${cellRef}"><v>${cell}</v></c>`;
+          }
+          if (typeof cell === "boolean") {
+            return `<c r="${cellRef}" t="b"><v>${cell ? 1 : 0}</v></c>`;
+          }
+
+          return `<c r="${cellRef}" t="inlineStr"><is><t>${escapeXml(String(cell ?? ""))}</t></is></c>`;
+        })
+        .join("");
+
+      return `<row r="${rowIndex + 1}">${cellsXml}</row>`;
+    })
+    .join("");
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData>${rowsXml}</sheetData>
+  ${sheet.chart ? `<drawing r:id="rId${sheetIndex}"/>` : ""}
+</worksheet>`;
+}
+
+function buildDrawingXml(chartIndex: number) {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:twoCellAnchor>
+    <xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>20</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
+    <xdr:to><xdr:col>12</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>42</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+    <xdr:graphicFrame macro="">
+      <xdr:nvGraphicFramePr>
+        <xdr:cNvPr id="${chartIndex + 1}" name="Projection Chart ${chartIndex}"/>
+        <xdr:cNvGraphicFramePr/>
+      </xdr:nvGraphicFramePr>
+      <xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>
+      <a:graphic>
+        <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">
+          <c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId1"/>
+        </a:graphicData>
+      </a:graphic>
+    </xdr:graphicFrame>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>`;
+}
+
+function buildChartXml(sheet: WorkbookSheet, chartIndex: number) {
+  const chart = sheet.chart;
+  if (!chart) return "";
+
+  const sheetRef = workbookSheetReference(sheet.name);
+  const lastRow = Math.max(2, sheet.rows.length);
+  const axisId = 10_000 + chartIndex;
+  const valueAxisId = 20_000 + chartIndex;
+  const lineAxisId = 30_000 + chartIndex;
+  const categoryRef = `${sheetRef}!$A$2:$A$${lastRow}`;
+  const barSeries = Array.from({ length: chart.barSeriesCount }, (_, index) => {
+    const column = columnName(index + 2);
+    const titleCell = `${sheetRef}!$${column}$1`;
+    const valueRef = `${sheetRef}!$${column}$2:$${column}$${lastRow}`;
+
+    return `<c:ser>
+      <c:idx val="${index}"/><c:order val="${index}"/>
+      <c:tx><c:strRef><c:f>${titleCell}</c:f></c:strRef></c:tx>
+      <c:cat><c:strRef><c:f>${categoryRef}</c:f></c:strRef></c:cat>
+      <c:val><c:numRef><c:f>${valueRef}</c:f></c:numRef></c:val>
+    </c:ser>`;
+  }).join("");
+  const lineColumn = columnName(chart.lineColumnIndex);
+  const lineTitleCell = `${sheetRef}!$${lineColumn}$1`;
+  const lineValueRef = `${sheetRef}!$${lineColumn}$2:$${lineColumn}$${lastRow}`;
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <c:chart>
+    <c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>${escapeXml(chart.title)}</a:t></a:r></a:p></c:rich></c:tx></c:title>
+    <c:plotArea>
+      <c:layout/>
+      <c:barChart>
+        <c:barDir val="col"/><c:grouping val="stacked"/>
+        ${barSeries}
+        <c:axId val="${axisId}"/><c:axId val="${valueAxisId}"/>
+      </c:barChart>
+      <c:lineChart>
+        <c:grouping val="standard"/>
+        <c:ser>
+          <c:idx val="${chart.barSeriesCount}"/><c:order val="${chart.barSeriesCount}"/>
+          <c:tx><c:strRef><c:f>${lineTitleCell}</c:f></c:strRef></c:tx>
+          <c:cat><c:strRef><c:f>${categoryRef}</c:f></c:strRef></c:cat>
+          <c:val><c:numRef><c:f>${lineValueRef}</c:f></c:numRef></c:val>
+        </c:ser>
+        <c:axId val="${axisId}"/><c:axId val="${lineAxisId}"/>
+      </c:lineChart>
+      <c:catAx><c:axId val="${axisId}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="b"/><c:crossAx val="${valueAxisId}"/><c:tickLblPos val="nextTo"/></c:catAx>
+      <c:valAx><c:axId val="${valueAxisId}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="l"/><c:crossAx val="${axisId}"/><c:tickLblPos val="nextTo"/></c:valAx>
+      <c:valAx><c:axId val="${lineAxisId}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:axPos val="r"/><c:crossAx val="${axisId}"/><c:tickLblPos val="nextTo"/></c:valAx>
+    </c:plotArea>
+    <c:legend><c:legendPos val="b"/><c:layout/></c:legend>
+    <c:plotVisOnly val="1"/>
+  </c:chart>
+</c:chartSpace>`;
+}
+
+async function downloadWorkbook(fileName: string, workbookSheets: WorkbookSheet[]) {
+  const zip = new JSZip();
+  const usedSheetNames = new Set<string>();
+  const sheets = workbookSheets.map((sheet) => ({
+    ...sheet,
+    name: uniqueSheetName(sheet.name, usedSheetNames),
+  }));
+  const chartSheets = sheets
+    .map((sheet, index) => ({ sheet, sheetIndex: index + 1 }))
+    .filter(({ sheet }) => sheet.chart);
+
+  zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  ${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}
+  ${chartSheets.map((_, index) => `<Override PartName="/xl/drawings/drawing${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join("")}
+  ${chartSheets.map((_, index) => `<Override PartName="/xl/charts/chart${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join("")}
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>`);
+  zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`);
+  zip.file("docProps/core.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>Projection Export</dc:title>
+  <dc:creator>iC2 Clients</dc:creator>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created>
+</cp:coreProperties>`);
+  zip.file("docProps/app.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>iC2 Clients</Application></Properties>`);
+  zip.file("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>${sheets.map((sheet, index) => `<sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets>
+</workbook>`);
+  zip.file("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}
+</Relationships>`);
+
+  sheets.forEach((sheet, index) => {
+    const sheetIndex = index + 1;
+    zip.file(`xl/worksheets/sheet${sheetIndex}.xml`, buildWorksheetXml(sheet, sheetIndex));
+  });
+  chartSheets.forEach(({ sheet, sheetIndex }, chartIndex) => {
+    const chartNumber = chartIndex + 1;
+    zip.file(`xl/worksheets/_rels/sheet${sheetIndex}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId${sheetIndex}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${chartNumber}.xml"/>
+</Relationships>`);
+    zip.file(`xl/drawings/drawing${chartNumber}.xml`, buildDrawingXml(chartNumber));
+    zip.file(`xl/drawings/_rels/drawing${chartNumber}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${chartNumber}.xml"/>
+</Relationships>`);
+    zip.file(`xl/charts/chart${chartNumber}.xml`, buildChartXml(sheet, chartNumber));
+  });
+
+  const blob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 const editableRiskProfileNames = ["Cash", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"];
@@ -135,7 +424,12 @@ const blankProjectionScenario: ProjectionScenario = {
   dependants: [],
   assets: [],
   liabilities: [],
+  assetSaleEvents: [],
+  liabilityPaymentEvents: [],
   retirementAccounts: [],
+  superContributionStrategies: [],
+  superRolloverEvents: [],
+  pensionWithdrawalEvents: [],
   cashflowItems: [],
   cashflowAllocation: {
     surplusTarget: null,
@@ -191,6 +485,58 @@ function buildStoredProjectionWorkspaceState(
   };
 }
 
+function normalizeProjectionScenario(scenario: ProjectionScenario): ProjectionScenario {
+  const retirementAccounts = scenario.retirementAccounts ?? [];
+  const legacyContributionStrategies = retirementAccounts
+    .filter((account) => account.accountType === "super-accumulation" && (account.annualContribution ?? 0) > 0)
+    .map((account) => ({
+      strategyId: `${account.accountId}-legacy-additional-contribution`,
+      ownerPersonId: account.ownerPersonId,
+      targetAccountId: account.accountId,
+      label: "Additional contributions",
+      annualAmount: account.annualContribution ?? 0,
+      contributionType: account.annualContributionType ?? "concessional" as const,
+      startDate: null,
+      endDate: null,
+      indexedToCpi: false,
+      enabled: true,
+    }));
+  const legacyRolloverEvents = retirementAccounts
+    .filter((account) => account.accountType === "super-accumulation" && account.rolloverToPensionDate)
+    .map((account) => ({
+      eventId: `${account.accountId}-legacy-rollover`,
+      label: "Rollover to pension",
+      sourceAccountId: account.accountId,
+      destinationAccountId: null,
+      destinationPensionName: account.rolloverPensionName?.trim() || `${account.productName} pension`,
+      rolloverDate: account.rolloverToPensionDate ?? null,
+      amountMode: "full-balance" as const,
+      fixedAmount: 0,
+      annualDrawdown: account.rolloverAnnualDrawdown ?? 0,
+      drawdownIndexedToCpi: account.rolloverDrawdownIndexedToCpi ?? false,
+      enabled: true,
+    }));
+
+  return {
+    ...scenario,
+    dependants: scenario.dependants ?? [],
+    assets: (scenario.assets ?? []).map((asset) => ({
+      ...asset,
+      type: assetTypeValue(asset.type),
+      centrelink: assetCentrelinkValue(asset.centrelink),
+    })),
+    assetSaleEvents: scenario.assetSaleEvents ?? [],
+    liabilityPaymentEvents: scenario.liabilityPaymentEvents ?? [],
+    retirementAccounts,
+    superContributionStrategies: (scenario.superContributionStrategies ?? []).length
+      ? scenario.superContributionStrategies
+      : legacyContributionStrategies,
+    superRolloverEvents: (scenario.superRolloverEvents ?? []).length ? scenario.superRolloverEvents : legacyRolloverEvents,
+    pensionWithdrawalEvents: scenario.pensionWithdrawalEvents ?? [],
+    cashflowAllocation: scenario.cashflowAllocation ?? { surplusTarget: null },
+  };
+}
+
 function slug(value: string) {
   return value
     .toLowerCase()
@@ -213,6 +559,40 @@ function numericValue(value: unknown) {
 
   const parsed = Number(value.replace(/[$,%\s,]/g, ""));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function assetCentrelinkValue(value: unknown): ProjectionScenario["assets"][number]["centrelink"] {
+  return value === "exempt" || value === "financial-asset" || value === "assessable" ? value : "assessable";
+}
+
+function assetTypeValue(value: unknown): ProjectionScenario["assets"][number]["type"] {
+  return projectionAssetTypeOptions.some((option) => option.value === value) ? value as ProjectionScenario["assets"][number]["type"] : "other";
+}
+
+function defaultAssetName(type: ProjectionScenario["assets"][number]["type"]) {
+  if (type === "cash" || type === "bank-account" || type === "offset-account") return "New cash reserve";
+  if (type === "term-deposit") return "New term deposit";
+  if (type === "investment-property") return "New investment property";
+  if (isInvestmentAssetType(type)) return "New investment";
+  if (type === "motor-vehicle") return "New motor vehicle";
+  if (type === "home-contents") return "Home contents";
+  if (type === "business") return "New business asset";
+  return "New asset";
+}
+
+function defaultAssetGrowthRateKey(type: ProjectionScenario["assets"][number]["type"], name = "") {
+  if (type === "offset-account") return "none" as const;
+  if (isCashAssetType(type)) return "cash" as const;
+  if (type === "primary-residence" || type === "investment-property") return "cpi" as const;
+  if (isInvestmentAssetType(type)) return "Balanced" as const;
+  if (/offset/i.test(name)) return "none" as const;
+  return "none" as const;
+}
+
+function defaultAssetCentrelink(type: ProjectionScenario["assets"][number]["type"]) {
+  if (type === "primary-residence" || type === "funeral-bond") return "exempt" as const;
+  if (isCashAssetType(type) || isInvestmentAssetType(type)) return "financial-asset" as const;
+  return "assessable" as const;
 }
 
 function normalizeRateValue(value: unknown) {
@@ -261,17 +641,6 @@ function calculateStartAge(dateOfBirth: string | null | undefined, startYear: nu
 
 function personName(person?: PersonRecord | null, fallback = "Client") {
   return textValue(person?.name) || fallback;
-}
-
-function formatProjectionDate(value: string | null | undefined) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString("en-AU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
 }
 
 function personGender(person?: PersonRecord | null): ProjectionScenario["people"][number]["gender"] {
@@ -336,9 +705,20 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
   const assetType = (value: string): ProjectionScenario["assets"][number]["type"] => {
     const normalized = value.toLowerCase();
     if (/home|residence|property.*home|principal|primary/.test(normalized)) return "primary-residence";
-    if (/cash|bank|savings|offset/.test(normalized)) return "cash";
+    if (/offset/.test(normalized)) return "offset-account";
+    if (/term deposit/.test(normalized)) return "term-deposit";
+    if (/cash/.test(normalized)) return "cash";
+    if (/bank|savings|transaction|cheque/.test(normalized)) return "bank-account";
     if (/funeral/.test(normalized)) return "funeral-bond";
-    if (/share|etf|managed|investment|portfolio|term deposit/.test(normalized)) return "investment";
+    if (/investment.*property|rental.*property/.test(normalized)) return "investment-property";
+    if (/australian.*share|asx|domestic.*share/.test(normalized)) return "australian-shares";
+    if (/international.*share|global.*share/.test(normalized)) return "international-shares";
+    if (/managed/.test(normalized)) return "managed-fund";
+    if (/etf/.test(normalized)) return "etf";
+    if (/share|investment|portfolio/.test(normalized)) return "investment";
+    if (/contents|household/.test(normalized)) return "home-contents";
+    if (/vehicle|car|motor/.test(normalized)) return "motor-vehicle";
+    if (/business|company/.test(normalized)) return "business";
     return "personal-asset";
   };
   const liabilityType = (value: string): ProjectionScenario["liabilities"][number]["type"] => {
@@ -368,18 +748,9 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
       name,
       openingValue: numericValue(asset.currentValue),
       annualIncome: annualizeAmount(asset.incomeAmount, asset.incomeFrequency),
-      growthRateKey:
-        type === "cash"
-          ? /offset/i.test(name)
-            ? "none" as const
-            : "cash" as const
-          : type === "primary-residence"
-            ? "cpi" as const
-            : type === "investment"
-              ? "Balanced" as const
-              : "none" as const,
-      centrelink: type === "primary-residence" || type === "funeral-bond" ? "exempt" as const : type === "cash" || type === "investment" ? "financial-asset" as const : "assessable" as const,
-      reserveTarget: type === "cash" ? 60000 : null,
+      growthRateKey: defaultAssetGrowthRateKey(type, name),
+      centrelink: defaultAssetCentrelink(type),
+      reserveTarget: isCashAssetType(type) ? 60000 : null,
     };
   });
   const hasPrimaryResidence = assets.some((asset) => asset.type === "primary-residence");
@@ -453,7 +824,8 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     productName: textValue(account.type) || textValue(account.superFund) || `Super account ${index + 1}`,
     openingBalance: numericValue(account.balance),
     annualFeeRate: 0.015,
-    annualContribution: annualizeAmount(account.contributionAmount, account.frequency),
+    annualInsurancePremium: 0,
+    annualContribution: 0,
     annualContributionType: "concessional" as const,
     rolloverToPensionDate: null,
     rolloverPensionName: null,
@@ -465,6 +837,27 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     taxableToClient: false,
     centrelink: "financial-asset" as const,
   }));
+  const superContributionStrategies = (profile.superannuation ?? [])
+    .map((account, index) => {
+      const annualAmount = annualizeAmount(account.contributionAmount, account.frequency);
+      const accountId = slug(account.id || account.superFund || `super-${index + 1}`) || `super-${index + 1}`;
+
+      return annualAmount > 0
+        ? {
+            strategyId: `${accountId}-contribution-strategy`,
+            ownerPersonId: ownerPersonId(account),
+            targetAccountId: accountId,
+            label: "Additional contributions",
+            annualAmount,
+            contributionType: "concessional" as const,
+            startDate: null,
+            endDate: null,
+            indexedToCpi: false,
+            enabled: true,
+          }
+        : null;
+    })
+    .filter((strategy): strategy is NonNullable<typeof strategy> => Boolean(strategy));
   const pensionAccounts = (profile.pension ?? []).map((account, index) => ({
     accountId: slug(account.id || account.superFund || `pension-${index + 1}`) || `pension-${index + 1}`,
     ownerPersonId: ownerPersonId(account),
@@ -473,6 +866,7 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     productName: textValue(account.type) || textValue(account.superFund) || `Pension account ${index + 1}`,
     openingBalance: numericValue(account.balance),
     annualFeeRate: 0.015,
+    annualInsurancePremium: 0,
     annualContribution: 0,
     annualContributionType: "concessional" as const,
     rolloverToPensionDate: null,
@@ -497,7 +891,12 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     projectionEnd: { type: "life-expectancy", personId: "client" },
     assets,
     liabilities,
+    assetSaleEvents: [],
+    liabilityPaymentEvents: [],
     retirementAccounts: [...superAccounts, ...pensionAccounts],
+    superContributionStrategies,
+    superRolloverEvents: [],
+    pensionWithdrawalEvents: [],
     cashflowItems: [...employmentItems, ...incomeItems, ...expenseItems],
   };
 }
@@ -508,7 +907,7 @@ const projectionRows = projectionResult.years;
 const primaryPersonId = activeScenario.primaryPersonId;
 const projectionStartYear = activeScenario.startYear;
 const endAge = projectionRows.at(-1)?.ageByPersonId[primaryPersonId] ?? 0;
-const cashAsset = activeScenario.assets.find((asset) => asset.type === "cash");
+const cashAsset = activeScenario.assets.find((asset) => isCashAssetType(asset.type));
 const cashReserveTarget = cashAsset?.reserveTarget ?? 0;
 const openingCash = cashAsset?.openingValue ?? 0;
 const cashAssetName = cashAsset?.name ?? "cash reserve";
@@ -534,8 +933,14 @@ function hasAnyAmount(values: number[]) {
 
 const finalProjectionYear = projectionRows.at(-1);
 const firstReserveBreach = projectionRows.find((row) => row.cashReserve < cashReserveTarget);
-const primaryPersonName = activeScenario.people.find((person) => person.personId === primaryPersonId)?.name ?? "Client";
 const personNameById = Object.fromEntries(activeScenario.people.map((person) => [person.personId, person.name]));
+const projectionAgePeople = activeScenario.people.filter((person) => person.role === "client" || person.role === "partner");
+const projectionAgeRows: ProjectionTableRow[] = (projectionAgePeople.length ? projectionAgePeople : activeScenario.people).map(
+  (person) => ({
+    label: `Age - ${person.name}`,
+    values: projectionRows.map((row) => `${row.ageByPersonId[person.personId] ?? ""}`),
+  }),
+);
 const liabilityRepaymentItemIds = new Set(activeScenario.liabilities.map((liability) => `${liability.liabilityId}-repayment`));
 const duplicatedCashflowLabels = new Set(
   activeScenario.cashflowItems
@@ -564,41 +969,143 @@ function rolloverPensionAccountId(accountId: string) {
   return `${accountId}-rollover-pension`;
 }
 
-function createRolloverPensionAccount(account: ProjectionScenario["retirementAccounts"][number]) {
+const superContributionStrategies = activeScenario.superContributionStrategies ?? [];
+const displayContributionStrategies = superContributionStrategies.length
+  ? superContributionStrategies
+  : activeScenario.retirementAccounts
+      .filter((account) => account.accountType === "super-accumulation" && (account.annualContribution ?? 0) > 0)
+      .map((account) => ({
+        strategyId: `${account.accountId}-legacy-additional-contribution`,
+        ownerPersonId: account.ownerPersonId,
+        targetAccountId: account.accountId,
+        label: "Additional contributions",
+        annualAmount: account.annualContribution ?? 0,
+        contributionType: account.annualContributionType ?? "concessional",
+        startDate: null,
+        endDate: null,
+        indexedToCpi: false,
+        enabled: true,
+      }));
+const superRolloverEvents = activeScenario.superRolloverEvents ?? [];
+const displayRolloverEvents = superRolloverEvents.length
+  ? superRolloverEvents
+  : activeScenario.retirementAccounts
+      .filter((account) => account.accountType === "super-accumulation" && account.rolloverToPensionDate)
+      .map((account) => ({
+        eventId: `${account.accountId}-legacy-rollover`,
+        label: "Rollover to pension",
+        sourceAccountId: account.accountId,
+        destinationAccountId: null,
+        destinationPensionName: account.rolloverPensionName?.trim() || `${account.productName} pension`,
+        rolloverDate: account.rolloverToPensionDate ?? null,
+        amountMode: "full-balance" as const,
+        fixedAmount: 0,
+        annualDrawdown: account.rolloverAnnualDrawdown ?? 0,
+        drawdownIndexedToCpi: account.rolloverDrawdownIndexedToCpi ?? false,
+        enabled: true,
+      }));
+const displayPensionWithdrawalEvents = activeScenario.pensionWithdrawalEvents ?? [];
+
+function rolloverDestinationAccountId(event: (typeof displayRolloverEvents)[number]) {
+  return event.destinationAccountId?.trim() || rolloverPensionAccountId(event.sourceAccountId);
+}
+
+function createRolloverPensionAccount(
+  event: (typeof displayRolloverEvents)[number],
+  account: ProjectionScenario["retirementAccounts"][number],
+) {
   return {
     ...account,
-    accountId: rolloverPensionAccountId(account.accountId),
+    accountId: rolloverDestinationAccountId(event),
     accountType: "account-based-pension" as const,
-    productName: account.rolloverPensionName?.trim() || `${account.productName} pension`,
+    productName: event.destinationPensionName?.trim() || `${account.productName} pension`,
+    openingBalance: 0,
+    annualInsurancePremium: 0,
     annualContribution: 0,
     annualContributionType: "concessional" as const,
-    annualDrawdown: account.rolloverAnnualDrawdown ?? 0,
-    drawdownIndexedToCpi: account.rolloverDrawdownIndexedToCpi ?? false,
+    rolloverToPensionDate: null,
+    rolloverPensionName: null,
+    rolloverAnnualDrawdown: 0,
+    rolloverDrawdownIndexedToCpi: false,
+    annualDrawdown: event.annualDrawdown ?? 0,
+    drawdownIndexedToCpi: event.drawdownIndexedToCpi ?? false,
     taxableToClient: false,
   };
 }
 
-const rolloverPensionAccounts = activeScenario.retirementAccounts
-  .filter((account) => account.accountType === "super-accumulation" && account.rolloverToPensionDate)
-  .map(createRolloverPensionAccount);
+const rolloverPensionAccounts = displayRolloverEvents
+  .filter((event) => event.enabled && event.rolloverDate)
+  .map((event) => {
+    const sourceAccount = activeScenario.retirementAccounts.find((account) => account.accountId === event.sourceAccountId);
+    const destinationAccountId = rolloverDestinationAccountId(event);
+    const existingDestination = activeScenario.retirementAccounts.find((account) => account.accountId === destinationAccountId);
+
+    return sourceAccount && !existingDestination ? createRolloverPensionAccount(event, sourceAccount) : null;
+  })
+  .filter((account): account is NonNullable<typeof account> => Boolean(account));
 const retirementDisplayAccounts = [...activeScenario.retirementAccounts, ...rolloverPensionAccounts];
 
-const mappedIncomeRows = activeScenario.cashflowItems
+function assignChartColors(rows: Array<{ label: string; rawValues: number[] }>): ProjectionChartSeries[] {
+  return rows.map((row, index) => ({
+    label: row.label,
+    values: row.rawValues,
+    color: cashflowChartPalette[index % cashflowChartPalette.length],
+  }));
+}
+
+const mappedIncomeRawRows = activeScenario.cashflowItems
   .filter((item) => item.category === "other-income")
   .map((item) => ({
     label: cashflowItemLabel(item),
-    values: projectionRows.map((row) => money(row.cashflowItemValues[item.itemId] ?? 0)),
+    rawValues: projectionRows.map((row) => row.cashflowItemValues[item.itemId] ?? 0),
   }));
-const assetIncomeRows = activeScenario.assets
+const mappedIncomeRows = mappedIncomeRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
+const assetIncomeRawRows = activeScenario.assets
   .map((asset) => ({
     label: `${asset.name} income`,
     rawValues: projectionRows.map((row) => row.assetIncomeValues[asset.assetId] ?? 0),
   }))
-  .filter((row) => hasAnyAmount(row.rawValues))
-  .map((row) => ({
-    label: row.label,
-    values: row.rawValues.map((value) => money(value)),
-  }));
+  .filter((row) => hasAnyAmount(row.rawValues));
+const assetIncomeRows = assetIncomeRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
+const assetSaleRawRows = (activeScenario.assetSaleEvents ?? [])
+  .map((event) => {
+    const asset = activeScenario.assets.find((entry) => entry.assetId === event.assetId);
+
+    return {
+      label: event.label.trim() || `Sale of ${asset?.name ?? "asset"}`,
+      rawValues: projectionRows.map((row) => row.assetSaleEventValues[event.eventId] ?? 0),
+    };
+  })
+  .filter((row) => hasAnyAmount(row.rawValues));
+const assetSaleRows = assetSaleRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
+const pensionLumpSumRawRows = displayPensionWithdrawalEvents
+  .map((event) => {
+    const account = retirementDisplayAccounts.find((entry) => entry.accountId === event.accountId);
+
+    return {
+      label: `${event.label.trim() || "Lump sum withdrawal"} - ${account?.productName ?? "pension"}`,
+      rawValues: projectionRows.map((row) => {
+        const detail = row.retirementAccountDetails[event.accountId]?.pensionWithdrawalDetails.find(
+          (entry) => entry.eventId === event.eventId,
+        );
+        return detail?.amount ?? 0;
+      }),
+    };
+  })
+  .filter((row) => hasAnyAmount(row.rawValues));
+const pensionLumpSumRows = pensionLumpSumRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
 const mappedExpenseRows = activeScenario.cashflowItems
   .filter(
     (item) =>
@@ -615,6 +1122,39 @@ const liabilityRepaymentRows = activeScenario.liabilities
     label: `${liability.name} repayment`,
     values: projectionRows.map((row) => money(row.liabilityRepaymentValues[liability.liabilityId] ?? 0)),
   }));
+const liabilityPaymentRawRows = (activeScenario.liabilityPaymentEvents ?? [])
+  .map((event) => {
+    const liability = activeScenario.liabilities.find((entry) => entry.liabilityId === event.liabilityId);
+
+    return {
+      label: event.label.trim() || `Payment to ${liability?.name ?? "liability"}`,
+      rawValues: projectionRows.map((row) => row.liabilityPaymentEventValues[event.eventId] ?? 0),
+    };
+  })
+  .filter((row) => hasAnyAmount(row.rawValues));
+const liabilityPaymentRows = liabilityPaymentRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
+const superContributionExpenseRows = displayContributionStrategies
+  .map((strategy) => {
+    const targetAccount = retirementDisplayAccounts.find((account) => account.accountId === strategy.targetAccountId);
+
+    return {
+      label: `${strategy.label} - ${targetAccount?.productName ?? "super"}`,
+      rawValues: projectionRows.map((row) => {
+        const detail = row.retirementAccountDetails[strategy.targetAccountId]?.contributionStrategyDetails.find(
+          (entry) => entry.strategyId === strategy.strategyId,
+        );
+        return detail?.grossContribution ?? 0;
+      }),
+    };
+  })
+  .filter((row) => hasAnyAmount(row.rawValues))
+  .map((row) => ({
+    label: row.label,
+    values: row.rawValues.map((value) => money(value)),
+  }));
 const taxPayableRows = activeScenario.people
   .map((person) => ({
     label: `${person.name} tax payable`,
@@ -625,20 +1165,84 @@ const taxPayableRows = activeScenario.people
     label: row.label,
     values: row.rawValues.map((value) => money(value)),
   }));
+const accountBasedPensionIncomeRows = activeScenario.retirementAccounts
+  .filter((account) => account.accountType === "account-based-pension")
+  .map((account) => {
+    const ownerLabel = ownerName(account.ownerPersonId);
+
+    return {
+      label: `${account.productName} - ${ownerLabel}`,
+      rawValues: projectionRows.map((row) => row.retirementAccountDetails[account.accountId]?.drawdown ?? 0),
+    };
+  });
 const calculatedIncomeRows = [
-  {
-    label: "Account-based pension",
-    rawValues: projectionRows.map((row) => row.accountBasedPension),
-  },
-  {
-    label: "Age Pension",
-    rawValues: projectionRows.map((row) => row.agePension.annualPayment),
-  },
+  ...accountBasedPensionIncomeRows,
+  ...activeScenario.people.map((person) => ({
+    label: `Age Pension - ${person.name}`,
+    rawValues: projectionRows.map((row) => row.agePensionByPersonId[person.personId]?.annualPayment ?? 0),
+  })),
   {
     label: "Bank interest",
     rawValues: projectionRows.map((row) => row.bankInterest),
   },
 ].filter((row) => hasAnyAmount(row.rawValues));
+function niceChartAxisStep(rawStep: number) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) {
+    return 1;
+  }
+
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceNormalized =
+    normalized <= 1
+      ? 1
+      : normalized <= 2
+        ? 2
+        : normalized <= 2.5
+          ? 2.5
+          : normalized <= 5
+            ? 5
+            : 10;
+
+  return niceNormalized * magnitude;
+}
+
+function chartAxisFor(rawMaxValue: number, targetTickCount = defaultChartTickCount) {
+  const safeMaxValue = Math.max(1, rawMaxValue);
+  const axisStep = niceChartAxisStep(safeMaxValue / targetTickCount);
+  const maxValue = Math.max(axisStep, Math.ceil(safeMaxValue / axisStep) * axisStep);
+
+  return { axisStep, maxValue };
+}
+
+const cashflowChartSeries = assignChartColors([
+  ...mappedIncomeRawRows,
+  ...assetIncomeRawRows,
+  ...assetSaleRawRows,
+  ...calculatedIncomeRows,
+  ...pensionLumpSumRawRows,
+]);
+const cashflowEventIncomeValues = projectionRows.map((_, yearIndex) =>
+  [...assetSaleRawRows, ...pensionLumpSumRawRows].reduce((total, row) => total + (row.rawValues[yearIndex] ?? 0), 0),
+);
+const cashflowEventExpenseValues = projectionRows.map((_, yearIndex) =>
+  liabilityPaymentRawRows.reduce((total, row) => total + (row.rawValues[yearIndex] ?? 0), 0),
+);
+const cashflowTotalIncomeValues = projectionRows.map((row, yearIndex) => row.totalIncome + cashflowEventIncomeValues[yearIndex]);
+const cashflowExpenseValues = projectionRows.map(
+  (row, yearIndex) => row.expenses + row.tax.taxPayable + cashflowEventExpenseValues[yearIndex],
+);
+const cashflowNetValues = projectionRows.map(
+  (row, yearIndex) => row.netCashflowAfterTax + cashflowEventIncomeValues[yearIndex] - cashflowEventExpenseValues[yearIndex],
+);
+const cashflowChartRawMaxValue = Math.max(
+  1,
+  ...cashflowTotalIncomeValues,
+  ...cashflowExpenseValues,
+);
+const cashflowChartAxis = chartAxisFor(cashflowChartRawMaxValue);
+const cashflowChartMaxValue = cashflowChartAxis.maxValue;
+const cashflowChartAxisStep = cashflowChartAxis.axisStep;
 const surplusAllocationTarget = activeScenario.cashflowAllocation?.surplusTarget ?? null;
 const surplusTargetAsset = surplusAllocationTarget?.targetType === "cash-asset"
   ? activeScenario.assets.find((asset) => asset.assetId === surplusAllocationTarget.targetId)
@@ -687,7 +1291,7 @@ const fallbackAllocationRows = [
   }));
 
 const cashflowProjectionRows: ProjectionTableRow[] = [
-  { label: `Age - ${primaryPersonName}`, values: projectionRows.map((row) => `${row.ageByPersonId[primaryPersonId]}`) },
+  ...projectionAgeRows,
   { label: "Income", values: [], isSection: true },
   ...mappedIncomeRows,
   ...assetIncomeRows,
@@ -695,17 +1299,21 @@ const cashflowProjectionRows: ProjectionTableRow[] = [
     label: row.label,
     values: row.rawValues.map((value) => money(value)),
   })),
-  { label: "Total income", values: projectionRows.map((row) => money(row.totalIncome)), isTotal: true },
+  ...assetSaleRows,
+  ...pensionLumpSumRows,
+  { label: "Total income", values: cashflowTotalIncomeValues.map((value) => money(value)), isTotal: true },
   { label: "Expenses", values: [], isSection: true },
   ...mappedExpenseRows,
   ...liabilityRepaymentRows,
+  ...liabilityPaymentRows,
+  ...superContributionExpenseRows,
   ...taxPayableRows,
   {
     label: "Total expenses including tax",
-    values: projectionRows.map((row) => money(row.expenses + row.tax.taxPayable)),
+    values: cashflowExpenseValues.map((value) => money(value)),
     isTotal: true,
   },
-  { label: "Net cashflow after tax", values: projectionRows.map((row) => money(row.netCashflowAfterTax)) },
+  { label: "Net cashflow after tax", values: cashflowNetValues.map((value) => money(value)) },
   ...(fallbackAllocationRows.length
     ? [{ label: "Surplus / shortfall allocation", values: [], isSection: true }, ...fallbackAllocationRows]
     : []),
@@ -714,17 +1322,41 @@ const superProjectionGroups = activeScenario.retirementAccounts
   .filter((account) => account.accountType === "super-accumulation")
   .map<ProjectionTableGroup>((account) => {
     const ownerName = personNameById[account.ownerPersonId] ?? "Client";
+    const accountRolloverEvents = displayRolloverEvents.filter((event) => event.enabled && event.sourceAccountId === account.accountId);
+    const accountContributionStrategies = displayContributionStrategies.filter((strategy) => strategy.enabled && strategy.targetAccountId === account.accountId);
+    const strategyRows = accountContributionStrategies.map((strategy) => ({
+      label: strategy.label,
+      values: projectionRows.map((row) => {
+        const detail = row.retirementAccountDetails[account.accountId]?.contributionStrategyDetails.find(
+          (entry) => entry.strategyId === strategy.strategyId,
+        );
+        return money(detail?.grossContribution ?? 0);
+      }),
+    }));
+    const rolloverRows = accountRolloverEvents.map((event) => {
+      const destinationAccount = retirementDisplayAccounts.find((entry) => entry.accountId === rolloverDestinationAccountId(event));
+
+      return {
+        label: `Rollover to ${destinationAccount?.productName ?? event.destinationPensionName ?? "pension"}`,
+        values: projectionRows.map((row) => {
+          const detail = row.retirementAccountDetails[account.accountId]?.rolloverEventDetails.find(
+            (entry) => entry.eventId === event.eventId,
+          );
+          return money(detail?.rolloverOut ?? 0);
+        }),
+      };
+    });
 
     return {
       groupId: account.accountId,
       title: account.productName,
       ownerPersonId: account.ownerPersonId,
       ownerName,
-      subtitle: account.rolloverToPensionDate
-        ? `Owner: ${ownerName} | Investment option: ${account.investmentProfileKey} | Rolls to pension from ${account.rolloverToPensionDate}`
+      subtitle: accountRolloverEvents.length
+        ? `Owner: ${ownerName} | Investment option: ${account.investmentProfileKey} | ${accountRolloverEvents.length} rollover event(s)`
         : `Owner: ${ownerName} | Investment option: ${account.investmentProfileKey}`,
       rows: [
-        { label: `Age - ${ownerName}`, values: projectionRows.map((row) => `${row.ageByPersonId[account.ownerPersonId] ?? ""}`) },
+        ...projectionAgeRows,
         {
           label: "Opening balance",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.openingBalance ?? 0)),
@@ -735,10 +1367,16 @@ const superProjectionGroups = activeScenario.retirementAccounts
           label: "Employer contributions",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.grossEmployerContribution ?? 0)),
         },
-        {
-          label: "Additional contributions",
-          values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.additionalContribution ?? 0)),
-        },
+        ...strategyRows,
+        ...(strategyRows.length > 1
+          ? [
+              {
+                label: "Total strategy contributions",
+                values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.additionalContribution ?? 0)),
+                isTotal: true,
+              },
+            ]
+          : []),
         {
           label: "Investment income",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.investmentIncome ?? 0)),
@@ -761,18 +1399,15 @@ const superProjectionGroups = activeScenario.retirementAccounts
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.fees ?? 0)),
         },
         {
+          label: "Insurance premiums",
+          values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.insurancePremium ?? 0)),
+        },
+        {
           label: "Total tax payable",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.taxPayable ?? 0)),
           isTotal: true,
         },
-        ...(account.rolloverToPensionDate
-          ? [
-              {
-                label: "Rollover to pension",
-                values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.rolloverOut ?? 0)),
-              },
-            ]
-          : []),
+        ...rolloverRows,
         {
           label: "Closing balance",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.closingBalance ?? 0)),
@@ -785,6 +1420,18 @@ const pensionProjectionGroups = retirementDisplayAccounts
   .filter((account) => account.accountType === "account-based-pension")
   .map<ProjectionTableGroup>((account) => {
     const ownerName = personNameById[account.ownerPersonId] ?? "Client";
+    const accountPensionWithdrawalEvents = displayPensionWithdrawalEvents.filter(
+      (event) => event.enabled && event.accountId === account.accountId,
+    );
+    const pensionWithdrawalRows = accountPensionWithdrawalEvents.map((event) => ({
+      label: event.label,
+      values: projectionRows.map((row) => {
+        const detail = row.retirementAccountDetails[account.accountId]?.pensionWithdrawalDetails.find(
+          (entry) => entry.eventId === event.eventId,
+        );
+        return money(detail?.amount ?? 0);
+      }),
+    }));
 
     return {
       groupId: account.accountId,
@@ -793,7 +1440,7 @@ const pensionProjectionGroups = retirementDisplayAccounts
       ownerName,
       subtitle: `Owner: ${ownerName} | Investment option: ${account.investmentProfileKey}`,
       rows: [
-        { label: `Age - ${ownerName}`, values: projectionRows.map((row) => `${row.ageByPersonId[account.ownerPersonId] ?? ""}`) },
+        ...projectionAgeRows,
         {
           label: "Opening balance",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.openingBalance ?? 0)),
@@ -817,6 +1464,7 @@ const pensionProjectionGroups = retirementDisplayAccounts
           label: "Pension drawdown",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.drawdown ?? 0)),
         },
+        ...pensionWithdrawalRows,
         {
           label: "Tax payable",
           values: projectionRows.map((row) => money(row.retirementAccountDetails[account.accountId]?.taxPayable ?? 0)),
@@ -868,7 +1516,7 @@ const taxProjectionRowsByPersonId = Object.fromEntries(
     return [
       person.personId,
       [
-        { label: `Age - ${person.name}`, values: projectionRows.map((row) => `${row.ageByPersonId[person.personId] ?? ""}`) },
+        ...projectionAgeRows,
         ...taxableIncomeRows,
         ...taxableAssetIncomeRows,
         ...[
@@ -877,8 +1525,8 @@ const taxProjectionRowsByPersonId = Object.fromEntries(
             rawValues: taxRows.map((row) => row.taxableBankInterest),
           },
           {
-            label: "Age Pension excluded from tax",
-            rawValues: person.personId === primaryPersonId ? projectionRows.map((row) => row.agePension.annualPayment) : [],
+            label: "Taxable Age Pension",
+            rawValues: taxRows.map((row) => row.taxableAgePension),
           },
         ]
           .filter((row) => hasAnyAmount(row.rawValues))
@@ -890,8 +1538,14 @@ const taxProjectionRowsByPersonId = Object.fromEntries(
         { label: "Taxable income", values: taxRows.map((row) => money(row.taxableIncome)), isTotal: true },
         { label: "Gross tax", values: taxRows.map((row) => money(row.grossTax)) },
         { label: "Medicare levy", values: taxRows.map((row) => money(row.medicareLevy)) },
+        ...(hasAnyAmount(taxRows.map((row) => row.lowIncomeTaxOffset))
+          ? [{ label: "Low income tax offset", values: taxRows.map((row) => money(row.lowIncomeTaxOffset)) }]
+          : []),
+        ...(hasAnyAmount(taxRows.map((row) => row.seniorsAndPensionersTaxOffset))
+          ? [{ label: "Seniors and pensioners tax offset", values: taxRows.map((row) => money(row.seniorsAndPensionersTaxOffset)) }]
+          : []),
         ...(hasAnyAmount(taxRows.map((row) => row.taxOffsets))
-          ? [{ label: "Configured offsets", values: taxRows.map((row) => money(row.taxOffsets)) }]
+          ? [{ label: "Total tax offsets", values: taxRows.map((row) => money(row.taxOffsets)) }]
           : []),
         { label: "Tax payable", values: taxRows.map((row) => money(row.taxPayable)), isTotal: true },
       ],
@@ -899,8 +1553,31 @@ const taxProjectionRowsByPersonId = Object.fromEntries(
   }),
 );
 const taxProjectionRows = taxProjectionRowsByPersonId[primaryPersonId] ?? [];
+const agePensionProjectionRowsByPersonId = Object.fromEntries(
+  activeScenario.people.map((person) => {
+    const personAgePensionRows = projectionRows.map((row) => row.agePensionByPersonId[person.personId]);
+
+    return [
+      person.personId,
+      [
+        ...projectionAgeRows,
+        { label: "Household assessment inputs", values: [], isSection: true },
+        { label: "Assessable assets", values: personAgePensionRows.map((row) => money(row?.assessableAssets ?? 0)) },
+        { label: "Deemed income", values: personAgePensionRows.map((row) => money(row?.deemedIncome ?? 0)) },
+        { label: `${person.name} eligibility`, values: [], isSection: true },
+        { label: "Age eligible", values: personAgePensionRows.map((row) => (row?.ageEligible ? "Yes" : "No")) },
+        { label: "Maximum annual rate", values: personAgePensionRows.map((row) => money(row?.maximumAnnualRate ?? 0)) },
+        { label: "Assets test rate", values: personAgePensionRows.map((row) => money(row?.assetsTestAnnualRate ?? 0)) },
+        { label: "Income test rate", values: personAgePensionRows.map((row) => money(row?.incomeTestAnnualRate ?? 0)) },
+        { label: "Binding test", values: personAgePensionRows.map((row) => row?.bindingTest ?? "not-eligible") },
+        { label: `${person.name} Age Pension`, values: personAgePensionRows.map((row) => money(row?.annualPayment ?? 0)), isTotal: true },
+        { label: "Household Age Pension", values: projectionRows.map((row) => money(row.agePension.annualPayment)), isTotal: true },
+      ],
+    ];
+  }),
+);
 const agePensionProjectionRows = [
-  { label: `Age - ${primaryPersonName}`, values: projectionRows.map((row) => `${row.ageByPersonId[primaryPersonId]}`) },
+  ...projectionAgeRows,
   { label: "Assessment inputs", values: [], isSection: true },
   { label: "Assessable assets", values: projectionRows.map((row) => money(row.agePension.assessableAssets)) },
   { label: "Deemed income", values: projectionRows.map((row) => money(row.agePension.deemedIncome)) },
@@ -909,11 +1586,11 @@ const agePensionProjectionRows = [
   { label: "Assets test rate", values: projectionRows.map((row) => money(row.agePension.assetsTestAnnualRate)) },
   { label: "Income test rate", values: projectionRows.map((row) => money(row.agePension.incomeTestAnnualRate)) },
   { label: "Result", values: [], isSection: true },
-  { label: "Modelled Age Pension", values: projectionRows.map((row) => money(row.agePension.annualPayment)), isTotal: true },
+  { label: "Household Age Pension", values: projectionRows.map((row) => money(row.agePension.annualPayment)), isTotal: true },
   { label: "Binding test", values: projectionRows.map((row) => row.agePension.bindingTest) },
 ];
 const balanceSheetProjectionRows = [
-  { label: `Age - ${primaryPersonName}`, values: projectionRows.map((row) => `${row.ageByPersonId[primaryPersonId]}`) },
+  ...projectionAgeRows,
   { label: "Assets", values: [], isSection: true },
   ...activeScenario.assets.map((asset) => ({
     label: asset.name,
@@ -934,6 +1611,29 @@ const balanceSheetProjectionRows = [
   { label: "Net position", values: [], isSection: true },
   { label: "Net worth", values: projectionRows.map((row) => money(row.netWorth)), isTotal: true },
 ];
+const assetLiabilityChartSeries = assignChartColors([
+  ...activeScenario.assets
+    .map((asset) => ({
+      label: asset.name,
+      rawValues: projectionRows.map((row) => row.assetValues[asset.assetId] ?? 0),
+    }))
+    .filter((row) => hasAnyAmount(row.rawValues)),
+  ...retirementDisplayAccounts
+    .map((account) => ({
+      label: account.productName,
+      rawValues: projectionRows.map((row) => row.retirementAccountBalances[account.accountId] ?? 0),
+    }))
+    .filter((row) => hasAnyAmount(row.rawValues)),
+]);
+const assetLiabilityLineValues = projectionRows.map((row) => row.totalLiabilities);
+const assetLiabilityChartRawMaxValue = Math.max(
+  1,
+  ...projectionRows.map((row) => row.totalAssets),
+  ...assetLiabilityLineValues,
+);
+const assetLiabilityChartAxis = chartAxisFor(assetLiabilityChartRawMaxValue);
+const assetLiabilityChartAxisStep = assetLiabilityChartAxis.axisStep;
+const assetLiabilityChartMaxValue = assetLiabilityChartAxis.maxValue;
 
 const assets = [
   ...activeScenario.assets.map((asset) => ({
@@ -945,7 +1645,7 @@ const assets = [
       asset.centrelink === "exempt"
         ? "Excluded from Centrelink assessment in this scenario"
         : asset.centrelink === "financial-asset"
-          ? "Financial asset; included for deeming and assets test"
+          ? "Deemed asset; included for deeming and assets test"
           : "Assessable asset; confirm treatment before relying on outputs",
   })),
   ...retirementDisplayAccounts.map((account) => ({
@@ -1028,7 +1728,7 @@ const retirementAccounts = retirementDisplayAccounts.map((account) => ({
 
 const projectionChecks = [
   "Confirm age, residency, and Age Pension eligibility before relying on Centrelink outputs.",
-  "Age Pension is currently excluded from taxable income in this prototype per the modelling instruction; confirm if taxable treatment should be reinstated with SAPTO/LITO.",
+  "Age Pension is included in taxable income with core LITO and SAPTO offsets; confirm special-case tax treatments separately.",
   "Confirm pension minimum drawdown and current pension features where a pension account exists.",
   "Confirm current pension tax components and Centrelink assessment treatment.",
   "Confirm product fees, transaction costs, buy/sell spreads, and any loss of existing features before replacement modelling.",
@@ -1057,11 +1757,20 @@ const assumptionSources = [
     finalProjectionYear,
     firstReserveBreach,
     cashflowProjectionRows,
+    cashflowChartSeries,
+    cashflowExpenseValues,
+    cashflowChartMaxValue,
+    cashflowChartAxisStep,
+    assetLiabilityChartSeries,
+    assetLiabilityLineValues,
+    assetLiabilityChartMaxValue,
+    assetLiabilityChartAxisStep,
     superProjectionGroups,
     pensionProjectionGroups,
     taxProjectionRows,
     taxProjectionRowsByPersonId,
     agePensionProjectionRows,
+    agePensionProjectionRowsByPersonId,
     balanceSheetProjectionRows,
     assets,
     cashflowRows,
@@ -1088,8 +1797,16 @@ function ProjectionsPageContent() {
   const [clientImportMessage, setClientImportMessage] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<ProjectionSection>("scenario-inputs");
   const [activeScenarioInputTab, setActiveScenarioInputTab] = useState<ScenarioInputTab>("scenario-details");
+  const [cashflowViewMode, setCashflowViewMode] = useState<"table" | "chart">("table");
+  const [assetLiabilityViewMode, setAssetLiabilityViewMode] = useState<"table" | "chart">("table");
   const [superOwnerFilter, setSuperOwnerFilter] = useState("all");
+  const [activeAssetSaleModalId, setActiveAssetSaleModalId] = useState<string | null>(null);
+  const [activeLiabilityPaymentModalId, setActiveLiabilityPaymentModalId] = useState<string | null>(null);
+  const [activePensionWithdrawalModalId, setActivePensionWithdrawalModalId] = useState<string | null>(null);
+  const [activeSuperStrategyModalId, setActiveSuperStrategyModalId] = useState<string | null>(null);
+  const [activeSuperRolloverModalId, setActiveSuperRolloverModalId] = useState<string | null>(null);
   const [taxPersonFilter, setTaxPersonFilter] = useState<string | null>(null);
+  const [centrelinkPersonFilter, setCentrelinkPersonFilter] = useState<string | null>(null);
   const [scenarioAssumptionOverrides, setScenarioAssumptionOverrides] = useState<ScenarioAssumptionOverrides>(
     getInitialScenarioAssumptionOverrides,
   );
@@ -1113,11 +1830,12 @@ function ProjectionsPageContent() {
     try {
       const stored = JSON.parse(raw) as StoredProjectionWorkspaceState;
       if (Array.isArray(stored.scenarios) && stored.scenarios.length) {
-        setScenarios(stored.scenarios);
+        const storedScenarios = stored.scenarios.map(normalizeProjectionScenario);
+        setScenarios(storedScenarios);
         setActiveScenarioId(
-          stored.activeScenarioId && stored.scenarios.some((scenario) => scenario.scenarioId === stored.activeScenarioId)
+          stored.activeScenarioId && storedScenarios.some((scenario) => scenario.scenarioId === stored.activeScenarioId)
             ? stored.activeScenarioId
-            : stored.scenarios[0]?.scenarioId ?? null,
+            : storedScenarios[0]?.scenarioId ?? null,
         );
         const fallbackAssumptions = getInitialScenarioAssumptionOverrides();
         setScenarioAssumptionOverrides({
@@ -1153,11 +1871,16 @@ function ProjectionsPageContent() {
     window.localStorage.setItem(workspaceStorageKey, JSON.stringify(stored));
 
     if (hasLinkedSoaContext) {
-      writeSoaProjectionScenarioOptions(
-        linkedClientId,
-        linkedSoaId,
-        scenarios.map((scenario) => createProjectionPackageForScenario(scenario)),
+      const packages = scenarios.map((scenario) => createProjectionPackageForScenario(scenario));
+      writeSoaProjectionScenarioOptions(linkedClientId, linkedSoaId, packages);
+
+      const selectedPackage = readSoaProjectionPackage(linkedClientId, linkedSoaId);
+      const refreshedSelectedPackage = packages.find(
+        (packageValue) => packageValue.selectedScenarioId === selectedPackage?.selectedScenarioId,
       );
+      if (refreshedSelectedPackage) {
+        writeSoaProjectionPackage(refreshedSelectedPackage);
+      }
     }
   }, [
     activeScenarioId,
@@ -1238,11 +1961,20 @@ function ProjectionsPageContent() {
     finalProjectionYear,
     firstReserveBreach,
     cashflowProjectionRows,
+    cashflowChartSeries,
+    cashflowExpenseValues,
+    cashflowChartMaxValue,
+    cashflowChartAxisStep,
+    assetLiabilityChartSeries,
+    assetLiabilityLineValues,
+    assetLiabilityChartMaxValue,
+    assetLiabilityChartAxisStep,
     superProjectionGroups,
     pensionProjectionGroups,
     taxProjectionRows,
     taxProjectionRowsByPersonId,
     agePensionProjectionRows,
+    agePensionProjectionRowsByPersonId,
     balanceSheetProjectionRows,
     assets,
     cashflowRows,
@@ -1256,6 +1988,11 @@ function ProjectionsPageContent() {
     ? taxPersonFilter
     : activeScenario.primaryPersonId;
   const selectedTaxProjectionRows = taxProjectionRowsByPersonId[selectedTaxPersonId ?? activeScenario.primaryPersonId] ?? taxProjectionRows;
+  const selectedCentrelinkPersonId = activeScenario.people.some((person) => person.personId === centrelinkPersonFilter)
+    ? centrelinkPersonFilter
+    : activeScenario.primaryPersonId;
+  const selectedCentrelinkProjectionRows =
+    agePensionProjectionRowsByPersonId[selectedCentrelinkPersonId ?? activeScenario.primaryPersonId] ?? agePensionProjectionRows;
   const filteredSuperProjectionGroups =
     superOwnerFilter === "all"
       ? superProjectionGroups
@@ -1268,6 +2005,83 @@ function ProjectionsPageContent() {
   const activeLiabilityRepaymentItemIds = new Set(
     activeScenario.liabilities.map((liability) => `${liability.liabilityId}-repayment`),
   );
+  const activeAssetSale = (activeScenario.assetSaleEvents ?? []).find((event) => event.eventId === activeAssetSaleModalId) ?? null;
+  const activeAssetSaleAsset = activeAssetSale
+    ? activeScenario.assets.find((asset) => asset.assetId === activeAssetSale.assetId) ?? null
+    : null;
+  const activeAssetSaleOwnerCashAssets = activeAssetSaleAsset
+    ? activeScenario.assets.filter(
+        (asset) =>
+          isCashAssetType(asset.type) &&
+          (asset.ownerPersonId === activeAssetSaleAsset.ownerPersonId || asset.ownerPersonId === jointOwnerId),
+      )
+    : [];
+  const activeAssetSaleCashAssets =
+    activeAssetSaleOwnerCashAssets.length > 0 ? activeAssetSaleOwnerCashAssets : activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
+  const activeLiabilityPayment =
+    (activeScenario.liabilityPaymentEvents ?? []).find((event) => event.eventId === activeLiabilityPaymentModalId) ?? null;
+  const activeLiabilityPaymentLiability = activeLiabilityPayment
+    ? activeScenario.liabilities.find((liability) => liability.liabilityId === activeLiabilityPayment.liabilityId) ?? null
+    : null;
+  const activeLiabilityPaymentOwnerCashAssets = activeLiabilityPaymentLiability
+    ? activeScenario.assets.filter(
+        (asset) =>
+          isCashAssetType(asset.type) &&
+          (asset.ownerPersonId === activeLiabilityPaymentLiability.ownerPersonId || asset.ownerPersonId === jointOwnerId),
+      )
+    : [];
+  const activeLiabilityPaymentCashAssets =
+    activeLiabilityPaymentOwnerCashAssets.length > 0
+      ? activeLiabilityPaymentOwnerCashAssets
+      : activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
+  const activePensionWithdrawal =
+    (activeScenario.pensionWithdrawalEvents ?? []).find((event) => event.eventId === activePensionWithdrawalModalId) ?? null;
+  const activePensionWithdrawalAccount = activePensionWithdrawal
+    ? activeScenario.retirementAccounts.find((account) => account.accountId === activePensionWithdrawal.accountId) ?? null
+    : null;
+  const activePensionWithdrawalOwnerCashAssets = activePensionWithdrawalAccount
+    ? activeScenario.assets.filter(
+        (asset) =>
+          isCashAssetType(asset.type) &&
+          (asset.ownerPersonId === activePensionWithdrawalAccount.ownerPersonId || asset.ownerPersonId === jointOwnerId),
+      )
+    : [];
+  const activePensionWithdrawalCashAssets =
+    activePensionWithdrawalOwnerCashAssets.length > 0
+      ? activePensionWithdrawalOwnerCashAssets
+      : activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
+  const activeSuperStrategy = (activeScenario.superContributionStrategies ?? []).find(
+    (strategy) => strategy.strategyId === activeSuperStrategyModalId,
+  ) ?? null;
+  const activeSuperRollover = (activeScenario.superRolloverEvents ?? []).find(
+    (rolloverEvent) => rolloverEvent.eventId === activeSuperRolloverModalId,
+  ) ?? null;
+  const superAccumulationAccounts = activeScenario.retirementAccounts.filter(
+    (account) => account.accountType === "super-accumulation",
+  );
+  const accountBasedPensionAccounts = activeScenario.retirementAccounts.filter(
+    (account) => account.accountType === "account-based-pension",
+  );
+  const activeSuperStrategyTargetAccount = activeSuperStrategy
+    ? superAccumulationAccounts.find((account) => account.accountId === activeSuperStrategy.targetAccountId) ?? null
+    : null;
+  const activeSuperStrategyOwnerName = activeSuperStrategyTargetAccount
+    ? activeScenario.people.find((person) => person.personId === activeSuperStrategyTargetAccount.ownerPersonId)?.name ?? "Client"
+    : "Client";
+  const activeSuperRolloverSourceAccount = activeSuperRollover
+    ? superAccumulationAccounts.find((account) => account.accountId === activeSuperRollover.sourceAccountId) ?? null
+    : null;
+  const activeSuperRolloverDestinationAccounts = activeSuperRolloverSourceAccount
+    ? accountBasedPensionAccounts.filter(
+        (account) => account.ownerPersonId === activeSuperRolloverSourceAccount.ownerPersonId,
+      )
+    : [];
+  const activeSuperRolloverDestinationAccountId =
+    activeSuperRollover?.destinationAccountId &&
+    activeSuperRolloverDestinationAccounts.some((account) => account.accountId === activeSuperRollover.destinationAccountId)
+      ? activeSuperRollover.destinationAccountId
+      : "";
+  const activeSuperRolloverCreatesNewPension = Boolean(activeSuperRollover && !activeSuperRolloverDestinationAccountId);
 
   function scenarioVersionId(prefix = "scenario") {
     return makeId(prefix);
@@ -1471,12 +2285,12 @@ function ProjectionsPageContent() {
         assetId: createScenarioInputId("asset"),
         ownerPersonId: draft.primaryPersonId,
         type,
-        name: type === "cash" ? "New cash reserve" : type === "investment" ? "New investment" : "New asset",
+        name: defaultAssetName(type),
         openingValue: 0,
         annualIncome: 0,
-        growthRateKey: type === "cash" ? "cash" : type === "primary-residence" ? "cpi" : "none",
-        centrelink: type === "primary-residence" ? "exempt" : type === "cash" || type === "investment" ? "financial-asset" : "assessable",
-        reserveTarget: type === "cash" ? 0 : null,
+        growthRateKey: defaultAssetGrowthRateKey(type),
+        centrelink: defaultAssetCentrelink(type),
+        reserveTarget: isCashAssetType(type) ? 0 : null,
       });
     });
   }
@@ -1484,6 +2298,11 @@ function ProjectionsPageContent() {
   function deleteAsset(assetId: string) {
     updateActiveScenario((draft) => {
       draft.assets = draft.assets.filter((asset) => asset.assetId !== assetId);
+      draft.assetSaleEvents = (draft.assetSaleEvents ?? []).filter(
+        (event) => event.assetId !== assetId && event.targetAssetId !== assetId,
+      );
+      draft.liabilityPaymentEvents = (draft.liabilityPaymentEvents ?? []).filter((event) => event.sourceAssetId !== assetId);
+      draft.pensionWithdrawalEvents = (draft.pensionWithdrawalEvents ?? []).filter((event) => event.targetAssetId !== assetId);
     });
   }
 
@@ -1505,7 +2324,106 @@ function ProjectionsPageContent() {
   function deleteLiability(liabilityId: string) {
     updateActiveScenario((draft) => {
       draft.liabilities = draft.liabilities.filter((liability) => liability.liabilityId !== liabilityId);
+      draft.liabilityPaymentEvents = (draft.liabilityPaymentEvents ?? []).filter((event) => event.liabilityId !== liabilityId);
     });
+  }
+
+  function updateAssetSaleEvent(
+    eventId: string,
+    applyUpdate: (event: NonNullable<ProjectionScenario["assetSaleEvents"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.assetSaleEvents = draft.assetSaleEvents ?? [];
+      const saleEvent = draft.assetSaleEvents.find((entry) => entry.eventId === eventId);
+      if (saleEvent) {
+        applyUpdate(saleEvent);
+      }
+    });
+  }
+
+  function addAssetSaleEvent(assetId?: string) {
+    const eventId = createScenarioInputId("asset-sale");
+
+    updateActiveScenario((draft) => {
+      const sourceAsset = draft.assets.find((asset) => asset.assetId === assetId) ?? draft.assets[0];
+      if (!sourceAsset) {
+        return;
+      }
+
+      const cashAsset =
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === sourceAsset.ownerPersonId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === jointOwnerId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type));
+
+      draft.assetSaleEvents = draft.assetSaleEvents ?? [];
+      draft.assetSaleEvents.push({
+        eventId,
+        label: `Sell ${sourceAsset.name}`,
+        assetId: sourceAsset.assetId,
+        saleDate: null,
+        amountMode: "full-value",
+        fixedAmount: 0,
+        targetAssetId: cashAsset?.assetId ?? null,
+        enabled: true,
+      });
+    });
+    setActiveAssetSaleModalId(eventId);
+  }
+
+  function deleteAssetSaleEvent(eventId: string) {
+    updateActiveScenario((draft) => {
+      draft.assetSaleEvents = (draft.assetSaleEvents ?? []).filter((event) => event.eventId !== eventId);
+    });
+    setActiveAssetSaleModalId((currentId) => currentId === eventId ? null : currentId);
+  }
+
+  function updateLiabilityPaymentEvent(
+    eventId: string,
+    applyUpdate: (event: NonNullable<ProjectionScenario["liabilityPaymentEvents"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.liabilityPaymentEvents = draft.liabilityPaymentEvents ?? [];
+      const paymentEvent = draft.liabilityPaymentEvents.find((entry) => entry.eventId === eventId);
+      if (paymentEvent) {
+        applyUpdate(paymentEvent);
+      }
+    });
+  }
+
+  function addLiabilityPaymentEvent(liabilityId?: string) {
+    const eventId = createScenarioInputId("liability-payment");
+
+    updateActiveScenario((draft) => {
+      const liability = draft.liabilities.find((entry) => entry.liabilityId === liabilityId) ?? draft.liabilities[0];
+      if (!liability) {
+        return;
+      }
+
+      const cashAsset =
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === liability.ownerPersonId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === jointOwnerId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type));
+
+      draft.liabilityPaymentEvents = draft.liabilityPaymentEvents ?? [];
+      draft.liabilityPaymentEvents.push({
+        eventId,
+        label: `Pay ${liability.name}`,
+        liabilityId: liability.liabilityId,
+        paymentDate: null,
+        amountMode: "full-balance",
+        fixedAmount: 0,
+        sourceAssetId: cashAsset?.assetId ?? null,
+        enabled: true,
+      });
+    });
+    setActiveLiabilityPaymentModalId(eventId);
+  }
+
+  function deleteLiabilityPaymentEvent(eventId: string) {
+    updateActiveScenario((draft) => {
+      draft.liabilityPaymentEvents = (draft.liabilityPaymentEvents ?? []).filter((event) => event.eventId !== eventId);
+    });
+    setActiveLiabilityPaymentModalId((currentId) => currentId === eventId ? null : currentId);
   }
 
   function addRetirementAccount(accountType: ProjectionScenario["retirementAccounts"][number]["accountType"]) {
@@ -1518,6 +2436,7 @@ function ProjectionsPageContent() {
         productName: accountType === "account-based-pension" ? "New account-based pension" : "New super account",
         openingBalance: 0,
         annualFeeRate: 0.015,
+        annualInsurancePremium: 0,
         annualContribution: 0,
         annualContributionType: "concessional",
         rolloverToPensionDate: null,
@@ -1536,17 +2455,174 @@ function ProjectionsPageContent() {
   function deleteRetirementAccount(accountId: string) {
     updateActiveScenario((draft) => {
       draft.retirementAccounts = draft.retirementAccounts.filter((account) => account.accountId !== accountId);
+      draft.superContributionStrategies = (draft.superContributionStrategies ?? []).filter(
+        (strategy) => strategy.targetAccountId !== accountId,
+      );
+      draft.superRolloverEvents = (draft.superRolloverEvents ?? []).filter(
+        (event) => event.sourceAccountId !== accountId && event.destinationAccountId !== accountId,
+      );
+      draft.pensionWithdrawalEvents = (draft.pensionWithdrawalEvents ?? []).filter((event) => event.accountId !== accountId);
     });
+  }
+
+  function updatePensionWithdrawalEvent(
+    eventId: string,
+    applyUpdate: (event: NonNullable<ProjectionScenario["pensionWithdrawalEvents"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.pensionWithdrawalEvents = draft.pensionWithdrawalEvents ?? [];
+      const withdrawalEvent = draft.pensionWithdrawalEvents.find((entry) => entry.eventId === eventId);
+      if (withdrawalEvent) {
+        applyUpdate(withdrawalEvent);
+      }
+    });
+  }
+
+  function addPensionWithdrawalEvent(accountId?: string) {
+    const eventId = createScenarioInputId("pension-withdrawal");
+
+    updateActiveScenario((draft) => {
+      const account =
+        draft.retirementAccounts.find((entry) => entry.accountId === accountId && entry.accountType === "account-based-pension") ??
+        draft.retirementAccounts.find((entry) => entry.accountType === "account-based-pension");
+      if (!account) {
+        return;
+      }
+
+      const cashAsset =
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === account.ownerPersonId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === jointOwnerId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type));
+
+      draft.pensionWithdrawalEvents = draft.pensionWithdrawalEvents ?? [];
+      draft.pensionWithdrawalEvents.push({
+        eventId,
+        label: "New lump sum withdrawal",
+        accountId: account.accountId,
+        withdrawalDate: null,
+        amountMode: "fixed-amount",
+        fixedAmount: 0,
+        targetAssetId: cashAsset?.assetId ?? null,
+        enabled: true,
+      });
+    });
+    setActivePensionWithdrawalModalId(eventId);
+  }
+
+  function deletePensionWithdrawalEvent(eventId: string) {
+    updateActiveScenario((draft) => {
+      draft.pensionWithdrawalEvents = (draft.pensionWithdrawalEvents ?? []).filter((event) => event.eventId !== eventId);
+    });
+    setActivePensionWithdrawalModalId((currentId) => currentId === eventId ? null : currentId);
+  }
+
+  function updateSuperContributionStrategy(
+    strategyId: string,
+    applyUpdate: (strategy: NonNullable<ProjectionScenario["superContributionStrategies"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.superContributionStrategies = draft.superContributionStrategies ?? [];
+      const strategy = draft.superContributionStrategies.find((entry) => entry.strategyId === strategyId);
+      if (strategy) {
+        applyUpdate(strategy);
+      }
+    });
+  }
+
+  function addSuperContributionStrategy(targetAccountId?: string) {
+    const strategyId = createScenarioInputId("super-strategy");
+
+    updateActiveScenario((draft) => {
+      const targetAccount =
+        draft.retirementAccounts.find((account) => account.accountId === targetAccountId && account.accountType === "super-accumulation") ??
+        draft.retirementAccounts.find((account) => account.accountType === "super-accumulation");
+      if (!targetAccount) {
+        return;
+      }
+
+      draft.superContributionStrategies = draft.superContributionStrategies ?? [];
+      draft.superContributionStrategies.push({
+        strategyId,
+        ownerPersonId: targetAccount.ownerPersonId,
+        targetAccountId: targetAccount.accountId,
+        label: "New contribution strategy",
+        annualAmount: 0,
+        contributionType: "concessional",
+        startDate: null,
+        endDate: null,
+        indexedToCpi: false,
+        enabled: true,
+      });
+    });
+    setActiveSuperStrategyModalId(strategyId);
+  }
+
+  function deleteSuperContributionStrategy(strategyId: string) {
+    updateActiveScenario((draft) => {
+      draft.superContributionStrategies = (draft.superContributionStrategies ?? []).filter(
+        (strategy) => strategy.strategyId !== strategyId,
+      );
+    });
+    setActiveSuperStrategyModalId((currentId) => currentId === strategyId ? null : currentId);
+  }
+
+  function updateSuperRolloverEvent(
+    eventId: string,
+    applyUpdate: (event: NonNullable<ProjectionScenario["superRolloverEvents"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.superRolloverEvents = draft.superRolloverEvents ?? [];
+      const rolloverEvent = draft.superRolloverEvents.find((entry) => entry.eventId === eventId);
+      if (rolloverEvent) {
+        applyUpdate(rolloverEvent);
+      }
+    });
+  }
+
+  function addSuperRolloverEvent(sourceAccountId?: string) {
+    const eventId = createScenarioInputId("super-rollover");
+
+    updateActiveScenario((draft) => {
+      const sourceAccount =
+        draft.retirementAccounts.find((account) => account.accountId === sourceAccountId && account.accountType === "super-accumulation") ??
+        draft.retirementAccounts.find((account) => account.accountType === "super-accumulation");
+      if (!sourceAccount) {
+        return;
+      }
+
+      draft.superRolloverEvents = draft.superRolloverEvents ?? [];
+      draft.superRolloverEvents.push({
+        eventId,
+        label: "New rollover strategy",
+        sourceAccountId: sourceAccount.accountId,
+        destinationAccountId: null,
+        destinationPensionName: `${sourceAccount.productName} pension`,
+        rolloverDate: null,
+        amountMode: "full-balance",
+        fixedAmount: 0,
+        annualDrawdown: 0,
+        drawdownIndexedToCpi: false,
+        enabled: true,
+      });
+    });
+    setActiveSuperRolloverModalId(eventId);
+  }
+
+  function deleteSuperRolloverEvent(eventId: string) {
+    updateActiveScenario((draft) => {
+      draft.superRolloverEvents = (draft.superRolloverEvents ?? []).filter((event) => event.eventId !== eventId);
+    });
+    setActiveSuperRolloverModalId((currentId) => currentId === eventId ? null : currentId);
   }
 
   async function handleRunScenario() {
     if (pendingClientProfileScenario && !scenarioFile) {
       const scenarioId = scenarioVersionId("client-profile");
-      const importedScenario = {
+      const importedScenario = normalizeProjectionScenario({
         ...pendingClientProfileScenario,
         scenarioId,
         scenarioName: scenarios.length ? pendingClientProfileScenario.scenarioName : "Current Situation",
-      };
+      });
 
       setScenarios((currentScenarios) => [...currentScenarios, importedScenario]);
       setActiveScenarioId(scenarioId);
@@ -1587,11 +2663,11 @@ function ProjectionsPageContent() {
       }
 
       const scenarioId = scenarioVersionId("uploaded");
-      const uploadedScenario = {
+      const uploadedScenario = normalizeProjectionScenario({
         ...body.scenario,
         scenarioId,
         scenarioName: scenarios.length ? body.scenario.scenarioName : "Current Situation",
-      };
+      });
       setScenarios((currentScenarios) => [...currentScenarios, uploadedScenario]);
       setActiveScenarioId(scenarioId);
       setMappingResult(body);
@@ -1675,6 +2751,142 @@ function ProjectionsPageContent() {
     setActiveScenarioInputTab("scenario-details");
   }
 
+  function projectionTableWorksheetRows(title: string, rows: ProjectionTableRow[]) {
+    return [
+      [title],
+      [],
+      ["Date", ...projectionRows.map((row) => `1 Jul ${String(row.year).slice(-2)}`)],
+      ...rows.map((row) => (row.isSection ? [row.label] : [row.label, ...row.values])),
+    ];
+  }
+
+  function groupedProjectionTableWorksheetRows(title: string, groups: ProjectionTableGroup[]) {
+    const worksheetRows: WorkbookCell[][] = [[title], []];
+    const header = ["Date", ...projectionRows.map((row) => `1 Jul ${String(row.year).slice(-2)}`)];
+
+    if (!groups.length) {
+      return [...worksheetRows, ["No accounts mapped for this person."]];
+    }
+
+    groups.forEach((group, index) => {
+      if (index > 0) {
+        worksheetRows.push([]);
+      }
+      worksheetRows.push([group.title]);
+      worksheetRows.push([group.subtitle]);
+      worksheetRows.push(header);
+      group.rows.forEach((row) => {
+        worksheetRows.push(row.isSection ? [row.label] : [row.label, ...row.values]);
+      });
+    });
+
+    return worksheetRows;
+  }
+
+  function chartWorksheetRows(series: ProjectionChartSeries[], lineValues: number[], lineLabel: string) {
+    return [
+      ["Date", ...series.map((item) => item.label), lineLabel],
+      ...projectionRows.map((row, index) => [
+        `1 Jul ${String(row.year).slice(-2)}`,
+        ...series.map((item) => item.values[index] ?? 0),
+        lineValues[index] ?? 0,
+      ]),
+    ];
+  }
+
+  function personExportLabel(person: ProjectionScenario["people"][number]) {
+    return `${person.role === "partner" ? "Partner" : "Client"} - ${person.name}`;
+  }
+
+  async function handleExportProjectionWorkbook() {
+    if (!mappedScenario) {
+      return;
+    }
+
+    const exportPeople = activeScenario.people.filter((person) => person.role === "client" || person.role === "partner");
+    const peopleForExport = exportPeople.length ? exportPeople : activeScenario.people;
+    const scenarioFileName = activeScenario.scenarioName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "projection";
+    const sheets: WorkbookSheet[] = [
+      {
+        name: "Summary",
+        rows: [
+          ["Scenario", activeScenario.scenarioName],
+          ["Client", activeClientName],
+          ["Start date", `1 ${monthNames[activeScenario.startMonth - 1] ?? "Jul"} ${projectionStartYear}`],
+          ["Projected to age", endAge],
+          ["Exported", new Date().toLocaleString("en-AU")],
+        ],
+      },
+      {
+        name: "Personal Cashflow",
+        rows: projectionTableWorksheetRows("Personal cash flow", cashflowProjectionRows),
+      },
+      {
+        name: "Cashflow Graph",
+        rows: chartWorksheetRows(cashflowChartSeries, cashflowExpenseValues, "Total expenses including tax"),
+        chart: {
+          title: "Personal cash flow",
+          barSeriesCount: cashflowChartSeries.length,
+          lineColumnIndex: cashflowChartSeries.length + 2,
+        },
+      },
+      {
+        name: "Assets Liabilities",
+        rows: projectionTableWorksheetRows("Assets and liabilities", balanceSheetProjectionRows),
+      },
+      {
+        name: "Assets Graph",
+        rows: chartWorksheetRows(assetLiabilityChartSeries, assetLiabilityLineValues, "Total liabilities"),
+        chart: {
+          title: "Assets and liabilities",
+          barSeriesCount: assetLiabilityChartSeries.length,
+          lineColumnIndex: assetLiabilityChartSeries.length + 2,
+        },
+      },
+      {
+        name: "Assumptions",
+        rows: [
+          ["Layer", "Source", "Use"],
+          ...assumptions.map((assumption) => [assumption.layer, assumption.source, assumption.use]),
+          [],
+          ["Projection checks"],
+          ...projectionChecks.map((check) => [check]),
+        ],
+      },
+    ];
+
+    peopleForExport.forEach((person) => {
+      const personLabel = personExportLabel(person);
+      sheets.push({
+        name: `Tax ${personLabel}`,
+        rows: projectionTableWorksheetRows(`Taxation - ${personLabel}`, taxProjectionRowsByPersonId[person.personId] ?? taxProjectionRows),
+      });
+      sheets.push({
+        name: `Centrelink ${personLabel}`,
+        rows: projectionTableWorksheetRows(
+          `Centrelink - ${personLabel}`,
+          agePensionProjectionRowsByPersonId[person.personId] ?? agePensionProjectionRows,
+        ),
+      });
+      sheets.push({
+        name: `Super ${personLabel}`,
+        rows: groupedProjectionTableWorksheetRows(
+          `Superannuation - ${personLabel}`,
+          superProjectionGroups.filter((group) => group.ownerPersonId === person.personId),
+        ),
+      });
+      sheets.push({
+        name: `Pensions ${personLabel}`,
+        rows: groupedProjectionTableWorksheetRows(
+          `Pensions - ${personLabel}`,
+          pensionProjectionGroups.filter((group) => group.ownerPersonId === person.personId),
+        ),
+      });
+    });
+
+    await downloadWorkbook(`${scenarioFileName}-projection-export.xlsx`, sheets);
+  }
+
   function createFinancialProjectionForScenario(scenario: ProjectionScenario): FinancialProjectionV1 {
     const scenarioViewModel =
       scenario.scenarioId === activeScenario.scenarioId ? viewModel : buildProjectionViewModel(scenario, activeAssumptions);
@@ -1687,6 +2899,13 @@ function ProjectionsPageContent() {
       startingNetWorth: outputStartingNetWorth,
       finalProjectionYear: outputFinalProjectionYear,
       cashflowProjectionRows: outputCashflowProjectionRows,
+      assetLiabilityChartSeries: outputAssetLiabilityChartSeries,
+      assetLiabilityLineValues: outputAssetLiabilityLineValues,
+      assetLiabilityChartMaxValue: outputAssetLiabilityChartMaxValue,
+      assetLiabilityChartAxisStep: outputAssetLiabilityChartAxisStep,
+      superProjectionGroups: outputSuperProjectionGroups,
+      pensionProjectionGroups: outputPensionProjectionGroups,
+      balanceSheetProjectionRows: outputBalanceSheetProjectionRows,
     } = scenarioViewModel;
     const outputPrimaryPerson = outputScenario.people.find((person) => person.personId === outputScenario.primaryPersonId);
     const outputClientName = outputPrimaryPerson?.name ?? outputScenario.scenarioName;
@@ -1695,6 +2914,7 @@ function ProjectionsPageContent() {
       : ("current-position" as const);
     const firstProjectionYear = outputProjectionRows[0];
     const cashflowTableColumnCount = Math.min(5, outputProjectionRows.length);
+    const projectionColumns = outputProjectionRows.map((row) => `1 Jul ${String(row.year).slice(-2)}`);
     const currentValueKey = projectionType === "recommended-position" ? "recommendedValue" : "currentValue";
     const percentForSoa = (value: number | null | undefined) =>
       value === null || value === undefined || Number.isNaN(value) ? "-" : `${Math.round(value * 10000) / 100}%`;
@@ -1707,6 +2927,23 @@ function ProjectionsPageContent() {
       unit,
       notes: null,
     });
+    const tableRowsForSoa = (rows: ProjectionTableRow[]) =>
+      rows.map((row) => ({
+        label: row.label,
+        values: row.values,
+        isSection: row.isSection ?? false,
+        isTotal: row.isTotal ?? false,
+      }));
+    const groupedTablesForSoa = (tablePrefix: string, groups: ProjectionTableGroup[]) =>
+      groups.map((group) => ({
+        tableId: `${tablePrefix.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${group.groupId}`,
+        title: `${tablePrefix} - ${group.title} (${group.ownerName})`,
+        columns: projectionColumns,
+        rows: [
+          { label: group.subtitle, values: [], isSection: true },
+          ...tableRowsForSoa(group.rows),
+        ],
+      }));
 
     return {
       projectionId: `projection-${outputScenario.scenarioId}`,
@@ -1768,6 +3005,28 @@ function ProjectionsPageContent() {
             isTotal: "isTotal" in row ? row.isTotal ?? false : false,
           })),
         },
+        assetLiabilityTable: {
+          tableId: "asset-liability-projections",
+          title: "Asset and liability projections",
+          columns: projectionColumns,
+          rows: tableRowsForSoa(outputBalanceSheetProjectionRows),
+        },
+        assetLiabilityChart: {
+          chartId: "asset-liability-chart",
+          title: "Asset and liability chart",
+          columns: projectionColumns,
+          series: outputAssetLiabilityChartSeries.map((series) => ({
+            label: series.label,
+            values: series.values,
+            color: series.color,
+          })),
+          lineLabel: "Total liabilities",
+          lineValues: outputAssetLiabilityLineValues,
+          axisMax: outputAssetLiabilityChartMaxValue,
+          axisStep: outputAssetLiabilityChartAxisStep,
+        },
+        superTables: groupedTablesForSoa("Superannuation", outputSuperProjectionGroups),
+        pensionTables: groupedTablesForSoa("Pension", outputPensionProjectionGroups),
         assumptionTables: [
           {
             tableId: "core-modelling-assumptions",
@@ -1835,7 +3094,7 @@ function ProjectionsPageContent() {
       return `liability:${target.targetId}`;
     }
 
-    const defaultCashAssetId = activeScenario.assets.find((asset) => asset.type === "cash")?.assetId;
+    const defaultCashAssetId = activeScenario.assets.find((asset) => isCashAssetType(asset.type))?.assetId;
     return defaultCashAssetId ? `cash-asset:${defaultCashAssetId}` : "";
   }
 
@@ -1854,7 +3113,7 @@ function ProjectionsPageContent() {
   }
 
   function renderSurplusAllocationControl() {
-    const cashAssets = activeScenario.assets.filter((asset) => asset.type === "cash");
+    const cashAssets = activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
     const liabilities = activeScenario.liabilities;
     const hasOptions = cashAssets.length > 0 || liabilities.length > 0;
 
@@ -1939,6 +3198,141 @@ function ProjectionsPageContent() {
         </table>
       </div>
     );
+  }
+
+  function renderStackedBarLineChart({
+    series,
+    lineValues,
+    lineLabel,
+    maxValue,
+    axisStep,
+    emptyMessage,
+    barTotalValues,
+    barTotalLabel,
+  }: {
+    series: ProjectionChartSeries[];
+    lineValues: number[];
+    lineLabel: string;
+    maxValue: number;
+    axisStep: number;
+    emptyMessage: string;
+    barTotalValues: number[];
+    barTotalLabel: string;
+  }) {
+    if (!projectionRows.length || !series.length) {
+      return <p className={styles.emptyState}>{emptyMessage}</p>;
+    }
+
+    const linePoints = projectionRows
+      .map((row, index) => {
+        const x = ((index + 0.5) / projectionRows.length) * 100;
+        const y = 100 - Math.min(100, Math.max(0, ((lineValues[index] ?? 0) / maxValue) * 100));
+        return `${x},${y}`;
+      })
+      .join(" ");
+    const axisTicks = Array.from(
+      { length: Math.floor(maxValue / axisStep) + 1 },
+      (_, index) => maxValue - index * axisStep,
+    );
+
+    return (
+      <div className={styles.cashflowChartShell}>
+        <div className={styles.cashflowChartLegend}>
+          {series.map((item) => (
+            <span key={item.label}>
+              <i style={{ backgroundColor: item.color }} />
+              {item.label}
+            </span>
+          ))}
+          <span>
+            <i className={styles.expenseLegendLine} />
+            {lineLabel}
+          </span>
+        </div>
+        <div className={styles.cashflowChartScroller}>
+          <div className={styles.cashflowChart}>
+            <div className={styles.cashflowChartScale}>
+              <div className={styles.cashflowChartScaleInner}>
+                {axisTicks.map((tick) => (
+                  <span key={tick} style={{ bottom: `${(tick / maxValue) * 100}%` }}>
+                    {money(tick)}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className={styles.cashflowChartPlot}>
+              <div className={styles.cashflowChartGrid} aria-hidden="true">
+                {axisTicks.map((tick) => (
+                  <span key={tick} style={{ bottom: `${(tick / maxValue) * 100}%` }} />
+                ))}
+              </div>
+              <svg className={styles.cashflowExpenseLine} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <polyline points={linePoints} />
+              </svg>
+              <div
+                className={styles.cashflowChartColumns}
+                style={{ gridTemplateColumns: `repeat(${projectionRows.length}, minmax(3.6rem, 1fr))` }}
+              >
+                {projectionRows.map((row, yearIndex) => (
+                  <div className={styles.cashflowChartColumn} key={row.year}>
+                    <div
+                      className={styles.cashflowChartBar}
+                      title={`1 Jul ${String(row.year).slice(-2)} ${barTotalLabel} ${money(
+                        barTotalValues[yearIndex] ?? 0,
+                      )}; ${lineLabel} ${money(lineValues[yearIndex] ?? 0)}`}
+                    >
+                      {series.map((item) => {
+                        const value = Math.max(0, item.values[yearIndex] ?? 0);
+                        const height = maxValue ? (value / maxValue) * 100 : 0;
+
+                        return (
+                          <span
+                            key={`${item.label}-${row.year}`}
+                            className={styles.cashflowChartSegment}
+                            style={{
+                              backgroundColor: item.color,
+                              height: `${height}%`,
+                            }}
+                            title={`${item.label}: ${money(value)}`}
+                          />
+                        );
+                      })}
+                    </div>
+                    <span className={styles.cashflowChartYear}>1 Jul {String(row.year).slice(-2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderCashflowChart() {
+    return renderStackedBarLineChart({
+      series: cashflowChartSeries,
+      lineValues: cashflowExpenseValues,
+      lineLabel: "Total expenses including tax",
+      maxValue: cashflowChartMaxValue,
+      axisStep: cashflowChartAxisStep,
+      emptyMessage: "No cashflow income rows have been mapped for this chart yet.",
+      barTotalValues: projectionRows.map((row) => row.totalIncome),
+      barTotalLabel: "income",
+    });
+  }
+
+  function renderAssetLiabilityChart() {
+    return renderStackedBarLineChart({
+      series: assetLiabilityChartSeries,
+      lineValues: assetLiabilityLineValues,
+      lineLabel: "Total liabilities",
+      maxValue: assetLiabilityChartMaxValue,
+      axisStep: assetLiabilityChartAxisStep,
+      emptyMessage: "No asset rows have been mapped for this chart yet.",
+      barTotalValues: projectionRows.map((row) => row.totalAssets),
+      barTotalLabel: "assets",
+    });
   }
 
   function renderGroupedProjectionTable(groups: ProjectionTableGroup[]) {
@@ -2451,7 +3845,10 @@ function ProjectionsPageContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeScenario.assets.map((asset) => (
+                  {activeScenario.assets.map((asset) => {
+                    const assetSaleEvents = (activeScenario.assetSaleEvents ?? []).filter((event) => event.assetId === asset.assetId);
+
+                    return (
                     <tr key={asset.assetId}>
                       <td>
                         <input
@@ -2486,11 +3883,11 @@ function ProjectionsPageContent() {
                             draft.type = event.target.value as ProjectionScenario["assets"][number]["type"];
                           })}
                         >
-                          <option value="primary-residence">Primary residence</option>
-                          <option value="cash">Cash</option>
-                          <option value="funeral-bond">Funeral bond</option>
-                          <option value="personal-asset">Personal asset</option>
-                          <option value="investment">Investment</option>
+                          {projectionAssetTypeOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td>
@@ -2537,17 +3934,39 @@ function ProjectionsPageContent() {
                         >
                           <option value="assessable">Assessable</option>
                           <option value="exempt">Exempt</option>
-                          <option value="financial-asset">Financial asset</option>
-                          <option value="unknown">Unknown</option>
+                          <option value="financial-asset">Deemed</option>
                         </select>
                       </td>
                       <td>
-                        <button type="button" className={styles.dangerButton} onClick={() => deleteAsset(asset.assetId)}>
-                          Delete
-                        </button>
+                        <details className={styles.rowActionMenu}>
+                          <summary aria-label={`Actions for ${asset.name}`}>...</summary>
+                          <div className={styles.rowActionMenuList}>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addAssetSaleEvent(asset.assetId)}
+                            >
+                              Add sale
+                            </button>
+                            {assetSaleEvents.map((saleEvent, index) => (
+                              <button
+                                key={saleEvent.eventId}
+                                type="button"
+                                className={styles.secondaryButton}
+                                onClick={() => setActiveAssetSaleModalId(saleEvent.eventId)}
+                              >
+                                {saleEvent.label.trim() || (assetSaleEvents.length > 1 ? `Edit sale ${index + 1}` : "Edit sale")}
+                              </button>
+                            ))}
+                            <button type="button" className={styles.dangerButton} onClick={() => deleteAsset(asset.assetId)}>
+                              Delete
+                            </button>
+                          </div>
+                        </details>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2576,7 +3995,12 @@ function ProjectionsPageContent() {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeScenario.liabilities.map((liability) => (
+                  {activeScenario.liabilities.map((liability) => {
+                    const liabilityPaymentEvents = (activeScenario.liabilityPaymentEvents ?? []).filter(
+                      (event) => event.liabilityId === liability.liabilityId,
+                    );
+
+                    return (
                     <tr key={liability.liabilityId}>
                       <td>
                         <input
@@ -2642,12 +4066,36 @@ function ProjectionsPageContent() {
                         })}
                       </td>
                       <td>
-                        <button type="button" className={styles.dangerButton} onClick={() => deleteLiability(liability.liabilityId)}>
-                          Delete
-                        </button>
+                        <details className={styles.rowActionMenu}>
+                          <summary aria-label={`Actions for ${liability.name}`}>...</summary>
+                          <div className={styles.rowActionMenuList}>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addLiabilityPaymentEvent(liability.liabilityId)}
+                            >
+                              Add payment
+                            </button>
+                            {liabilityPaymentEvents.map((paymentEvent, index) => (
+                              <button
+                                key={paymentEvent.eventId}
+                                type="button"
+                                className={styles.secondaryButton}
+                                onClick={() => setActiveLiabilityPaymentModalId(paymentEvent.eventId)}
+                              >
+                                {paymentEvent.label.trim() ||
+                                  (liabilityPaymentEvents.length > 1 ? `Edit payment ${index + 1}` : "Edit payment")}
+                              </button>
+                            ))}
+                            <button type="button" className={styles.dangerButton} onClick={() => deleteLiability(liability.liabilityId)}>
+                              Delete
+                            </button>
+                          </div>
+                        </details>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2674,11 +4122,7 @@ function ProjectionsPageContent() {
                 <th>Owner</th>
                 <th>Opening balance</th>
                 <th>Fees</th>
-                {accountType === "super-accumulation" ? <th>Additional contributions</th> : null}
-                {accountType === "super-accumulation" ? <th>Contribution type</th> : null}
-                {accountType === "super-accumulation" ? <th>Rollover date</th> : null}
-                {accountType === "super-accumulation" ? <th>Pension account</th> : null}
-                {accountType === "super-accumulation" ? <th>Pension payment</th> : null}
+                {accountType === "super-accumulation" ? <th>Insurance premiums</th> : null}
                 <th>Investment profile</th>
                 {accountType === "account-based-pension" ? <th>Annual drawdown</th> : null}
                 {accountType === "account-based-pension" ? <th>Indexed</th> : null}
@@ -2686,7 +4130,18 @@ function ProjectionsPageContent() {
               </tr>
             </thead>
             <tbody>
-              {accounts.map((account) => (
+              {accounts.map((account) => {
+                const accountContributionStrategies = (activeScenario.superContributionStrategies ?? []).filter(
+                  (strategy) => strategy.targetAccountId === account.accountId,
+                );
+                const accountRolloverEvents = (activeScenario.superRolloverEvents ?? []).filter(
+                  (rolloverEvent) => rolloverEvent.sourceAccountId === account.accountId && Boolean(rolloverEvent.rolloverDate),
+                );
+                const accountPensionWithdrawalEvents = (activeScenario.pensionWithdrawalEvents ?? []).filter(
+                  (withdrawalEvent) => withdrawalEvent.accountId === account.accountId,
+                );
+
+                return (
                 <tr key={account.accountId}>
                   <td>
                     <input
@@ -2732,72 +4187,11 @@ function ProjectionsPageContent() {
                   {accountType === "super-accumulation" ? (
                     <td>
                       {renderCurrencyInput({
-                        value: account.annualContribution ?? 0,
+                        value: account.annualInsurancePremium ?? 0,
                         onChange: (value) => updateRetirementAccount(account.accountId, (draft) => {
-                          draft.annualContribution = value;
+                          draft.annualInsurancePremium = value;
                         }),
                       })}
-                    </td>
-                  ) : null}
-                  {accountType === "super-accumulation" ? (
-                    <td>
-                      <select
-                        className={styles.compactInput}
-                        value={account.annualContributionType ?? "concessional"}
-                        onChange={(event) => updateRetirementAccount(account.accountId, (draft) => {
-                          draft.annualContributionType = event.target.value as NonNullable<
-                            ProjectionScenario["retirementAccounts"][number]["annualContributionType"]
-                          >;
-                        })}
-                      >
-                        <option value="concessional">Concessional</option>
-                        <option value="non-concessional">Non-concessional</option>
-                      </select>
-                    </td>
-                  ) : null}
-                  {accountType === "super-accumulation" ? (
-                    <td>
-                      <input
-                        type="date"
-                        className={styles.compactInput}
-                        value={account.rolloverToPensionDate ?? ""}
-                        onChange={(event) => updateRetirementAccount(account.accountId, (draft) => {
-                          draft.rolloverToPensionDate = event.target.value || null;
-                        })}
-                      />
-                    </td>
-                  ) : null}
-                  {accountType === "super-accumulation" ? (
-                    <td>
-                      <input
-                        className={styles.compactInput}
-                        value={account.rolloverPensionName ?? `${account.productName} pension`}
-                        onChange={(event) => updateRetirementAccount(account.accountId, (draft) => {
-                          draft.rolloverPensionName = event.target.value;
-                        })}
-                      />
-                    </td>
-                  ) : null}
-                  {accountType === "super-accumulation" ? (
-                    <td>
-                      <div className={styles.inlineFieldStack}>
-                        {renderCurrencyInput({
-                          value: account.rolloverAnnualDrawdown ?? 0,
-                          onChange: (value) => updateRetirementAccount(account.accountId, (draft) => {
-                            draft.rolloverAnnualDrawdown = value;
-                          }),
-                        })}
-                        <label className={styles.inlineCheckbox}>
-                          <input
-                            type="checkbox"
-                            checked={account.rolloverDrawdownIndexedToCpi ?? false}
-                            onChange={(event) => updateRetirementAccount(account.accountId, (draft) => {
-                              draft.rolloverDrawdownIndexedToCpi = event.target.checked;
-                            })}
-                          />
-                          Indexed
-                        </label>
-                      </div>
                     </td>
                   ) : null}
                   <td>
@@ -2837,12 +4231,80 @@ function ProjectionsPageContent() {
                     </td>
                   ) : null}
                   <td>
-                    <button type="button" className={styles.dangerButton} onClick={() => deleteRetirementAccount(account.accountId)}>
-                      Delete
-                    </button>
+                    <details className={styles.rowActionMenu}>
+                      <summary aria-label={`Actions for ${account.productName}`}>...</summary>
+                      <div className={styles.rowActionMenuList}>
+                        {accountType === "super-accumulation" ? (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addSuperContributionStrategy(account.accountId)}
+                            >
+                              Add contribution
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addSuperRolloverEvent(account.accountId)}
+                            >
+                              Add rollover
+                            </button>
+                            {accountContributionStrategies.map((strategy, index) => (
+                              <button
+                                key={strategy.strategyId}
+                                type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => setActiveSuperStrategyModalId(strategy.strategyId)}
+                            >
+                                {strategy.label.trim() || (accountContributionStrategies.length > 1 ? `Edit contribution ${index + 1}` : "Edit contribution")}
+                              </button>
+                            ))}
+                            {accountRolloverEvents.map((rolloverEvent, index) => (
+                              <button
+                                key={rolloverEvent.eventId}
+                                type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => setActiveSuperRolloverModalId(rolloverEvent.eventId)}
+                            >
+                                {rolloverEvent.label?.trim() || (accountRolloverEvents.length > 1 ? `Edit rollover ${index + 1}` : "Edit rollover")}
+                              </button>
+                            ))}
+                          </>
+                        ) : null}
+                        {accountType === "account-based-pension" ? (
+                          <>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addPensionWithdrawalEvent(account.accountId)}
+                            >
+                              Add lump sum
+                            </button>
+                            {accountPensionWithdrawalEvents.map((withdrawalEvent, index) => (
+                              <button
+                                key={withdrawalEvent.eventId}
+                                type="button"
+                                className={styles.secondaryButton}
+                                onClick={() => setActivePensionWithdrawalModalId(withdrawalEvent.eventId)}
+                              >
+                                {withdrawalEvent.label.trim() ||
+                                  (accountPensionWithdrawalEvents.length > 1
+                                    ? `Edit lump sum ${index + 1}`
+                                    : "Edit lump sum")}
+                              </button>
+                            ))}
+                          </>
+                        ) : null}
+                        <button type="button" className={styles.dangerButton} onClick={() => deleteRetirementAccount(account.accountId)}>
+                          Delete
+                        </button>
+                      </div>
+                    </details>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -2898,7 +4360,25 @@ function ProjectionsPageContent() {
     if (activeSection === "personal-cashflow") {
       return (
         <section className={styles.panel}>
-          {renderProjectionTable(cashflowProjectionRows, true)}
+          <div className={styles.tableControls}>
+            <div className={styles.segmentedControl} aria-label="Personal cashflow view">
+              <button
+                className={cashflowViewMode === "table" ? styles.segmentedButtonActive : styles.segmentedButton}
+                type="button"
+                onClick={() => setCashflowViewMode("table")}
+              >
+                Table
+              </button>
+              <button
+                className={cashflowViewMode === "chart" ? styles.segmentedButtonActive : styles.segmentedButton}
+                type="button"
+                onClick={() => setCashflowViewMode("chart")}
+              >
+                Bar chart
+              </button>
+            </div>
+          </div>
+          {cashflowViewMode === "chart" ? renderCashflowChart() : renderProjectionTable(cashflowProjectionRows, true)}
         </section>
       );
     }
@@ -2929,7 +4409,25 @@ function ProjectionsPageContent() {
     if (activeSection === "assets-liabilities") {
       return (
         <section className={styles.panel}>
-          {renderProjectionTable(balanceSheetProjectionRows)}
+          <div className={styles.tableControls}>
+            <div className={styles.segmentedControl} aria-label="Assets and liabilities view">
+              <button
+                className={assetLiabilityViewMode === "table" ? styles.segmentedButtonActive : styles.segmentedButton}
+                type="button"
+                onClick={() => setAssetLiabilityViewMode("table")}
+              >
+                Table
+              </button>
+              <button
+                className={assetLiabilityViewMode === "chart" ? styles.segmentedButtonActive : styles.segmentedButton}
+                type="button"
+                onClick={() => setAssetLiabilityViewMode("chart")}
+              >
+                Bar chart
+              </button>
+            </div>
+          </div>
+          {assetLiabilityViewMode === "chart" ? renderAssetLiabilityChart() : renderProjectionTable(balanceSheetProjectionRows)}
         </section>
       );
     }
@@ -2979,7 +4477,22 @@ function ProjectionsPageContent() {
     if (activeSection === "centrelink") {
       return (
         <section className={styles.panel}>
-          {renderProjectionTable(agePensionProjectionRows)}
+          <div className={styles.tableControls}>
+            <label>
+              View Centrelink for
+              <select
+                value={selectedCentrelinkPersonId ?? activeScenario.primaryPersonId}
+                onChange={(event) => setCentrelinkPersonFilter(event.target.value)}
+              >
+                {activeScenario.people.map((person) => (
+                  <option key={person.personId} value={person.personId}>
+                    {person.role === "partner" ? "Partner" : "Client"}: {person.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {renderProjectionTable(selectedCentrelinkProjectionRows)}
         </section>
       );
     }
@@ -3167,6 +4680,11 @@ function ProjectionsPageContent() {
               <p>Client ID: {linkedClientId}</p>
               <p>SOA ID: {linkedSoaId}</p>
             </div>
+            {mappedScenario ? (
+              <button className={styles.exportButton} type="button" onClick={handleExportProjectionWorkbook}>
+                Export Excel
+              </button>
+            ) : null}
           </section>
         ) : null}
         {!workspaceStateLoaded ? (
@@ -3390,7 +4908,7 @@ function ProjectionsPageContent() {
             <span>Medicare levy: 2.00%</span>
             <span>Medicare threshold: $27,222</span>
             <span>Shade-in threshold: $34,028</span>
-            <span>Age Pension excluded from taxable income in this prototype</span>
+            <span>Age Pension included with LITO/SAPTO offsets</span>
           </div>
           <div className={styles.tableWrap}>
             <table className={`${styles.dataTable} ${styles.projectionTable}`.trim()}>
@@ -3676,6 +5194,572 @@ function ProjectionsPageContent() {
         </div>
         </div>
       </main>
+      {activeAssetSale ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveAssetSaleModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Asset sale"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Assets and liabilities</p>
+                <h3>Asset sale</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activeAssetSale.label}
+                  onChange={(event) => updateAssetSaleEvent(activeAssetSale.eventId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Asset
+                <input
+                  className={styles.compactInput}
+                  value={activeAssetSaleAsset?.name ?? "Selected asset"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Sale date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeAssetSale.saleDate ?? ""}
+                  onChange={(event) => updateAssetSaleEvent(activeAssetSale.eventId, (draft) => {
+                    draft.saleDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                Proceeds to
+                <select
+                  className={styles.compactInput}
+                  value={
+                    activeAssetSale.targetAssetId &&
+                    activeAssetSaleCashAssets.some((asset) => asset.assetId === activeAssetSale.targetAssetId)
+                      ? activeAssetSale.targetAssetId
+                      : ""
+                  }
+                  onChange={(event) => updateAssetSaleEvent(activeAssetSale.eventId, (draft) => {
+                    draft.targetAssetId = event.target.value || null;
+                  })}
+                >
+                  <option value="">Select cash account</option>
+                  {activeAssetSaleCashAssets.map((asset) => (
+                    <option key={asset.assetId} value={asset.assetId}>
+                      {asset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Amount
+                <select
+                  className={styles.compactInput}
+                  value={activeAssetSale.amountMode}
+                  onChange={(event) => updateAssetSaleEvent(activeAssetSale.eventId, (draft) => {
+                    draft.amountMode = event.target.value as ProjectionScenario["assetSaleEvents"][number]["amountMode"];
+                  })}
+                >
+                  <option value="full-value">Full value</option>
+                  <option value="fixed-amount">Fixed amount</option>
+                </select>
+              </label>
+              {activeAssetSale.amountMode === "fixed-amount" ? (
+                <label>
+                  Fixed amount
+                  {renderCurrencyInput({
+                    value: activeAssetSale.fixedAmount ?? 0,
+                    onChange: (value) => updateAssetSaleEvent(activeAssetSale.eventId, (draft) => {
+                      draft.fixedAmount = value;
+                    }),
+                  })}
+                </label>
+              ) : null}
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveAssetSaleModalId(null)}>
+                Save
+              </button>
+              <button type="button" className={styles.dangerButton} onClick={() => deleteAssetSaleEvent(activeAssetSale.eventId)}>
+                Delete sale
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {activeLiabilityPayment ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveLiabilityPaymentModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Liability payment"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Assets and liabilities</p>
+                <h3>Liability payment</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activeLiabilityPayment.label}
+                  onChange={(event) => updateLiabilityPaymentEvent(activeLiabilityPayment.eventId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Liability
+                <input
+                  className={styles.compactInput}
+                  value={activeLiabilityPaymentLiability?.name ?? "Selected liability"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Payment date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeLiabilityPayment.paymentDate ?? ""}
+                  onChange={(event) => updateLiabilityPaymentEvent(activeLiabilityPayment.eventId, (draft) => {
+                    draft.paymentDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                Pay from
+                <select
+                  className={styles.compactInput}
+                  value={
+                    activeLiabilityPayment.sourceAssetId &&
+                    activeLiabilityPaymentCashAssets.some((asset) => asset.assetId === activeLiabilityPayment.sourceAssetId)
+                      ? activeLiabilityPayment.sourceAssetId
+                      : ""
+                  }
+                  onChange={(event) => updateLiabilityPaymentEvent(activeLiabilityPayment.eventId, (draft) => {
+                    draft.sourceAssetId = event.target.value || null;
+                  })}
+                >
+                  <option value="">Select cash account</option>
+                  {activeLiabilityPaymentCashAssets.map((asset) => (
+                    <option key={asset.assetId} value={asset.assetId}>
+                      {asset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Amount
+                <select
+                  className={styles.compactInput}
+                  value={activeLiabilityPayment.amountMode}
+                  onChange={(event) => updateLiabilityPaymentEvent(activeLiabilityPayment.eventId, (draft) => {
+                    draft.amountMode = event.target.value as ProjectionScenario["liabilityPaymentEvents"][number]["amountMode"];
+                  })}
+                >
+                  <option value="full-balance">Full balance</option>
+                  <option value="fixed-amount">Fixed amount</option>
+                </select>
+              </label>
+              {activeLiabilityPayment.amountMode === "fixed-amount" ? (
+                <label>
+                  Fixed amount
+                  {renderCurrencyInput({
+                    value: activeLiabilityPayment.fixedAmount ?? 0,
+                    onChange: (value) => updateLiabilityPaymentEvent(activeLiabilityPayment.eventId, (draft) => {
+                      draft.fixedAmount = value;
+                    }),
+                  })}
+                </label>
+              ) : null}
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveLiabilityPaymentModalId(null)}>
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => deleteLiabilityPaymentEvent(activeLiabilityPayment.eventId)}
+              >
+                Delete payment
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {activePensionWithdrawal ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActivePensionWithdrawalModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Pension lump sum withdrawal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Pensions</p>
+                <h3>Lump sum withdrawal</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activePensionWithdrawal.label}
+                  onChange={(event) => updatePensionWithdrawalEvent(activePensionWithdrawal.eventId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Pension account
+                <input
+                  className={styles.compactInput}
+                  value={activePensionWithdrawalAccount?.productName ?? "Selected pension account"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Withdrawal date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activePensionWithdrawal.withdrawalDate ?? ""}
+                  onChange={(event) => updatePensionWithdrawalEvent(activePensionWithdrawal.eventId, (draft) => {
+                    draft.withdrawalDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                Pay to
+                <select
+                  className={styles.compactInput}
+                  value={
+                    activePensionWithdrawal.targetAssetId &&
+                    activePensionWithdrawalCashAssets.some((asset) => asset.assetId === activePensionWithdrawal.targetAssetId)
+                      ? activePensionWithdrawal.targetAssetId
+                      : ""
+                  }
+                  onChange={(event) => updatePensionWithdrawalEvent(activePensionWithdrawal.eventId, (draft) => {
+                    draft.targetAssetId = event.target.value || null;
+                  })}
+                >
+                  <option value="">Select cash account</option>
+                  {activePensionWithdrawalCashAssets.map((asset) => (
+                    <option key={asset.assetId} value={asset.assetId}>
+                      {asset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Amount
+                <select
+                  className={styles.compactInput}
+                  value={activePensionWithdrawal.amountMode}
+                  onChange={(event) => updatePensionWithdrawalEvent(activePensionWithdrawal.eventId, (draft) => {
+                    draft.amountMode = event.target.value as ProjectionScenario["pensionWithdrawalEvents"][number]["amountMode"];
+                  })}
+                >
+                  <option value="fixed-amount">Fixed amount</option>
+                  <option value="full-balance">Full balance</option>
+                </select>
+              </label>
+              {activePensionWithdrawal.amountMode === "fixed-amount" ? (
+                <label>
+                  Fixed amount
+                  {renderCurrencyInput({
+                    value: activePensionWithdrawal.fixedAmount ?? 0,
+                    onChange: (value) => updatePensionWithdrawalEvent(activePensionWithdrawal.eventId, (draft) => {
+                      draft.fixedAmount = value;
+                    }),
+                  })}
+                </label>
+              ) : null}
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActivePensionWithdrawalModalId(null)}>
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => deletePensionWithdrawalEvent(activePensionWithdrawal.eventId)}
+              >
+                Delete withdrawal
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {activeSuperStrategy ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveSuperStrategyModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Contribution strategy"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Superannuation</p>
+                <h3>Contribution strategy</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activeSuperStrategy.label}
+                  onChange={(event) => updateSuperContributionStrategy(activeSuperStrategy.strategyId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Owner
+                <input
+                  className={styles.compactInput}
+                  value={activeSuperStrategyOwnerName}
+                  readOnly
+                />
+              </label>
+              <label>
+                Target account
+                <input
+                  className={styles.compactInput}
+                  value={activeSuperStrategyTargetAccount?.productName ?? "Selected super account"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Annual amount
+                {renderCurrencyInput({
+                  value: activeSuperStrategy.annualAmount,
+                  onChange: (value) => updateSuperContributionStrategy(activeSuperStrategy.strategyId, (draft) => {
+                    draft.annualAmount = value;
+                  }),
+                })}
+              </label>
+              <label>
+                Type
+                <select
+                  className={styles.compactInput}
+                  value={activeSuperStrategy.contributionType}
+                  onChange={(event) => updateSuperContributionStrategy(activeSuperStrategy.strategyId, (draft) => {
+                    draft.contributionType = event.target.value as ProjectionScenario["superContributionStrategies"][number]["contributionType"];
+                  })}
+                >
+                  <option value="concessional">Concessional</option>
+                  <option value="non-concessional">Non-concessional</option>
+                </select>
+              </label>
+              <label>
+                Start date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeSuperStrategy.startDate ?? ""}
+                  onChange={(event) => updateSuperContributionStrategy(activeSuperStrategy.strategyId, (draft) => {
+                    draft.startDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                End date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeSuperStrategy.endDate ?? ""}
+                  onChange={(event) => updateSuperContributionStrategy(activeSuperStrategy.strategyId, (draft) => {
+                    draft.endDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label className={styles.checkboxField}>
+                <input
+                  type="checkbox"
+                  checked={activeSuperStrategy.indexedToCpi}
+                  onChange={(event) => updateSuperContributionStrategy(activeSuperStrategy.strategyId, (draft) => {
+                    draft.indexedToCpi = event.target.checked;
+                  })}
+                />
+                Indexed
+              </label>
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveSuperStrategyModalId(null)}>
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => deleteSuperContributionStrategy(activeSuperStrategy.strategyId)}
+              >
+                Delete strategy
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {activeSuperRollover ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveSuperRolloverModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Rollover event"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Superannuation</p>
+                <h3>Rollover event</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activeSuperRollover.label ?? ""}
+                  onChange={(event) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Source account
+                <input
+                  className={styles.compactInput}
+                  value={activeSuperRolloverSourceAccount?.productName ?? "Selected super account"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Destination
+                <select
+                  className={styles.compactInput}
+                  value={activeSuperRolloverDestinationAccountId}
+                  onChange={(event) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                    draft.destinationAccountId = event.target.value || null;
+                  })}
+                >
+                  <option value="">New pension account</option>
+                  {activeSuperRolloverDestinationAccounts.map((account) => (
+                    <option key={account.accountId} value={account.accountId}>
+                      {account.productName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {activeSuperRolloverCreatesNewPension ? (
+                <label>
+                  New pension name
+                  <input
+                    className={styles.compactInput}
+                    value={activeSuperRollover.destinationPensionName ?? ""}
+                    onChange={(event) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                      draft.destinationPensionName = event.target.value;
+                    })}
+                  />
+                </label>
+              ) : null}
+              <label>
+                Rollover date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeSuperRollover.rolloverDate ?? ""}
+                  onChange={(event) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                    draft.rolloverDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                Amount
+                <select
+                  className={styles.compactInput}
+                  value={activeSuperRollover.amountMode}
+                  onChange={(event) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                    draft.amountMode = event.target.value as ProjectionScenario["superRolloverEvents"][number]["amountMode"];
+                  })}
+                >
+                  <option value="full-balance">Full balance</option>
+                  <option value="fixed-amount">Fixed amount</option>
+                </select>
+              </label>
+              {activeSuperRollover.amountMode === "fixed-amount" ? (
+                <label>
+                  Fixed amount
+                  {renderCurrencyInput({
+                    value: activeSuperRollover.fixedAmount ?? 0,
+                    onChange: (value) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                      draft.fixedAmount = value;
+                    }),
+                  })}
+                </label>
+              ) : null}
+              {activeSuperRolloverCreatesNewPension ? (
+                <>
+                  <label>
+                    Pension payment
+                    {renderCurrencyInput({
+                      value: activeSuperRollover.annualDrawdown ?? 0,
+                      onChange: (value) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                        draft.annualDrawdown = value;
+                      }),
+                    })}
+                  </label>
+                  <label className={styles.checkboxField}>
+                    <input
+                      type="checkbox"
+                      checked={activeSuperRollover.drawdownIndexedToCpi ?? false}
+                      onChange={(event) => updateSuperRolloverEvent(activeSuperRollover.eventId, (draft) => {
+                        draft.drawdownIndexedToCpi = event.target.checked;
+                      })}
+                    />
+                    Indexed
+                  </label>
+                </>
+              ) : null}
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveSuperRolloverModalId(null)}>
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => deleteSuperRolloverEvent(activeSuperRollover.eventId)}
+              >
+                Delete rollover
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

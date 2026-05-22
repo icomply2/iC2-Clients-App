@@ -4,7 +4,7 @@ import type {
   ProductDraftResponseV1,
   ProductRecommendationDraftV1,
 } from "@/lib/soa-output-contracts";
-import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
+import { normalizeRecommendationLanguage, sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
 
 export type SoaProductDraftRequest = {
   clientName?: string | null;
@@ -246,16 +246,22 @@ function normalizeProductDrafts(value: unknown, clientName?: string | null): Pro
         typeof entry.recommendedProductName === "string" ? entry.recommendedProductName.trim() : null,
       recommendedProvider:
         typeof entry.recommendedProvider === "string" ? entry.recommendedProvider.trim() : null,
-      clientBenefits: normalizeStringArray(entry.clientBenefits),
-      consequences: normalizeStringArray(entry.consequences),
-      suitabilityRationale: typeof entry.suitabilityRationale === "string" ? entry.suitabilityRationale.trim() : null,
+      clientBenefits: normalizeStringArray(entry.clientBenefits).map(sanitizeClientFacingResearchLanguage),
+      consequences: normalizeStringArray(entry.consequences).map(sanitizeClientFacingResearchLanguage),
+      suitabilityRationale:
+        typeof entry.suitabilityRationale === "string"
+          ? sanitizeClientFacingResearchLanguage(entry.suitabilityRationale)
+          : null,
       alternativesConsidered: Array.isArray(entry.alternativesConsidered)
         ? entry.alternativesConsidered
             .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
             .map((item) => ({
               productName: typeof item.productName === "string" ? item.productName.trim() : null,
               provider: typeof item.provider === "string" ? item.provider.trim() : null,
-              reasonDiscounted: typeof item.reasonDiscounted === "string" ? item.reasonDiscounted.trim() : null,
+                reasonDiscounted:
+                  typeof item.reasonDiscounted === "string"
+                    ? sanitizeClientFacingResearchLanguage(item.reasonDiscounted)
+                    : null,
             }))
         : [],
     }))
@@ -324,6 +330,7 @@ async function requestOpenAiProductDrafts(
             "Write as an adviser-assistant reasoning about this specific client and their likely product needs, not as a generic product marketing template.",
             "Write all recommendationText, clientBenefits, suitabilityRationale, consequences, and alternativesConsidered.reasonDiscounted in second person, addressed directly to the client using 'you' and 'your'.",
             "For recommendationText, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'.",
+            "Never mention ProductRex, ProductRex report, uploaded report names, or internal research tooling in client-facing SOA wording. Use 'our product research', 'our research', 'the product comparison', or direct product facts instead.",
             "Do not use 'you should', 'you need to', or 'you must' in recommendationText because that reads as opinion or instruction rather than advice.",
             "Do not write about the client in third person using wording such as 'Guy's superannuation', 'their objectives', 'the client will benefit', 'he', 'she', or 'they'.",
             "For joint clients, use 'you' and 'your' as the collective addressee. Use names only where needed to identify account ownership, policy ownership, or which person will take a specific action, then return to second-person wording.",

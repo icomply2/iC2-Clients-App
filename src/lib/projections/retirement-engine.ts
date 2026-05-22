@@ -57,8 +57,13 @@ export function projectRetirementAccount(input: {
       ? investmentIncome * input.assumptions.legislative.superannuation.investmentEarningsTaxRate
       : 0;
   const balanceBeforeFees = Math.max(balanceBeforeInvestment + investmentIncome + investmentGrowth - investmentTax, 0);
-  const fees = balanceBeforeFees * (input.account.annualFeeRate ?? DEFAULT_ANNUAL_ACCOUNT_FEE_RATE);
-  const closingBalance = Math.max(balanceBeforeFees - fees, 0);
+  const insurancePremium =
+    input.account.accountType === "super-accumulation"
+      ? Math.min(Math.max(input.account.annualInsurancePremium ?? 0, 0), balanceBeforeFees)
+      : 0;
+  const balanceBeforeAccountFees = Math.max(balanceBeforeFees - insurancePremium, 0);
+  const fees = balanceBeforeAccountFees * (input.account.annualFeeRate ?? DEFAULT_ANNUAL_ACCOUNT_FEE_RATE);
+  const closingBalance = Math.max(balanceBeforeAccountFees - fees, 0);
 
   return {
     openingBalance: input.previousBalance,
@@ -72,6 +77,7 @@ export function projectRetirementAccount(input: {
     investmentGrowth,
     investmentTax,
     fees,
+    insurancePremium,
     taxPayable: input.contributionTax + investmentTax,
     closingBalance,
   };

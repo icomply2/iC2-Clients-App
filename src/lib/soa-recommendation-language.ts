@@ -11,8 +11,21 @@ function stripDuplicateClientGreeting(text: string, firstName: string) {
   return text.replace(new RegExp(`^${firstName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*,\\s*`, "i"), "");
 }
 
+export function sanitizeClientFacingResearchLanguage(text: string) {
+  return text
+    .replace(/\baccording to\s+(?:the\s+)?ProductRex(?:\s+report)?\b/gi, "based on our product research")
+    .replace(/\b(?:the\s+)?ProductRex\s+report\s+(shows|indicates|identifies|confirms|compares|notes|states)\b/gi, "our product research $1")
+    .replace(/\bProductRex\s+(shows|indicates|identifies|confirms|compares|notes|states)\b/gi, "our product research $1")
+    .replace(/\bProductRex\s+report\b/gi, "product research")
+    .replace(/\bProductRex\s+platform\s+option\b/gi, "platform option")
+    .replace(/\bProductRex\b/g, "product research")
+    .replace(/\bproduct research product research\b/gi, "product research")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function normalizeRecommendationLanguage(text: string, clientName?: string | null) {
-  const trimmed = text.trim();
+  const trimmed = sanitizeClientFacingResearchLanguage(text).trim();
   if (!trimmed) return trimmed;
 
   let next = trimmed
