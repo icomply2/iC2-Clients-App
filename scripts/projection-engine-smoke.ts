@@ -429,6 +429,300 @@ const pensionWithdrawalScenario: ProjectionScenario = {
 };
 const pensionWithdrawalResult = runProjection(pensionWithdrawalScenario, currentProjectionAssumptions);
 const pensionWithdrawalFirstYear = pensionWithdrawalResult.years[0];
+const cgtScenario: ProjectionScenario = {
+  ...margaretCurrentScenario,
+  scenarioId: "cgt-taxable-sale",
+  scenarioName: "CGT taxable sale",
+  people: [
+    {
+      ...margaretCurrentScenario.people[0],
+      startAge: 60,
+    },
+  ],
+  assets: [
+    {
+      assetId: "cash",
+      ownerPersonId: "margaret",
+      type: "cash",
+      name: "Cash",
+      openingValue: 0,
+      annualIncome: 0,
+      growthRateKey: "none",
+      centrelink: "financial-asset",
+      reserveTarget: 0,
+      costBase: 0,
+      acquisitionDate: null,
+      cgtTreatment: "not-applicable",
+    },
+    {
+      assetId: "portfolio",
+      ownerPersonId: "margaret",
+      type: "investment",
+      name: "Investment portfolio",
+      openingValue: 200000,
+      annualIncome: 0,
+      growthRateKey: "none",
+      centrelink: "financial-asset",
+      reserveTarget: null,
+      costBase: 100000,
+      acquisitionDate: "2020-07-01",
+      cgtTreatment: "taxable",
+    },
+  ],
+  liabilities: [],
+  assetSaleEvents: [
+    {
+      eventId: "sell-portfolio",
+      label: "Sell portfolio",
+      assetId: "portfolio",
+      saleDate: "2026-07-01",
+      amountMode: "full-value",
+      fixedAmount: 0,
+      targetAssetId: "cash",
+      enabled: true,
+    },
+  ],
+  liabilityPaymentEvents: [],
+  retirementAccounts: [],
+  superContributionStrategies: [],
+  superRolloverEvents: [],
+  pensionWithdrawalEvents: [],
+  cashflowItems: [],
+};
+const partialCgtScenario: ProjectionScenario = {
+  ...cgtScenario,
+  scenarioId: "partial-cgt-sale",
+  scenarioName: "Partial CGT sale",
+  assetSaleEvents: [
+    {
+      ...cgtScenario.assetSaleEvents[0],
+      amountMode: "fixed-amount",
+      fixedAmount: 100000,
+    },
+  ],
+};
+const lossCarryForwardScenario: ProjectionScenario = {
+  ...cgtScenario,
+  scenarioId: "loss-carry-forward",
+  scenarioName: "Loss carry forward",
+  assets: [
+    cgtScenario.assets[0],
+    {
+      ...cgtScenario.assets[1],
+      assetId: "loss-asset",
+      name: "Loss asset",
+      openingValue: 100000,
+      costBase: 150000,
+      acquisitionDate: null,
+    },
+    {
+      ...cgtScenario.assets[1],
+      assetId: "gain-asset",
+      name: "Gain asset",
+      openingValue: 200000,
+      costBase: 100000,
+      acquisitionDate: null,
+    },
+  ],
+  assetSaleEvents: [
+    {
+      eventId: "sell-loss-asset",
+      label: "Sell loss asset",
+      assetId: "loss-asset",
+      saleDate: "2026-07-01",
+      amountMode: "full-value",
+      fixedAmount: 0,
+      targetAssetId: "cash",
+      enabled: true,
+    },
+    {
+      eventId: "sell-gain-asset",
+      label: "Sell gain asset",
+      assetId: "gain-asset",
+      saleDate: "2027-07-01",
+      amountMode: "full-value",
+      fixedAmount: 0,
+      targetAssetId: "cash",
+      enabled: true,
+    },
+  ],
+};
+const mainResidenceCgtScenario: ProjectionScenario = {
+  ...cgtScenario,
+  scenarioId: "main-residence-exempt",
+  scenarioName: "Main residence exempt",
+  assets: [
+    cgtScenario.assets[0],
+    {
+      ...cgtScenario.assets[1],
+      assetId: "home",
+      type: "primary-residence",
+      name: "Home",
+      openingValue: 1000000,
+      costBase: 400000,
+      cgtTreatment: "main-residence-exempt",
+      centrelink: "exempt",
+    },
+  ],
+  assetSaleEvents: [
+    {
+      ...cgtScenario.assetSaleEvents[0],
+      eventId: "sell-home",
+      assetId: "home",
+    },
+  ],
+};
+const loanTaxScenario: ProjectionScenario = {
+  ...cgtScenario,
+  scenarioId: "loan-tax",
+  scenarioName: "Loan tax",
+  assets: [cgtScenario.assets[0]],
+  assetSaleEvents: [],
+  liabilities: [
+    {
+      liabilityId: "investment-loan",
+      ownerPersonId: "margaret",
+      type: "mortgage",
+      name: "Investment loan",
+      openingBalance: 100000,
+      annualInterestRate: 0.1,
+      annualRepayment: 20000,
+      repaymentTiming: "end-of-year",
+      repaymentType: "principal-and-interest",
+      interestDeductible: true,
+    },
+    {
+      liabilityId: "interest-only-loan",
+      ownerPersonId: "margaret",
+      type: "mortgage",
+      name: "Interest only loan",
+      openingBalance: 100000,
+      annualInterestRate: 0.1,
+      annualRepayment: 0,
+      repaymentTiming: "end-of-year",
+      repaymentType: "interest-only",
+      interestDeductible: false,
+    },
+  ],
+  cashflowItems: [
+    {
+      itemId: "salary",
+      ownerPersonId: "margaret",
+      category: "other-income",
+      label: "Salary",
+      annualAmount: 100000,
+      indexedToCpi: false,
+      taxable: true,
+    },
+  ],
+};
+const downsizeScenario: ProjectionScenario = {
+  ...cgtScenario,
+  scenarioId: "future-downsize",
+  scenarioName: "Future downsize",
+  assets: [
+    {
+      ...cgtScenario.assets[0],
+      openingValue: 0,
+    },
+    {
+      ...mainResidenceCgtScenario.assets[1],
+      assetId: "old-home",
+      name: "Old home",
+      openingValue: 1000000,
+      costBase: 400000,
+    },
+    {
+      ...mainResidenceCgtScenario.assets[1],
+      assetId: "new-home",
+      name: "New home",
+      openingValue: 0,
+      costBase: 0,
+    },
+  ],
+  assetSaleEvents: [
+    {
+      eventId: "sell-old-home",
+      label: "Sell old home",
+      assetId: "old-home",
+      saleDate: "2031-07-01",
+      amountMode: "full-value",
+      fixedAmount: 0,
+      targetAssetId: "cash",
+      enabled: true,
+    },
+  ],
+  assetPurchaseEvents: [
+    {
+      eventId: "buy-new-home",
+      label: "Buy new home",
+      assetId: "new-home",
+      purchaseDate: "2031-07-01",
+      amount: 700000,
+      sourceAssetId: "cash",
+      enabled: true,
+    },
+  ],
+};
+const newBuyerScenario: ProjectionScenario = {
+  ...downsizeScenario,
+  scenarioId: "future-new-buyer",
+  scenarioName: "Future new buyer",
+  assets: [
+    cgtScenario.assets[0],
+    {
+      ...mainResidenceCgtScenario.assets[1],
+      assetId: "first-home",
+      name: "First home",
+      openingValue: 0,
+      costBase: 0,
+    },
+  ],
+  liabilities: [
+    {
+      liabilityId: "new-home-loan",
+      ownerPersonId: "margaret",
+      type: "mortgage",
+      name: "New home loan",
+      openingBalance: 0,
+      annualInterestRate: 0.06,
+      annualRepayment: 0,
+      repaymentTiming: "end-of-year",
+      repaymentType: "interest-only",
+      interestDeductible: false,
+    },
+  ],
+  assetSaleEvents: [],
+  liabilityDrawdownEvents: [
+    {
+      eventId: "draw-new-loan",
+      label: "Draw new loan",
+      liabilityId: "new-home-loan",
+      drawdownDate: "2031-07-01",
+      amount: 800000,
+      targetAssetId: "cash",
+      enabled: true,
+    },
+  ],
+  assetPurchaseEvents: [
+    {
+      eventId: "buy-first-home",
+      label: "Buy first home",
+      assetId: "first-home",
+      purchaseDate: "2031-07-01",
+      amount: 800000,
+      sourceAssetId: "cash",
+      enabled: true,
+    },
+  ],
+};
+const cgtResult = runProjection(cgtScenario, currentProjectionAssumptions);
+const partialCgtResult = runProjection(partialCgtScenario, currentProjectionAssumptions);
+const lossCarryForwardResult = runProjection(lossCarryForwardScenario, currentProjectionAssumptions);
+const mainResidenceCgtResult = runProjection(mainResidenceCgtScenario, currentProjectionAssumptions);
+const loanTaxResult = runProjection(loanTaxScenario, currentProjectionAssumptions);
+const downsizeResult = runProjection(downsizeScenario, currentProjectionAssumptions);
+const newBuyerResult = runProjection(newBuyerScenario, currentProjectionAssumptions);
 
 assert(result.years.length > 10, "Projection should run through life expectancy.");
 assert(Boolean(finalYear), "Projection should have a final year.");
@@ -535,6 +829,78 @@ assert(
   pensionWithdrawalFirstYear.retirementAccountBalances.pension < 150000,
   "Pension lump sum withdrawals should reduce the pension account before annual projection.",
 );
+assert(
+  Math.round(cgtResult.years[0].assetSaleEventCgtDetails["sell-portfolio"].costBaseUsed) === 100000,
+  "CGT should use the asset cost base on a full sale.",
+);
+assert(
+  Math.round(cgtResult.years[0].taxableCapitalGainsByPersonId.margaret) === 50000,
+  "CGT should apply the 50% discount where the asset was held for at least 12 months.",
+);
+assert(
+  Math.round(partialCgtResult.years[0].assetSaleEventCgtDetails["sell-portfolio"].costBaseUsed) === 50000,
+  "Partial asset sales should allocate cost base proportionally.",
+);
+assert(
+  Math.round(partialCgtResult.years[0].assetCostBases.portfolio) === 50000,
+  "Partial asset sales should reduce the remaining cost base.",
+);
+assert(
+  Math.round(partialCgtResult.years[0].taxableCapitalGainsByPersonId.margaret) === 25000,
+  "Partial asset sales should calculate discounted taxable capital gains on the sold parcel.",
+);
+assert(
+  Math.round(lossCarryForwardResult.years[0].carriedForwardCapitalLossesByPersonId.margaret) === 50000,
+  "Capital losses should carry forward when there are no same-year gains.",
+);
+assert(
+  Math.round(lossCarryForwardResult.years[1].taxableCapitalGainsByPersonId.margaret) === 50000,
+  "Carried-forward capital losses should reduce a later capital gain.",
+);
+assert(
+  mainResidenceCgtResult.years[0].taxableCapitalGainsByPersonId.margaret === 0,
+  "Main residence exempt sales should not create taxable capital gains.",
+);
+assert(
+  Math.round(loanTaxResult.years[0].liabilityInterestValues["investment-loan"]) === 10000,
+  "Loan interest should be calculated separately from principal repayments.",
+);
+assert(
+  Math.round(loanTaxResult.years[0].deductibleInterestByPersonId.margaret) === 10000,
+  "Deductible loan interest should be allocated to the liability owner.",
+);
+assert(
+  Math.round(loanTaxResult.years[0].taxByPersonId.margaret.taxableIncome) === 90000,
+  "Deductible loan interest should reduce taxable income for the year.",
+);
+assert(
+  Math.round(loanTaxResult.years[1].liabilityBalances["investment-loan"]) === 90000,
+  "Principal-and-interest repayments should reduce the projected loan balance.",
+);
+assert(
+  Math.round(loanTaxResult.years[1].liabilityBalances["interest-only-loan"]) === 100000,
+  "Interest-only loans should keep principal unchanged unless a payment event occurs.",
+);
+assert(
+  Math.round(downsizeResult.years[5].assetSaleEventValues["sell-old-home"]) === 1000000 &&
+    Math.round(downsizeResult.years[5].assetPurchaseEventValues["buy-new-home"]) === 700000,
+  "Future downsizing should sell the old home and purchase the replacement home in the selected year.",
+);
+assert(
+  Math.round(downsizeResult.years[5].assetValues.cash) === 300000 &&
+    Math.round(downsizeResult.years[5].assetValues["new-home"]) === 700000,
+  "Future downsizing should leave sale proceeds after the replacement purchase in cash.",
+);
+assert(
+  Math.round(newBuyerResult.years[5].liabilityDrawdownEventValues["draw-new-loan"]) === 800000 &&
+    Math.round(newBuyerResult.years[5].assetPurchaseEventValues["buy-first-home"]) === 800000,
+  "Future new-buyer scenarios should support loan drawdowns funding a home purchase.",
+);
+assert(
+  Math.round(newBuyerResult.years[5].liabilityBalances["new-home-loan"]) === 800000 &&
+    Math.round(newBuyerResult.years[5].assetValues["first-home"]) === 800000,
+  "Future loan drawdown and purchase events should update projected liabilities and assets.",
+);
 
 console.log(
   JSON.stringify(
@@ -549,6 +915,9 @@ console.log(
       assetSaleProceeds: Math.round(assetMovementFirstYear.assetSaleEventValues["downsize-home"]),
       liabilityPayment: Math.round(assetMovementFirstYear.liabilityPaymentEventValues["pay-home-loan"]),
       pensionLumpSumWithdrawal: Math.round(pensionWithdrawalFirstYear.retirementAccountDetails.pension.lumpSumWithdrawal),
+      taxableCapitalGain: Math.round(cgtResult.years[0].taxableCapitalGainsByPersonId.margaret),
+      deductibleInterest: Math.round(loanTaxResult.years[0].deductibleInterestByPersonId.margaret),
+      downsizeCash: Math.round(downsizeResult.years[5].assetValues.cash),
       firstYearTaxPayable: Math.round(firstYear.tax.taxPayable),
       finalYear: finalYear?.year,
       finalCashReserve: Math.round(finalYear?.cashReserve ?? 0),

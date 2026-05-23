@@ -476,6 +476,15 @@
   outline: none;
 }
 
+.tableInputReadOnly {
+  border-color: transparent;
+  background: transparent;
+  color: #102f55;
+  cursor: default;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 .inlineAddButton {
   min-height: 2.25rem;
   padding: 0 0.8rem;

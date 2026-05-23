@@ -1628,6 +1628,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const [commissionDrafts, setCommissionDrafts] = useState<Record<string, string>>({});
   const [activeServiceFeeInput, setActiveServiceFeeInput] = useState<string | null>(null);
   const [serviceFeeDrafts, setServiceFeeDrafts] = useState<Record<string, string>>({});
+  const [isPortfolioAllocationEditing, setIsPortfolioAllocationEditing] = useState(false);
   const [scenarioReady, setScenarioReady] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const [soaRenderStyle, setSoaRenderStyle] = useState<SoaRenderStyle>(DEFAULT_SOA_RENDER_STYLE);
@@ -1676,8 +1677,15 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setUpfrontFeeDrafts({ preparation: "", implementation: "" });
     setActiveCommissionInput(null);
     setCommissionDrafts({});
+    setIsPortfolioAllocationEditing(false);
     setActiveSectionId("soa-introduction");
   }
+
+  useEffect(() => {
+    if (activeSectionId !== "portfolio-allocation") {
+      setIsPortfolioAllocationEditing(false);
+    }
+  }, [activeSectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -6569,6 +6577,15 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 <>
                   {portfolioAccountViews.some((account) => account.holdings.length || account.allocationComparison.length) ? (
                     <div className={styles.workflowDraftStack}>
+                      <div className={styles.sectionNavigationActions}>
+                        <button
+                          type="button"
+                          className={styles.sectionActionButton}
+                          onClick={() => setIsPortfolioAllocationEditing((current) => !current)}
+                        >
+                          {isPortfolioAllocationEditing ? "Save" : "Edit"}
+                        </button>
+                      </div>
                       {portfolioAccountViews.map((account) => (
                         <div key={account.accountId} className={styles.workflowDraftCard}>
                           <div className={styles.workflowDraftHeader}>
@@ -6618,7 +6635,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                             <tr key={holding.holdingId}>
                                               <td>
                                                 <input
-                                                  className={styles.tableInput}
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
                                                   value={holding.fundName}
                                                   onChange={(event) =>
                                                     updatePortfolioHolding(account.accountId, holding.holdingId, { fundName: event.target.value })
@@ -6627,7 +6645,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                               </td>
                                               <td>
                                                 <input
-                                                  className={styles.tableInput}
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
                                                   inputMode="decimal"
                                                   value={formatTableCurrencyInput(currentAmount)}
                                                   onChange={(event) =>
@@ -6639,7 +6658,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                               </td>
                                               <td>
                                                 <input
-                                                  className={styles.tableInput}
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
                                                   inputMode="decimal"
                                                   value={formatTableCurrencyInput(changeAmount)}
                                                   onChange={(event) =>
@@ -6651,7 +6671,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                               </td>
                                               <td>
                                                 <input
-                                                  className={styles.tableInput}
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
                                                   inputMode="decimal"
                                                   value={formatTableCurrencyInput(proposedAmount)}
                                                   onChange={(event) =>
@@ -6706,7 +6727,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                       >
                                         <td>
                                           <input
-                                            className={styles.tableInput}
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
                                             value={row.assetClass}
                                             onChange={(event) =>
                                               updatePortfolioAllocationRow(account.accountId, row.rowId, { assetClass: event.target.value })
@@ -6715,7 +6737,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                         </td>
                                         <td>
                                           <input
-                                            className={styles.tableInput}
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
                                             inputMode="decimal"
                                             value={formatTablePercentInput(row.currentPct)}
                                             onChange={(event) =>
@@ -6727,7 +6750,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                         </td>
                                         <td>
                                           <input
-                                            className={styles.tableInput}
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
                                             inputMode="decimal"
                                             value={formatTablePercentInput(row.riskProfilePct)}
                                             onChange={(event) =>
@@ -6739,7 +6763,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                         </td>
                                         <td>
                                           <input
-                                            className={styles.tableInput}
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
                                             inputMode="decimal"
                                             value={formatTablePercentInput(row.recommendedPct)}
                                             onChange={(event) =>
@@ -6751,7 +6776,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                         </td>
                                         <td>
                                           <input
-                                            className={styles.tableInput}
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
                                             inputMode="decimal"
                                             value={formatTablePercentInput(row.variancePct)}
                                             onChange={(event) =>

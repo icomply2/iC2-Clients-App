@@ -17,7 +17,18 @@ import {
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
 import { cacheFileNoteAttachments } from "@/lib/file-note-attachment-cache";
-import { DEFAULT_SERVICE_AGREEMENT_SERVICES, groupServiceAgreementServices } from "@/lib/documents/document-sections";
+import {
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS,
+  ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  DEFAULT_SERVICE_AGREEMENT_SERVICES,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS,
+  ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  groupServiceAgreementServices,
+} from "@/lib/documents/document-sections";
 import { getFactFindImportCounts, type FactFindImportCandidate } from "@/lib/fact-find-import";
 import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "./finley-avatar.png";
@@ -401,6 +412,18 @@ function AgreementRender({
   const fees = agreement.fees.length ? agreement.fees : defaultAgreementFeeRows();
   const totalAnnualFee = formatCurrencyAmount(totalAgreementAnnualFee(fees));
   const title = isAnnual ? "Annual Advice Agreement" : "Ongoing Service Agreement";
+  const openingParagraphs = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS
+    : ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS;
+  const detailSections = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+    : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const acknowledgementParagraphs = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+    : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
+  const acknowledgementItems = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
+    : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS;
 
   return (
     <div className={styles.engagementRender}>
@@ -435,60 +458,49 @@ function AgreementRender({
           )}
         </div>
 
-        <p>Dear {clientSalutationName},</p>
-
         <h1>{title}</h1>
-        {isAnnual ? (
-          <>
-            <p>
-              As your Financial Adviser, it is our role to provide you with the advice you need to achieve your
-              financial goals. The purpose of this letter is to establish an Annual Advice Agreement.
-            </p>
-            <p>
-              The services you receive as part of your Annual Advice Agreement are important as they offer support to
-              help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled
-              to and the cost, are set out below.
-            </p>
-            <p>
-              This arrangement will be between {agreement.clientName} and{" "}
-              {agreement.practiceName?.trim() || "<<practice.name>>"}. The arrangement will commence on the date you
-              sign this agreement.
-            </p>
-          </>
-        ) : (
-          <>
-            <p>
-              As your Financial Adviser, it is our role to provide you with the advice you need to achieve your
-              financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.
-            </p>
-            <p>
-              We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent
-              being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.
-            </p>
-            <p>
-              The commencement date of this arrangement is the date you sign this agreement. Upon signing this
-              agreement, any existing service agreement between us is deemed to be automatically terminated and replaced
-              by this agreement.
-            </p>
-          </>
-        )}
-
-        <h2>{isAnnual ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive"}</h2>
-        {serviceGroups.map((group, index) => (
-          <div key={`${group.heading ?? "services"}-${index}`} className={styles.engagementRichText}>
-            {group.heading ? <h3>{group.heading}</h3> : null}
-            {group.items.length ? (
-              <ul>
-                {group.items.map((item, itemIndex) => (
-                  <li key={`${itemIndex}-${item}`}>{item}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
+        <p>Dear {clientSalutationName},</p>
+        {openingParagraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
         ))}
 
-        <h2>Fees Payable</h2>
-        <p>The fees payable for this agreement are set out below. All fees include GST where applicable.</p>
+        {detailSections.map((section) => (
+          <div key={section.heading} className={styles.engagementRichText}>
+            <h2>{section.heading}</h2>
+            {section.paragraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </div>
+        ))}
+        <h2>Your Acknowledgement</h2>
+        {acknowledgementParagraphs.map((paragraph) => (
+          <p key={paragraph}>{paragraph}</p>
+        ))}
+        <ul>
+          {acknowledgementItems.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+
+        <h2>Consent To Deduct Fees From Your Account</h2>
+        <p>
+          {isAnnual
+            ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+            : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement."}
+        </p>
+        {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
+        <p>
+          {isAnnual
+            ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+            : "This consent may be withdrawn by you at any time by notifying us in writing."}
+        </p>
+
+        <h2>{isAnnual ? "What fees are payable under my fixed term fee arrangement?" : "What fees are payable under my ongoing fee arrangement?"}</h2>
+        <p>
+          {isAnnual
+            ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+            : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:"}
+        </p>
         <table className={styles.engagementFeeTable}>
           <thead>
             <tr>
@@ -501,7 +513,7 @@ function AgreementRender({
           </thead>
           <tbody>
             {fees.map((fee) => (
-              <tr key={fee.id}>
+              <tr key={`consent-${fee.id}`}>
                 <td>{fee.entity}</td>
                 <td>{fee.product}</td>
                 <td>{fee.feeAmount}</td>
@@ -516,19 +528,30 @@ function AgreementRender({
           </tbody>
         </table>
 
-        <h2>Consent To Deduct Fees From Your Account</h2>
-        <p>
-          By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for
-          the services described in this agreement.
-        </p>
-        {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
-        <p>This consent may be withdrawn by you at any time by notifying us in writing.</p>
-
-        <h2>{isAnnual ? "Next Steps" : "Your Acknowledgement"}</h2>
+        <h2>The services you are entitled to receive</h2>
         <p>
           {isAnnual
-            ? "Please sign the acknowledgement below and accept the Annual Advice Agreement outlined in this letter."
-            : "You agree to be bound by the terms and conditions of this agreement. You may terminate or vary the agreement at any time by notifying us in writing."}
+            ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+            : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below."}
+        </p>
+        {serviceGroups.map((group, index) => (
+          <div key={`consent-${group.heading ?? "services"}-${index}`} className={styles.engagementRichText}>
+            {group.heading ? <h3>{group.heading}</h3> : null}
+            {group.items.length ? (
+              <ul>
+                {group.items.map((item, itemIndex) => (
+                  <li key={`consent-${itemIndex}-${item}`}>{item}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ))}
+
+        <h2>Your consent to deduct fees from your account</h2>
+        <p>
+          {isAnnual
+            ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+            : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form."}
         </p>
 
         <div className={styles.engagementSignoff}>

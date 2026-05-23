@@ -1,6 +1,10 @@
 import JSZip from "jszip";
 import type { ClientProfile, PersonRecord } from "@/lib/api/types";
 import {
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS,
   buildServiceAgreementSectionModel,
   getServiceFeeAnnualAmount,
   getServiceFeeFrequencyLabel,
@@ -566,8 +570,8 @@ function run(text: string, options: ParagraphOptions, fontFamily: string, defaul
 
 function paragraph(text: string, options: ParagraphOptions, fontFamily: string, defaultColor: string) {
   const alignment = options.align ? `<w:jc w:val="${options.align}"/>` : "";
-  const before = 0;
-  const after = 0;
+  const before = options.spacingBefore ?? 0;
+  const after = options.spacingAfter ?? 0;
   const spacing = `<w:spacing w:before="${before}" w:after="${after}" w:line="${PARAGRAPH_SPACING.line}" w:lineRule="auto"/>`;
 
   return `<w:p><w:pPr>${alignment}${spacing}</w:pPr>${run(text, options, fontFamily, defaultColor)}</w:p>`;
@@ -649,19 +653,19 @@ function imageParagraph(relationshipId: string, name: string, widthEmu: number, 
 
 function heading(text: string, level: 1 | 2 | 3, fontFamily: string) {
   const size = level === 1 ? 18 : 14;
-  const xml = paragraph(
+  return paragraph(
     text,
     {
       bold: true,
       color: activeHeadingColor,
       fontSize: size,
       heading: true,
-      spacingBefore: level === 1 ? 0 : PARAGRAPH_SPACING.headingBefore,
+      spacingBefore: level === 1 ? 0 : 160,
+      spacingAfter: 40,
     },
     fontFamily,
     DEFAULT_TEXT_COLOR,
   );
-  return `${emptyParagraph()}${xml}`;
 }
 
 function sectionTitle(text: string, fontFamily: string) {
@@ -1240,6 +1244,7 @@ function buildLetter(input: SoaDocxExportInput, fontFamily: string, textColor: s
 
   return [
     normal(formatDate(input.savedAt), fontFamily, textColor, { gapAfter: false }),
+    emptyParagraph(),
     normal(clientNames, fontFamily, textColor, { gapAfter: false }),
     ...addressLines.map((line) => normal(line, fontFamily, textColor, { gapAfter: false })),
     emptyParagraph(),
@@ -1368,6 +1373,10 @@ function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: st
 
   return [
     sectionTitle("About This Advice", fontFamily),
+    heading("Client Objectives", 2, fontFamily),
+    ...(adviceCase.objectives.length
+      ? adviceCase.objectives.map((objective) => bullet(objective.text, fontFamily, textColor))
+      : [normal("No client objectives have been recorded.", fontFamily, textColor)]),
     heading("Scope of Advice", 2, fontFamily),
     emptyParagraph(),
     paragraph("Included scope", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingAfter: 20 }, fontFamily, textColor),
@@ -1379,10 +1388,6 @@ function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: st
     ...(limitationsAndExclusions.length
       ? limitationsAndExclusions.map((item) => bullet(item, fontFamily, textColor))
       : [normal("No limitations or exclusions have been recorded.", fontFamily, textColor)]),
-    heading("Client Objectives", 2, fontFamily),
-    ...(adviceCase.objectives.length
-      ? adviceCase.objectives.map((objective) => bullet(objective.text, fontFamily, textColor))
-      : [normal("No client objectives have been recorded.", fontFamily, textColor)]),
     heading("Warnings and Limitations", 2, fontFamily),
     ...ABOUT_ADVICE_WARNINGS.flatMap((warning) => [
       emptyParagraph(),
@@ -1432,19 +1437,39 @@ function buildPersonalFinancialPosition(input: SoaDocxExportInput, fontFamily: s
   const totalExpenses = expenseRows.reduce((sum, entry) => sum + entry.amount, 0);
   const totalAssets = assetRows.reduce((sum, entry) => sum + parseNumericValue(entry.currentValue), 0);
   const totalLiabilities = liabilityRows.reduce((sum, entry) => sum + parseNumericValue(entry.outstandingBalance), 0);
+  const personalPositionRow = (label: string, clientValue: string, partnerValue: string) =>
+    hasPartner
+      ? [
+          { text: label, widthPct: 34 },
+          { text: clientValue, widthPct: 33 },
+          { text: partnerValue, widthPct: 33 },
+        ]
+      : [
+          { text: label, widthPct: 40 },
+          { text: clientValue, widthPct: 60 },
+        ];
 
   const currentSituationRows = [
-    [headerCell("Description", tableHeaderColor, DEFAULT_TEXT_COLOR, 34), headerCell(clientSnapshot.name, tableHeaderColor, DEFAULT_TEXT_COLOR, 33), headerCell(hasPartner ? partnerSnapshot.name : "", tableHeaderColor, DEFAULT_TEXT_COLOR, 33)],
-    [{ text: "Age", widthPct: 34 }, { text: clientSnapshot.age !== null ? String(clientSnapshot.age) : "-", widthPct: 33 }, { text: hasPartner && partnerSnapshot.age !== null ? String(partnerSnapshot.age) : "-", widthPct: 33 }],
-    [{ text: "Date of birth", widthPct: 34 }, { text: clientSnapshot.dob, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.dob : "-", widthPct: 33 }],
-    [{ text: "Marital status", widthPct: 34 }, { text: clientSnapshot.maritalStatus, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.maritalStatus : "-", widthPct: 33 }],
-    [{ text: "Resident status", widthPct: 34 }, { text: clientSnapshot.residentStatus, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.residentStatus : "-", widthPct: 33 }],
-    [{ text: "Preferred contact", widthPct: 34 }, { text: clientSnapshot.preferredContact, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.preferredContact : "-", widthPct: 33 }],
-    [{ text: "Preferred address", widthPct: 34 }, { text: combinedAddress, widthPct: 33 }, { text: hasPartner ? combinedAddress : "-", widthPct: 33 }],
-    [{ text: "Employment status", widthPct: 34 }, { text: clientSnapshot.employmentStatus, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.employmentStatus : "-", widthPct: 33 }],
-    [{ text: "Job title", widthPct: 34 }, { text: clientSnapshot.jobTitle, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.jobTitle : "-", widthPct: 33 }],
-    [{ text: "Current state of health", widthPct: 34 }, { text: clientSnapshot.healthStatus, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.healthStatus : "-", widthPct: 33 }],
-    [{ text: "Private health insurance", widthPct: 34 }, { text: clientSnapshot.healthInsurance, widthPct: 33 }, { text: hasPartner ? partnerSnapshot.healthInsurance : "-", widthPct: 33 }],
+    hasPartner
+      ? [
+          headerCell("Description", tableHeaderColor, DEFAULT_TEXT_COLOR, 34),
+          headerCell(clientSnapshot.name, tableHeaderColor, DEFAULT_TEXT_COLOR, 33),
+          headerCell(partnerSnapshot.name, tableHeaderColor, DEFAULT_TEXT_COLOR, 33),
+        ]
+      : [
+          headerCell("Description", tableHeaderColor, DEFAULT_TEXT_COLOR, 40),
+          headerCell(clientSnapshot.name, tableHeaderColor, DEFAULT_TEXT_COLOR, 60),
+        ],
+    personalPositionRow("Age", clientSnapshot.age !== null ? String(clientSnapshot.age) : "-", partnerSnapshot.age !== null ? String(partnerSnapshot.age) : "-"),
+    personalPositionRow("Date of birth", clientSnapshot.dob, partnerSnapshot.dob),
+    personalPositionRow("Marital status", clientSnapshot.maritalStatus, partnerSnapshot.maritalStatus),
+    personalPositionRow("Resident status", clientSnapshot.residentStatus, partnerSnapshot.residentStatus),
+    personalPositionRow("Preferred contact", clientSnapshot.preferredContact, partnerSnapshot.preferredContact),
+    personalPositionRow("Preferred address", combinedAddress, combinedAddress),
+    personalPositionRow("Employment status", clientSnapshot.employmentStatus, partnerSnapshot.employmentStatus),
+    personalPositionRow("Job title", clientSnapshot.jobTitle, partnerSnapshot.jobTitle),
+    personalPositionRow("Current state of health", clientSnapshot.healthStatus, partnerSnapshot.healthStatus),
+    personalPositionRow("Private health insurance", clientSnapshot.healthInsurance, partnerSnapshot.healthInsurance),
   ];
 
   return [
@@ -2682,6 +2707,9 @@ function buildAuthorityToProceed(input: SoaDocxExportInput, fontFamily: string, 
 function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const adviceCase = input.adviceCase;
   const clientNames = getClientNames(adviceCase, input.clientName);
+  const addressee = getAddressee(adviceCase, input.clientName);
+  const addressPerson = input.clientProfile?.client ?? input.clientProfile?.partner ?? null;
+  const addressLines = buildAddress(addressPerson);
   const practiceName = input.clientProfile?.adviser?.practice?.name?.trim() || input.clientProfile?.practice?.trim() || input.practiceName || adviceCase.practice.name || "<<practice>>";
   const adviserName = input.clientProfile?.adviser?.name?.trim() || input.adviserName || adviceCase.metadata.createdBy?.name || "<<adviser>>";
   const adviserEmail = input.clientProfile?.adviser?.email?.trim() || "<<adviser.email>>";
@@ -2706,7 +2734,6 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
   const isFixedTermAgreement = serviceAgreement.isFixedTermAgreement;
   const agreementTitle = serviceAgreement.agreementTitle;
   const arrangementLabel = serviceAgreement.arrangementLabel;
-  const serviceAgreementFeeItems = serviceAgreement.feeItems;
   const totalServiceAgreementFees = serviceAgreement.totalAnnualFees;
   const serviceGroups = serviceAgreement.serviceGroups;
   const referenceDate = serviceAgreement.referenceDate;
@@ -2723,70 +2750,35 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
         { text: formatCurrency(feeRow.annualAmount), widthPct: 18 },
       ])
     : [[{ text: "No advice fee rows have been drafted.", widthPct: 100 }]];
+  const agreementOpeningXml = serviceAgreement.openingParagraphs
+    .map((item) => normal(item, fontFamily, textColor))
+    .join("");
+  const agreementDetailSections = isFixedTermAgreement
+    ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+    : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const acknowledgementParagraphs = isFixedTermAgreement
+    ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+    : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
+  const agreementDetailXml = [
+    ...agreementDetailSections.flatMap((section) => [
+      heading(section.heading, 2, fontFamily),
+      ...section.paragraphs.map((item) => normal(item, fontFamily, textColor)),
+    ]),
+    heading("Your Acknowledgement", 2, fontFamily),
+    ...acknowledgementParagraphs.map((item) => normal(item, fontFamily, textColor)),
+    ...serviceAgreement.acknowledgementItems.map((item) => bullet(item, fontFamily, textColor)),
+  ].join("");
 
   return [
-    sectionTitle(agreementTitle, fontFamily),
     normal(formatDate(input.savedAt), fontFamily, textColor, { gapAfter: false }),
+    emptyParagraph(),
     normal(clientNames, fontFamily, textColor, { gapAfter: false }),
-    normal(
-      isFixedTermAgreement
-        ? "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. The purpose of this letter is to establish an Annual Advice Agreement."
-        : "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.",
-      fontFamily,
-      textColor,
-    ),
-    normal(
-      isFixedTermAgreement
-        ? "The services you receive as part of your Annual Advice Agreement are important as they offer support to help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled to and the cost, are set out below."
-        : "We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.",
-      fontFamily,
-      textColor,
-    ),
-    heading(isFixedTermAgreement ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive", 2, fontFamily),
-    serviceGroups
-      .map((group) =>
-        [
-          group.heading ? paragraph(group.heading, { bold: true }, fontFamily, textColor) : "",
-          ...group.items.map((item) => bullet(item, fontFamily, textColor)),
-        ].join(""),
-      )
-      .join(""),
-    heading("Fees Payable", 2, fontFamily),
-    normal("The fees payable for this agreement are set out in the Fees and Disclosures section of this Statement of Advice. All fees include GST where applicable.", fontFamily, textColor),
-    table(
-      [
-        [
-          headerCell("Entity", tableHeaderColor, DEFAULT_TEXT_COLOR, 18),
-          headerCell("Product", tableHeaderColor, DEFAULT_TEXT_COLOR, 22),
-          headerCell("Account Number", tableHeaderColor, DEFAULT_TEXT_COLOR, 18),
-          headerCell("Fee Amount", tableHeaderColor, DEFAULT_TEXT_COLOR, 14),
-          headerCell("Frequency", tableHeaderColor, DEFAULT_TEXT_COLOR, 14),
-          headerCell("Total Annual Fee", tableHeaderColor, DEFAULT_TEXT_COLOR, 14),
-        ],
-        ...(serviceAgreementFeeItems.length
-          ? [
-              ...serviceAgreementFeeItems.map((feeItem) => [
-                { text: getOwnerName(adviceCase, feeItem.ownerPersonId), widthPct: 18 },
-                { text: feeItem.productName || "-", widthPct: 22 },
-                { text: feeItem.accountNumber || "-", widthPct: 18 },
-                { text: formatCurrency(feeItem.feeAmount), widthPct: 14 },
-                { text: getServiceFeeFrequencyLabel(feeItem.frequency), widthPct: 14 },
-                { text: formatCurrency(getServiceFeeAnnualAmount(feeItem)), widthPct: 14 },
-              ]),
-              [
-                totalCell("Total Annual Advice Fees", tableHeaderColor, DEFAULT_TEXT_COLOR, 18),
-                totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 22),
-                totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 18),
-                totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 14),
-                totalCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 14),
-                totalCell(formatCurrency(totalServiceAgreementFees), tableHeaderColor, DEFAULT_TEXT_COLOR, 14),
-              ],
-            ]
-          : [[{ text: "No annual advice fee rows have been drafted.", widthPct: 100 }]]),
-      ],
-      fontFamily,
-      textColor,
-    ),
+    ...addressLines.map((line) => normal(line, fontFamily, textColor, { gapAfter: false })),
+    emptyParagraph(),
+    sectionTitle(agreementTitle, fontFamily),
+    normal(`Dear ${addressee},`, fontFamily, textColor),
+    agreementOpeningXml,
+    agreementDetailXml,
     table(
       [
         signatureNames.map(() => ({ text: "Signed:", widthPct: signatureWidth })),
@@ -2800,11 +2792,29 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
     ),
     pageBreak(),
     sectionTitle("Consent To Deduct Fees From Your Account", fontFamily),
-    normal("We are required to obtain your written consent to deduct the fees payable for our services for the upcoming 12 months. Without your consent, this agreement cannot be entered into.", fontFamily, textColor),
-    normal("Accordingly, no ongoing services or advice will be delivered if you do not return this signed and dated form consenting to payment of our advice fees.", fontFamily, textColor),
+    normal(
+      isFixedTermAgreement
+        ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+        : "We are required to obtain your written consent to deduct the fees payable for our ongoing services for the upcoming 12 months. Without your consent, our ongoing service agreement cannot be entered into.",
+      fontFamily,
+      textColor,
+    ),
+    normal(
+      isFixedTermAgreement
+        ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+        : "Accordingly, no ongoing services or advice will be delivered if you do not return this signed and dated form consenting to payment of our ongoing advice fees.",
+      fontFamily,
+      textColor,
+    ),
     normal(`You can terminate this ${arrangementLabel} at any time by providing us with written notice. If you terminate the arrangement in writing, no further fees will be charged to you, and no further services will be provided by us.`, fontFamily, textColor),
     heading(`What fees are payable under my ${arrangementLabel}?`, 2, fontFamily),
-    normal("The following fees will be payable to cover the services you are entitled to receive under the arrangement:", fontFamily, textColor),
+    normal(
+      isFixedTermAgreement
+        ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+        : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:",
+      fontFamily,
+      textColor,
+    ),
     table(
       [
         [
@@ -2827,7 +2837,13 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
       textColor,
     ),
     heading("The services you are entitled to receive", 2, fontFamily),
-    normal("The terms of this service arrangement, including the services you are entitled to and the cost, are set out below.", fontFamily, textColor),
+    normal(
+      isFixedTermAgreement
+        ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+        : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below.",
+      fontFamily,
+      textColor,
+    ),
     serviceGroups
       .map((group) =>
         [
@@ -2849,7 +2865,13 @@ function buildServiceAgreement(input: SoaDocxExportInput, fontFamily: string, te
     normal(`Your consent will expire on ${formatDate(expiryDate)}.`, fontFamily, textColor),
     normal(`We will contact you prior to this with instructions about how you can renew your fee arrangement. If you choose not to provide your consent to renew the arrangement, no further fees will be charged, or services provided, after ${formatDate(expiryDate)}.`, fontFamily, textColor),
     heading("Your consent to deduct fees from your account", 2, fontFamily),
-    normal("I/we consent to the payment of advice fees in accordance with the terms of this fee consent form.", fontFamily, textColor),
+    normal(
+      isFixedTermAgreement
+        ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+        : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form.",
+      fontFamily,
+      textColor,
+    ),
     table(
       [
         signatureNames.map(() => ({ text: "Signed:", widthPct: signatureWidth })),
