@@ -19,6 +19,10 @@ import type {
 } from "@/lib/soa-types";
 import type { IntakeAssessmentV1 } from "@/lib/soa-output-contracts";
 import {
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS,
   SERVICE_FEE_FREQUENCY_OPTIONS,
   addDays,
   buildServiceAgreementSectionModel,
@@ -911,7 +915,15 @@ export function SoaPrintPreview() {
   const isFixedTermAgreement = serviceAgreementSection?.isFixedTermAgreement ?? false;
   const serviceAgreementTitle = serviceAgreementSection?.agreementTitle ?? "Ongoing Service Agreement";
   const serviceAgreementContentsLabel = serviceAgreementSection?.contentsLabel ?? "Ongoing Service Agreement";
+  const serviceAgreementOpeningParagraphs = serviceAgreementSection?.openingParagraphs ?? [];
+  const serviceAgreementAcknowledgementItems = serviceAgreementSection?.acknowledgementItems ?? [];
   const serviceAgreementServiceGroups = serviceAgreementSection?.serviceGroups ?? [];
+  const serviceAgreementDetailSections = isFixedTermAgreement
+    ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+    : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const serviceAgreementAcknowledgementParagraphs = isFixedTermAgreement
+    ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+    : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
   const betterPositionRows = [
     ...adviceCase.recommendations.strategic.map((recommendation) => ({
       id: recommendation.recommendationId,
@@ -1617,6 +1629,13 @@ export function SoaPrintPreview() {
 
         <section className={styles.page} style={{ order: previewSectionOrder.aboutThisAdvice }}>
           <h2 className={styles.sectionHeading}>About This Advice</h2>
+          <div id="soa-preview-section-objectives" className={styles.card}>
+            <h3>Client Objectives</h3>
+            {renderBulletList(
+              adviceCase.objectives.map((objective) => objective.text),
+              "No objectives drafted yet.",
+            )}
+          </div>
           <div id="soa-preview-section-scope-of-advice" className={styles.card}>
             <h3>Scope of Advice</h3>
             <h4 className={styles.subheading}>Included scope</h4>
@@ -1628,13 +1647,6 @@ export function SoaPrintPreview() {
             {renderBulletList(
               [...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations],
               "No exclusions drafted yet.",
-            )}
-          </div>
-          <div id="soa-preview-section-objectives" className={styles.card}>
-            <h3>Client Objectives</h3>
-            {renderBulletList(
-              adviceCase.objectives.map((objective) => objective.text),
-              "No objectives drafted yet.",
             )}
           </div>
           <div className={styles.card}>
@@ -1666,34 +1678,34 @@ export function SoaPrintPreview() {
                 <tr>
                   <th>Description</th>
                   <th>{clientSnapshot.name}</th>
-                  <th>{hasPartner ? partnerSnapshot.name : ""}</th>
+                  {hasPartner ? <th>{partnerSnapshot.name}</th> : null}
                 </tr>
               </thead>
               <tbody>
                 <tr>
                   <td>Age</td>
                   <td>{clientSnapshot.age ?? "—"}</td>
-                  <td>{hasPartner ? partnerSnapshot.age ?? "—" : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.age ?? "—"}</td> : null}
                 </tr>
                 <tr>
                   <td>Date of birth</td>
                   <td>{clientSnapshot.dob}</td>
-                  <td>{hasPartner ? partnerSnapshot.dob : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.dob}</td> : null}
                 </tr>
                 <tr>
                   <td>Marital status</td>
                   <td>{clientSnapshot.maritalStatus}</td>
-                  <td>{hasPartner ? partnerSnapshot.maritalStatus : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.maritalStatus}</td> : null}
                 </tr>
                 <tr>
                   <td>Resident status</td>
                   <td>{clientSnapshot.residentStatus}</td>
-                  <td>{hasPartner ? partnerSnapshot.residentStatus : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.residentStatus}</td> : null}
                 </tr>
                 <tr>
                   <td>Preferred contact</td>
                   <td>{clientSnapshot.preferredContact}</td>
-                  <td>{hasPartner ? partnerSnapshot.preferredContact : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.preferredContact}</td> : null}
                 </tr>
                 <tr>
                   <td>Preferred address</td>
@@ -1702,22 +1714,22 @@ export function SoaPrintPreview() {
                 <tr>
                   <td>Employment status</td>
                   <td>{clientSnapshot.employmentStatus}</td>
-                  <td>{hasPartner ? partnerSnapshot.employmentStatus : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.employmentStatus}</td> : null}
                 </tr>
                 <tr>
                   <td>Job title</td>
                   <td>{clientSnapshot.jobTitle}</td>
-                  <td>{hasPartner ? partnerSnapshot.jobTitle : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.jobTitle}</td> : null}
                 </tr>
                 <tr>
                   <td>Current state of health</td>
                   <td>{clientSnapshot.healthStatus}</td>
-                  <td>{hasPartner ? partnerSnapshot.healthStatus : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.healthStatus}</td> : null}
                 </tr>
                 <tr>
                   <td>Private health insurance</td>
                   <td>{clientSnapshot.healthInsurance}</td>
-                  <td>{hasPartner ? partnerSnapshot.healthInsurance : "—"}</td>
+                  {hasPartner ? <td>{partnerSnapshot.healthInsurance}</td> : null}
                 </tr>
               </tbody>
             </table>
@@ -3009,118 +3021,40 @@ export function SoaPrintPreview() {
             className={styles.page}
             style={{ order: previewSectionOrder.serviceAgreement }}
           >
-            <h2 className={styles.sectionHeading}>{serviceAgreementTitle}</h2>
             <div className={styles.serviceAgreementIntro}>
               <div>{formatDate(payload.savedAt)}</div>
               <div>{addresseeLine}</div>
               <div>{address.street ?? "<<address>>"}</div>
               <div>{address.locality ?? "<<Suburb>> <<State>> <<Postcode>>"}</div>
             </div>
+            <h2 className={styles.sectionHeading}>{serviceAgreementTitle}</h2>
 
             <div className={styles.serviceAgreementBody}>
               <p>Dear {addresseeLine},</p>
-              {isFixedTermAgreement ? (
-                <>
-                  <p>
-                    As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. The purpose of this letter is to establish an Annual Advice Agreement.
-                  </p>
-                  <p>
-                    The services you receive as part of your Annual Advice Agreement are important as they offer support to help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled to and the cost, are set out below.
-                  </p>
-                  <p>This arrangement will be between {addresseeLine} and {practiceName}. The arrangement will commence on the date you sign this agreement.</p>
-                </>
-              ) : (
-                <>
-                  <p>
-                    As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.
-                  </p>
-                  <p>
-                    We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.
-                  </p>
-                  <p>
-                    The commencement date of this arrangement is the date you sign this agreement. Upon signing this agreement, any existing service agreement between us is deemed to be automatically terminated and replaced by this agreement.
-                  </p>
-                </>
-              )}
+              {serviceAgreementOpeningParagraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
 
-              <div className={styles.card}>
-                <h3>{isFixedTermAgreement ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive"}</h3>
-                <div className={styles.serviceAgreementServices}>
-                  {serviceAgreementServiceGroups.map((group, groupIndex) => (
-                    <div className={styles.serviceAgreementServiceGroup} key={`${group.heading ?? "service"}-${groupIndex}`}>
-                      {group.heading ? <h4>{group.heading}</h4> : null}
-                      {group.items.length ? (
-                        <ul className={styles.bulletList}>
-                          {group.items.map((service, serviceIndex) => (
-                            <li key={`${service}-${serviceIndex}`}>{service}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </div>
+              {serviceAgreementDetailSections.map((section) => (
+                <div key={section.heading} className={styles.serviceAgreementTextBlock}>
+                  <h3>{section.heading}</h3>
+                  {section.paragraphs.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
                   ))}
                 </div>
-              </div>
+              ))}
 
-              <div className={styles.card}>
-                <h3>Fees Payable</h3>
-                <p>
-                  The fees payable for this agreement are set out in the Fees and Disclosures section of this Statement of Advice. All fees include GST where applicable.
-                </p>
-                <table className={styles.table}>
-                  <thead>
-                    <tr>
-                      <th>Entity</th>
-                      <th>Product</th>
-                      <th>Account Number</th>
-                      <th>Fee Amount</th>
-                      <th>Frequency</th>
-                      <th>Total Annual Fee</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {serviceAgreementFeeItems.length ? (
-                      <>
-                        {serviceAgreementFeeItems.map((feeItem) => (
-                          <tr key={feeItem.feeItemId}>
-                            <td>{getServiceAgreementOwnerName(feeItem.ownerPersonId)}</td>
-                            <td>{feeItem.productName || "—"}</td>
-                            <td>{feeItem.accountNumber || "—"}</td>
-                            <td>{formatCurrency(feeItem.feeAmount)}</td>
-                            <td>{SERVICE_FEE_FREQUENCY_OPTIONS.find((option) => option.value === feeItem.frequency)?.label ?? feeItem.frequency}</td>
-                            <td>{formatCurrency(getServiceFeeAnnualAmount(feeItem))}</td>
-                          </tr>
-                        ))}
-                        <tr className={styles.totalRow}>
-                          <td colSpan={5}><strong>Total Annual Advice Fees</strong></td>
-                          <td><strong>{formatCurrency(totalServiceAgreementFees)}</strong></td>
-                        </tr>
-                      </>
-                    ) : (
-                      <tr>
-                        <td colSpan={6}>No annual advice fee rows have been drafted yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              <div className={styles.serviceAgreementTextBlock}>
+                <h3>Your Acknowledgement</h3>
+                {serviceAgreementAcknowledgementParagraphs.map((paragraph) => (
+                  <p key={paragraph}>{paragraph}</p>
+                ))}
+                <ul className={styles.bulletList}>
+                  {serviceAgreementAcknowledgementItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
               </div>
-
-              {isFixedTermAgreement ? (
-                <div className={styles.serviceAgreementTextBlock}>
-                  <h3>Next Steps</h3>
-                  <p>Please sign the acknowledgement below and accept the Annual Advice Agreement outlined in this letter.</p>
-                  <p>You may terminate this service at any time by contacting us. If terminated, we will cancel this service and turn off any applicable Annual Advice Agreement costs.</p>
-                </div>
-              ) : (
-                <div className={styles.serviceAgreementTextBlock}>
-                  <h3>Your Acknowledgement</h3>
-                  <ul className={styles.bulletList}>
-                    <li>You agree to be bound by the terms and conditions of this agreement.</li>
-                    <li>You acknowledge that this agreement will continue, subject to annual renewal, until either party provides notice of termination in writing.</li>
-                    <li>You acknowledge that entering into this agreement will replace and terminate any existing service agreement between us.</li>
-                    <li>You may terminate or vary the agreement at any time by notifying us in writing.</li>
-                  </ul>
-                </div>
-              )}
 
               <div className={styles.authoritySignatureGrid}>
                 {signaturePeople.map((person) => (
@@ -3142,10 +3076,14 @@ export function SoaPrintPreview() {
             <h2 className={styles.sectionHeading}>Consent To Deduct Fees From Your Account</h2>
             <div className={styles.serviceAgreementBody}>
               <p>
-                We are required to obtain your written consent to deduct the fees payable for our services for the upcoming 12 months. Without your consent, this agreement cannot be entered into.
+                {isFixedTermAgreement
+                  ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+                  : "We are required to obtain your written consent to deduct the fees payable for our ongoing services for the upcoming 12 months. Without your consent, our ongoing service agreement cannot be entered into."}
               </p>
               <p>
-                Accordingly, no ongoing services or advice will be delivered if you do not return this signed and dated form consenting to payment of our advice fees.
+                {isFixedTermAgreement
+                  ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+                  : "Accordingly, no ongoing services or advice will be delivered if you do not return this signed and dated form consenting to payment of our ongoing advice fees."}
               </p>
               <p>
                 You can terminate this {serviceAgreementArrangementLabel} at any time by providing us with written notice. If you terminate the arrangement in writing, no further fees will be charged to you, and no further services will be provided by us.
@@ -3153,7 +3091,11 @@ export function SoaPrintPreview() {
 
               <div className={styles.card}>
                 <h3>What fees are payable under my {serviceAgreementArrangementLabel}?</h3>
-                <p>The following fees will be payable to cover the services you are entitled to receive under the arrangement:</p>
+                <p>
+                  {isFixedTermAgreement
+                    ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+                    : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:"}
+                </p>
                 <table className={styles.table}>
                   <thead>
                     <tr>
@@ -3196,7 +3138,11 @@ export function SoaPrintPreview() {
 
               <div className={styles.card}>
                 <h3>The services you are entitled to receive</h3>
-                <p>The terms of this service arrangement, including the services you are entitled to and the cost, are set out below.</p>
+                <p>
+                  {isFixedTermAgreement
+                    ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+                    : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below."}
+                </p>
                 <div className={styles.serviceAgreementServices}>
                   {serviceAgreementServiceGroups.map((group, groupIndex) => (
                     <div className={styles.serviceAgreementServiceGroup} key={`consent-${group.heading ?? "service"}-${groupIndex}`}>
@@ -3242,7 +3188,11 @@ export function SoaPrintPreview() {
 
               <div className={styles.serviceAgreementTextBlock}>
                 <h3>Your consent to deduct fees from your account</h3>
-                <p>I/we consent to the payment of advice fees in accordance with the terms of this fee consent form.</p>
+                <p>
+                  {isFixedTermAgreement
+                    ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+                    : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form."}
+                </p>
               </div>
 
               <div className={styles.authoritySignatureGrid}>

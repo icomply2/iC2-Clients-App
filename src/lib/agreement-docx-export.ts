@@ -7,7 +7,18 @@ import {
   normalizeDocumentStyleProfile,
   type DocumentStyleProfile,
 } from "@/lib/documents/document-style-profile";
-import { DEFAULT_SERVICE_AGREEMENT_SERVICES, groupServiceAgreementServices } from "@/lib/documents/document-sections";
+import {
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS,
+  ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  DEFAULT_SERVICE_AGREEMENT_SERVICES,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS,
+  ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  groupServiceAgreementServices,
+} from "@/lib/documents/document-sections";
 
 export type StandaloneAgreementType = "ongoing" | "annual";
 
@@ -211,6 +222,15 @@ function servicesXml(services: string[]) {
     .join("");
 }
 
+function sectionsXml(sections: Array<{ heading: string; paragraphs: string[] }>) {
+  return sections
+    .map((section) => [
+      headingXml(section.heading, 2),
+      ...section.paragraphs.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
+    ].join(""))
+    .join("");
+}
+
 function parseCurrencyAmount(value?: string | null) {
   const numeric = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
   return Number.isFinite(numeric) ? numeric : 0;
@@ -315,38 +335,72 @@ function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocx
 
   const opening =
     agreementType === "annual"
-      ? [
-          "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. The purpose of this letter is to establish an Annual Advice Agreement.",
-          "The services you receive as part of your Annual Advice Agreement are important as they offer support to help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled to and the cost, are set out below.",
-          `This arrangement will be between ${clientName} and ${practiceName}. The arrangement will commence on the date you sign this agreement.`,
-        ]
-      : [
-          "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.",
-          "We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.",
-          "The commencement date of this arrangement is the date you sign this agreement. Upon signing this agreement, any existing service agreement between us is deemed to be automatically terminated and replaced by this agreement.",
-        ];
+      ? ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS;
+  const agreementDetailSections =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+      : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const acknowledgementParagraphs =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
+  const acknowledgementItems =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS;
+
+  const serviceAndFeeXml = [
+    headingXml("The services you are entitled to receive", 2),
+    paragraphXml(
+      agreementType === "annual"
+        ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+        : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below.",
+      { spacingAfter: 160 },
+    ),
+    servicesXml(input.services?.filter(Boolean) ?? DEFAULT_SERVICE_AGREEMENT_SERVICES),
+    headingXml(agreementType === "annual" ? "What fees are payable under my fixed term fee arrangement?" : "What fees are payable under my ongoing fee arrangement?", 2),
+    paragraphXml(
+      agreementType === "annual"
+        ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+        : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:",
+      { spacingAfter: 160 },
+    ),
+    feeTableXml(input.fees),
+  ].join("");
 
   const body = [
     paragraphXml(formatToday(), { spacingAfter: 220 }),
     paragraphXml(clientName, { bold: true, spacingAfter: 0 }),
     ...addressLines.map((line) => paragraphXml(line, { spacingAfter: 0 })),
-    paragraphXml(`Dear ${clientSalutationName},`, { spacingAfter: 180 }),
     headingXml(title),
+    paragraphXml(`Dear ${clientSalutationName},`, { spacingAfter: 180 }),
     ...opening.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
-    headingXml(agreementType === "annual" ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive", 2),
-    servicesXml(input.services?.filter(Boolean) ?? DEFAULT_SERVICE_AGREEMENT_SERVICES),
-    headingXml("Fees Payable", 2),
-    paragraphXml("The fees payable for this agreement are set out below. All fees include GST where applicable.", { spacingAfter: 160 }),
-    feeTableXml(input.fees),
+    sectionsXml(agreementDetailSections),
+    headingXml("Your Acknowledgement", 2),
+    ...acknowledgementParagraphs.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
+    ...acknowledgementItems.map((item) => paragraphXml(item, { bullet: true, spacingAfter: 40 })),
+    signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),
     headingXml("Consent To Deduct Fees From Your Account", 2),
-    paragraphXml("By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.", { spacingAfter: 160 }),
-    text(input.consentNotes) ? paragraphXml(text(input.consentNotes), { spacingAfter: 160 }) : "",
-    paragraphXml("This consent may be withdrawn by you at any time by notifying us in writing.", { spacingAfter: 160 }),
-    headingXml(agreementType === "annual" ? "Next Steps" : "Your Acknowledgement", 2),
     paragraphXml(
       agreementType === "annual"
-        ? "Please sign the acknowledgement below and accept the Annual Advice Agreement outlined in this letter."
-        : "You agree to be bound by the terms and conditions of this agreement. You may terminate or vary the agreement at any time by notifying us in writing.",
+        ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+        : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.",
+      { spacingAfter: 160 },
+    ),
+    text(input.consentNotes) ? paragraphXml(text(input.consentNotes), { spacingAfter: 160 }) : "",
+    paragraphXml(
+      agreementType === "annual"
+        ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+        : "This consent may be withdrawn by you at any time by notifying us in writing.",
+      { spacingAfter: 160 },
+    ),
+    serviceAndFeeXml,
+    headingXml("Your consent to deduct fees from your account", 2),
+    paragraphXml(
+      agreementType === "annual"
+        ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+        : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form.",
       { spacingAfter: 180 },
     ),
     signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),

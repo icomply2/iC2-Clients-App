@@ -150,6 +150,15 @@ const projectionAssetTypeOptions: Array<{ value: ProjectionScenario["assets"][nu
   { value: "business", label: "Business asset" },
   { value: "other", label: "Other asset" },
 ];
+const projectionCgtTreatmentOptions: Array<{
+  value: NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]>;
+  label: string;
+}> = [
+  { value: "taxable", label: "Taxable CGT asset" },
+  { value: "main-residence-exempt", label: "Main residence exempt" },
+  { value: "personal-use-exempt", label: "Personal use exempt" },
+  { value: "not-applicable", label: "Not applicable" },
+];
 const defaultChartTickCount = 5;
 
 const scenarioInputTabs: Array<{ id: ScenarioInputTab; label: string }> = [
@@ -425,6 +434,8 @@ const blankProjectionScenario: ProjectionScenario = {
   assets: [],
   liabilities: [],
   assetSaleEvents: [],
+  assetPurchaseEvents: [],
+  liabilityDrawdownEvents: [],
   liabilityPaymentEvents: [],
   retirementAccounts: [],
   superContributionStrategies: [],
@@ -524,9 +535,19 @@ function normalizeProjectionScenario(scenario: ProjectionScenario): ProjectionSc
       ...asset,
       type: assetTypeValue(asset.type),
       centrelink: assetCentrelinkValue(asset.centrelink),
+      costBase: asset.costBase ?? asset.openingValue,
+      acquisitionDate: asset.acquisitionDate ?? null,
+      cgtTreatment: cgtTreatmentValue(asset.cgtTreatment, assetTypeValue(asset.type)),
     })),
     assetSaleEvents: scenario.assetSaleEvents ?? [],
+    assetPurchaseEvents: scenario.assetPurchaseEvents ?? [],
+    liabilityDrawdownEvents: scenario.liabilityDrawdownEvents ?? [],
     liabilityPaymentEvents: scenario.liabilityPaymentEvents ?? [],
+    liabilities: (scenario.liabilities ?? []).map((liability) => ({
+      ...liability,
+      repaymentType: liability.repaymentType ?? "principal-and-interest",
+      interestDeductible: liability.interestDeductible ?? false,
+    })),
     retirementAccounts,
     superContributionStrategies: (scenario.superContributionStrategies ?? []).length
       ? scenario.superContributionStrategies
@@ -593,6 +614,22 @@ function defaultAssetCentrelink(type: ProjectionScenario["assets"][number]["type
   if (type === "primary-residence" || type === "funeral-bond") return "exempt" as const;
   if (isCashAssetType(type) || isInvestmentAssetType(type)) return "financial-asset" as const;
   return "assessable" as const;
+}
+
+function defaultAssetCgtTreatment(type: ProjectionScenario["assets"][number]["type"]): NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]> {
+  if (type === "primary-residence") return "main-residence-exempt";
+  if (isCashAssetType(type)) return "not-applicable";
+  if (type === "home-contents" || type === "motor-vehicle" || type === "personal-asset") return "personal-use-exempt";
+  return "taxable";
+}
+
+function cgtTreatmentValue(
+  value: unknown,
+  assetType: ProjectionScenario["assets"][number]["type"],
+): NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]> {
+  return projectionCgtTreatmentOptions.some((option) => option.value === value)
+    ? value as NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]>
+    : defaultAssetCgtTreatment(assetType);
 }
 
 function normalizeRateValue(value: unknown) {
@@ -751,6 +788,9 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
       growthRateKey: defaultAssetGrowthRateKey(type, name),
       centrelink: defaultAssetCentrelink(type),
       reserveTarget: isCashAssetType(type) ? 60000 : null,
+      costBase: numericValue(asset.cost) || numericValue(asset.currentValue),
+      acquisitionDate: asset.acquisitionDate ?? null,
+      cgtTreatment: defaultAssetCgtTreatment(type),
     };
   });
   const hasPrimaryResidence = assets.some((asset) => asset.type === "primary-residence");
@@ -759,16 +799,25 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
   });
   const liabilities = (profile.liabilities ?? []).map((liability, index) => {
     const name = textValue(liability.bankName) || textValue(liability.loanType) || textValue(liability.accountNumber) || `Liability ${index + 1}`;
+    const annualInterestRate = normalizeRateValue(liability.interestRate);
+    const annualRepayment = annualizeAmount(liability.repaymentAmount, liability.repaymentFrequency);
+    const openingBalance = numericValue(liability.outstandingBalance);
+    const annualInterest = openingBalance * annualInterestRate;
+    const loanText = `${liability.loanType ?? ""} ${liability.bankName ?? ""} ${liability.securityAssets?.type ?? ""} ${liability.securityAssets?.description ?? ""}`;
 
     return {
       liabilityId: slug(liability.id || name) || `liability-${index + 1}`,
       ownerPersonId: ownerPersonId(liability),
       type: liabilityType(`${liability.loanType ?? ""} ${liability.bankName ?? ""}`),
       name,
-      openingBalance: numericValue(liability.outstandingBalance),
-      annualInterestRate: normalizeRateValue(liability.interestRate),
-      annualRepayment: annualizeAmount(liability.repaymentAmount, liability.repaymentFrequency),
+      openingBalance,
+      annualInterestRate,
+      annualRepayment,
       repaymentTiming: "end-of-year" as const,
+      repaymentType: annualInterest > 0 && Math.abs(annualRepayment - annualInterest) <= Math.max(annualInterest * 0.08, 500)
+        ? "interest-only" as const
+        : "principal-and-interest" as const,
+      interestDeductible: /investment|rental|business/.test(loanText.toLowerCase()),
     };
   });
   const employmentRecords = [...(profile.employment ?? []), ...(profile.client?.employment ?? []), ...(profile.partner?.employment ?? [])];
@@ -892,6 +941,8 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     assets,
     liabilities,
     assetSaleEvents: [],
+    assetPurchaseEvents: [],
+    liabilityDrawdownEvents: [],
     liabilityPaymentEvents: [],
     retirementAccounts: [...superAccounts, ...pensionAccounts],
     superContributionStrategies,
@@ -1087,6 +1138,20 @@ const assetSaleRows = assetSaleRawRows.map((row) => ({
   label: row.label,
   values: row.rawValues.map((value) => money(value)),
 }));
+const assetPurchaseRawRows = (activeScenario.assetPurchaseEvents ?? [])
+  .map((event) => {
+    const asset = activeScenario.assets.find((entry) => entry.assetId === event.assetId);
+
+    return {
+      label: event.label.trim() || `Purchase of ${asset?.name ?? "asset"}`,
+      rawValues: projectionRows.map((row) => row.assetPurchaseEventValues[event.eventId] ?? 0),
+    };
+  })
+  .filter((row) => hasAnyAmount(row.rawValues));
+const assetPurchaseRows = assetPurchaseRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
 const pensionLumpSumRawRows = displayPensionWithdrawalEvents
   .map((event) => {
     const account = retirementDisplayAccounts.find((entry) => entry.accountId === event.accountId);
@@ -1133,6 +1198,20 @@ const liabilityPaymentRawRows = (activeScenario.liabilityPaymentEvents ?? [])
   })
   .filter((row) => hasAnyAmount(row.rawValues));
 const liabilityPaymentRows = liabilityPaymentRawRows.map((row) => ({
+  label: row.label,
+  values: row.rawValues.map((value) => money(value)),
+}));
+const liabilityDrawdownRawRows = (activeScenario.liabilityDrawdownEvents ?? [])
+  .map((event) => {
+    const liability = activeScenario.liabilities.find((entry) => entry.liabilityId === event.liabilityId);
+
+    return {
+      label: event.label.trim() || `Drawdown from ${liability?.name ?? "liability"}`,
+      rawValues: projectionRows.map((row) => row.liabilityDrawdownEventValues[event.eventId] ?? 0),
+    };
+  })
+  .filter((row) => hasAnyAmount(row.rawValues));
+const liabilityDrawdownRows = liabilityDrawdownRawRows.map((row) => ({
   label: row.label,
   values: row.rawValues.map((value) => money(value)),
 }));
@@ -1219,14 +1298,18 @@ const cashflowChartSeries = assignChartColors([
   ...mappedIncomeRawRows,
   ...assetIncomeRawRows,
   ...assetSaleRawRows,
+  ...liabilityDrawdownRawRows,
   ...calculatedIncomeRows,
   ...pensionLumpSumRawRows,
 ]);
 const cashflowEventIncomeValues = projectionRows.map((_, yearIndex) =>
-  [...assetSaleRawRows, ...pensionLumpSumRawRows].reduce((total, row) => total + (row.rawValues[yearIndex] ?? 0), 0),
+  [...assetSaleRawRows, ...liabilityDrawdownRawRows, ...pensionLumpSumRawRows].reduce(
+    (total, row) => total + (row.rawValues[yearIndex] ?? 0),
+    0,
+  ),
 );
 const cashflowEventExpenseValues = projectionRows.map((_, yearIndex) =>
-  liabilityPaymentRawRows.reduce((total, row) => total + (row.rawValues[yearIndex] ?? 0), 0),
+  [...assetPurchaseRawRows, ...liabilityPaymentRawRows].reduce((total, row) => total + (row.rawValues[yearIndex] ?? 0), 0),
 );
 const cashflowTotalIncomeValues = projectionRows.map((row, yearIndex) => row.totalIncome + cashflowEventIncomeValues[yearIndex]);
 const cashflowExpenseValues = projectionRows.map(
@@ -1300,11 +1383,13 @@ const cashflowProjectionRows: ProjectionTableRow[] = [
     values: row.rawValues.map((value) => money(value)),
   })),
   ...assetSaleRows,
+  ...liabilityDrawdownRows,
   ...pensionLumpSumRows,
   { label: "Total income", values: cashflowTotalIncomeValues.map((value) => money(value)), isTotal: true },
   { label: "Expenses", values: [], isSection: true },
   ...mappedExpenseRows,
   ...liabilityRepaymentRows,
+  ...assetPurchaseRows,
   ...liabilityPaymentRows,
   ...superContributionExpenseRows,
   ...taxPayableRows,
@@ -1528,6 +1613,14 @@ const taxProjectionRowsByPersonId = Object.fromEntries(
             label: "Taxable Age Pension",
             rawValues: taxRows.map((row) => row.taxableAgePension),
           },
+          {
+            label: "Net taxable capital gains",
+            rawValues: taxRows.map((row) => row.taxableCapitalGains),
+          },
+          {
+            label: "Deductible loan interest",
+            rawValues: taxRows.map((row) => -row.deductibleInterest),
+          },
         ]
           .filter((row) => hasAnyAmount(row.rawValues))
           .map((row) => ({
@@ -1729,6 +1822,8 @@ const retirementAccounts = retirementDisplayAccounts.map((account) => ({
 const projectionChecks = [
   "Confirm age, residency, and Age Pension eligibility before relying on Centrelink outputs.",
   "Age Pension is included in taxable income with core LITO and SAPTO offsets; confirm special-case tax treatments separately.",
+  "CGT is a practical projection estimate using cost base, acquisition date, exemptions, losses, and the 50% discount; confirm detailed tax advice separately.",
+  "Deductible loan interest reduces taxable income in the projection year only; confirm deductibility and loan purpose before relying on the result.",
   "Confirm pension minimum drawdown and current pension features where a pension account exists.",
   "Confirm current pension tax components and Centrelink assessment treatment.",
   "Confirm product fees, transaction costs, buy/sell spreads, and any loss of existing features before replacement modelling.",
@@ -1800,7 +1895,10 @@ function ProjectionsPageContent() {
   const [cashflowViewMode, setCashflowViewMode] = useState<"table" | "chart">("table");
   const [assetLiabilityViewMode, setAssetLiabilityViewMode] = useState<"table" | "chart">("table");
   const [superOwnerFilter, setSuperOwnerFilter] = useState("all");
+  const [activeAssetEditModalId, setActiveAssetEditModalId] = useState<string | null>(null);
   const [activeAssetSaleModalId, setActiveAssetSaleModalId] = useState<string | null>(null);
+  const [activeAssetPurchaseModalId, setActiveAssetPurchaseModalId] = useState<string | null>(null);
+  const [activeLiabilityDrawdownModalId, setActiveLiabilityDrawdownModalId] = useState<string | null>(null);
   const [activeLiabilityPaymentModalId, setActiveLiabilityPaymentModalId] = useState<string | null>(null);
   const [activePensionWithdrawalModalId, setActivePensionWithdrawalModalId] = useState<string | null>(null);
   const [activeSuperStrategyModalId, setActiveSuperStrategyModalId] = useState<string | null>(null);
@@ -1894,6 +1992,49 @@ function ProjectionsPageContent() {
     workspaceStateLoaded,
     workspaceStorageKey,
   ]);
+
+  function closeRowActionMenus(except?: HTMLDetailsElement) {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    document.querySelectorAll<HTMLDetailsElement>(`details.${styles.rowActionMenu}[open]`).forEach((menu) => {
+      if (menu !== except) {
+        menu.open = false;
+      }
+    });
+  }
+
+  function handleRowActionMenuToggle(event: { currentTarget: HTMLDetailsElement }) {
+    if (event.currentTarget.open) {
+      closeRowActionMenus(event.currentTarget);
+    }
+  }
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Element) || target.closest(`details.${styles.rowActionMenu}`)) {
+        return;
+      }
+
+      closeRowActionMenus();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeRowActionMenus();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
 
   const mappedScenario = scenarios.find((scenario) => scenario.scenarioId === activeScenarioId) ?? null;
   const hasSourceDataReady = Boolean(scenarioFile || pendingClientProfileScenario);
@@ -2005,6 +2146,7 @@ function ProjectionsPageContent() {
   const activeLiabilityRepaymentItemIds = new Set(
     activeScenario.liabilities.map((liability) => `${liability.liabilityId}-repayment`),
   );
+  const activeAssetEdit = activeScenario.assets.find((asset) => asset.assetId === activeAssetEditModalId) ?? null;
   const activeAssetSale = (activeScenario.assetSaleEvents ?? []).find((event) => event.eventId === activeAssetSaleModalId) ?? null;
   const activeAssetSaleAsset = activeAssetSale
     ? activeScenario.assets.find((asset) => asset.assetId === activeAssetSale.assetId) ?? null
@@ -2018,6 +2160,38 @@ function ProjectionsPageContent() {
     : [];
   const activeAssetSaleCashAssets =
     activeAssetSaleOwnerCashAssets.length > 0 ? activeAssetSaleOwnerCashAssets : activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
+  const activeAssetPurchase =
+    (activeScenario.assetPurchaseEvents ?? []).find((event) => event.eventId === activeAssetPurchaseModalId) ?? null;
+  const activeAssetPurchaseAsset = activeAssetPurchase
+    ? activeScenario.assets.find((asset) => asset.assetId === activeAssetPurchase.assetId) ?? null
+    : null;
+  const activeAssetPurchaseOwnerCashAssets = activeAssetPurchaseAsset
+    ? activeScenario.assets.filter(
+        (asset) =>
+          isCashAssetType(asset.type) &&
+          (asset.ownerPersonId === activeAssetPurchaseAsset.ownerPersonId || asset.ownerPersonId === jointOwnerId),
+      )
+    : [];
+  const activeAssetPurchaseCashAssets =
+    activeAssetPurchaseOwnerCashAssets.length > 0
+      ? activeAssetPurchaseOwnerCashAssets
+      : activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
+  const activeLiabilityDrawdown =
+    (activeScenario.liabilityDrawdownEvents ?? []).find((event) => event.eventId === activeLiabilityDrawdownModalId) ?? null;
+  const activeLiabilityDrawdownLiability = activeLiabilityDrawdown
+    ? activeScenario.liabilities.find((liability) => liability.liabilityId === activeLiabilityDrawdown.liabilityId) ?? null
+    : null;
+  const activeLiabilityDrawdownOwnerCashAssets = activeLiabilityDrawdownLiability
+    ? activeScenario.assets.filter(
+        (asset) =>
+          isCashAssetType(asset.type) &&
+          (asset.ownerPersonId === activeLiabilityDrawdownLiability.ownerPersonId || asset.ownerPersonId === jointOwnerId),
+      )
+    : [];
+  const activeLiabilityDrawdownCashAssets =
+    activeLiabilityDrawdownOwnerCashAssets.length > 0
+      ? activeLiabilityDrawdownOwnerCashAssets
+      : activeScenario.assets.filter((asset) => isCashAssetType(asset.type));
   const activeLiabilityPayment =
     (activeScenario.liabilityPaymentEvents ?? []).find((event) => event.eventId === activeLiabilityPaymentModalId) ?? null;
   const activeLiabilityPaymentLiability = activeLiabilityPayment
@@ -2291,6 +2465,9 @@ function ProjectionsPageContent() {
         growthRateKey: defaultAssetGrowthRateKey(type),
         centrelink: defaultAssetCentrelink(type),
         reserveTarget: isCashAssetType(type) ? 0 : null,
+        costBase: 0,
+        acquisitionDate: null,
+        cgtTreatment: defaultAssetCgtTreatment(type),
       });
     });
   }
@@ -2301,9 +2478,14 @@ function ProjectionsPageContent() {
       draft.assetSaleEvents = (draft.assetSaleEvents ?? []).filter(
         (event) => event.assetId !== assetId && event.targetAssetId !== assetId,
       );
+      draft.assetPurchaseEvents = (draft.assetPurchaseEvents ?? []).filter(
+        (event) => event.assetId !== assetId && event.sourceAssetId !== assetId,
+      );
+      draft.liabilityDrawdownEvents = (draft.liabilityDrawdownEvents ?? []).filter((event) => event.targetAssetId !== assetId);
       draft.liabilityPaymentEvents = (draft.liabilityPaymentEvents ?? []).filter((event) => event.sourceAssetId !== assetId);
       draft.pensionWithdrawalEvents = (draft.pensionWithdrawalEvents ?? []).filter((event) => event.targetAssetId !== assetId);
     });
+    setActiveAssetEditModalId((currentId) => currentId === assetId ? null : currentId);
   }
 
   function addLiability(type: ProjectionScenario["liabilities"][number]["type"]) {
@@ -2317,6 +2499,8 @@ function ProjectionsPageContent() {
         annualInterestRate: 0,
         annualRepayment: 0,
         repaymentTiming: "end-of-year",
+        repaymentType: "principal-and-interest",
+        interestDeductible: false,
       });
     });
   }
@@ -2324,6 +2508,7 @@ function ProjectionsPageContent() {
   function deleteLiability(liabilityId: string) {
     updateActiveScenario((draft) => {
       draft.liabilities = draft.liabilities.filter((liability) => liability.liabilityId !== liabilityId);
+      draft.liabilityDrawdownEvents = (draft.liabilityDrawdownEvents ?? []).filter((event) => event.liabilityId !== liabilityId);
       draft.liabilityPaymentEvents = (draft.liabilityPaymentEvents ?? []).filter((event) => event.liabilityId !== liabilityId);
     });
   }
@@ -2375,6 +2560,102 @@ function ProjectionsPageContent() {
       draft.assetSaleEvents = (draft.assetSaleEvents ?? []).filter((event) => event.eventId !== eventId);
     });
     setActiveAssetSaleModalId((currentId) => currentId === eventId ? null : currentId);
+  }
+
+  function updateAssetPurchaseEvent(
+    eventId: string,
+    applyUpdate: (event: NonNullable<ProjectionScenario["assetPurchaseEvents"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.assetPurchaseEvents = draft.assetPurchaseEvents ?? [];
+      const purchaseEvent = draft.assetPurchaseEvents.find((entry) => entry.eventId === eventId);
+      if (purchaseEvent) {
+        applyUpdate(purchaseEvent);
+      }
+    });
+  }
+
+  function addAssetPurchaseEvent(assetId?: string) {
+    const eventId = createScenarioInputId("asset-purchase");
+
+    updateActiveScenario((draft) => {
+      const targetAsset = draft.assets.find((asset) => asset.assetId === assetId) ?? draft.assets[0];
+      if (!targetAsset) {
+        return;
+      }
+
+      const cashAsset =
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === targetAsset.ownerPersonId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === jointOwnerId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type));
+
+      draft.assetPurchaseEvents = draft.assetPurchaseEvents ?? [];
+      draft.assetPurchaseEvents.push({
+        eventId,
+        label: `Buy ${targetAsset.name}`,
+        assetId: targetAsset.assetId,
+        purchaseDate: null,
+        amount: 0,
+        sourceAssetId: cashAsset?.assetId ?? null,
+        enabled: true,
+      });
+    });
+    setActiveAssetPurchaseModalId(eventId);
+  }
+
+  function deleteAssetPurchaseEvent(eventId: string) {
+    updateActiveScenario((draft) => {
+      draft.assetPurchaseEvents = (draft.assetPurchaseEvents ?? []).filter((event) => event.eventId !== eventId);
+    });
+    setActiveAssetPurchaseModalId((currentId) => currentId === eventId ? null : currentId);
+  }
+
+  function updateLiabilityDrawdownEvent(
+    eventId: string,
+    applyUpdate: (event: NonNullable<ProjectionScenario["liabilityDrawdownEvents"]>[number]) => void,
+  ) {
+    updateActiveScenario((draft) => {
+      draft.liabilityDrawdownEvents = draft.liabilityDrawdownEvents ?? [];
+      const drawdownEvent = draft.liabilityDrawdownEvents.find((entry) => entry.eventId === eventId);
+      if (drawdownEvent) {
+        applyUpdate(drawdownEvent);
+      }
+    });
+  }
+
+  function addLiabilityDrawdownEvent(liabilityId?: string) {
+    const eventId = createScenarioInputId("liability-drawdown");
+
+    updateActiveScenario((draft) => {
+      const liability = draft.liabilities.find((entry) => entry.liabilityId === liabilityId) ?? draft.liabilities[0];
+      if (!liability) {
+        return;
+      }
+
+      const cashAsset =
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === liability.ownerPersonId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === jointOwnerId) ??
+        draft.assets.find((asset) => isCashAssetType(asset.type));
+
+      draft.liabilityDrawdownEvents = draft.liabilityDrawdownEvents ?? [];
+      draft.liabilityDrawdownEvents.push({
+        eventId,
+        label: `Draw ${liability.name}`,
+        liabilityId: liability.liabilityId,
+        drawdownDate: null,
+        amount: 0,
+        targetAssetId: cashAsset?.assetId ?? null,
+        enabled: true,
+      });
+    });
+    setActiveLiabilityDrawdownModalId(eventId);
+  }
+
+  function deleteLiabilityDrawdownEvent(eventId: string) {
+    updateActiveScenario((draft) => {
+      draft.liabilityDrawdownEvents = (draft.liabilityDrawdownEvents ?? []).filter((event) => event.eventId !== eventId);
+    });
+    setActiveLiabilityDrawdownModalId((currentId) => currentId === eventId ? null : currentId);
   }
 
   function updateLiabilityPaymentEvent(
@@ -3822,9 +4103,6 @@ function ProjectionsPageContent() {
             <div className={styles.inputCardHeader}>
               <h4>Assets</h4>
               <div className={styles.tableActions}>
-                <button type="button" className={styles.secondaryButton} onClick={() => addAsset("cash")}>
-                  Add cash
-                </button>
                 <button type="button" className={styles.secondaryButton} onClick={() => addAsset("personal-asset")}>
                   Add asset
                 </button>
@@ -3880,7 +4158,9 @@ function ProjectionsPageContent() {
                           className={styles.compactInput}
                           value={asset.type}
                           onChange={(event) => updateAsset(asset.assetId, (draft) => {
-                            draft.type = event.target.value as ProjectionScenario["assets"][number]["type"];
+                            const nextType = event.target.value as ProjectionScenario["assets"][number]["type"];
+                            draft.type = nextType;
+                            draft.cgtTreatment = defaultAssetCgtTreatment(nextType);
                           })}
                         >
                           {projectionAssetTypeOptions.map((option) => (
@@ -3938,15 +4218,29 @@ function ProjectionsPageContent() {
                         </select>
                       </td>
                       <td>
-                        <details className={styles.rowActionMenu}>
+                        <details className={styles.rowActionMenu} onToggle={handleRowActionMenuToggle}>
                           <summary aria-label={`Actions for ${asset.name}`}>...</summary>
                           <div className={styles.rowActionMenuList}>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => setActiveAssetEditModalId(asset.assetId)}
+                            >
+                              Edit asset
+                            </button>
                             <button
                               type="button"
                               className={styles.secondaryButton}
                               onClick={() => addAssetSaleEvent(asset.assetId)}
                             >
                               Add sale
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addAssetPurchaseEvent(asset.assetId)}
+                            >
+                              Add purchase
                             </button>
                             {assetSaleEvents.map((saleEvent, index) => (
                               <button
@@ -3958,6 +4252,19 @@ function ProjectionsPageContent() {
                                 {saleEvent.label.trim() || (assetSaleEvents.length > 1 ? `Edit sale ${index + 1}` : "Edit sale")}
                               </button>
                             ))}
+                            {(activeScenario.assetPurchaseEvents ?? [])
+                              .filter((purchaseEvent) => purchaseEvent.assetId === asset.assetId)
+                              .map((purchaseEvent, index) => (
+                                <button
+                                  key={purchaseEvent.eventId}
+                                  type="button"
+                                  className={styles.secondaryButton}
+                                  onClick={() => setActiveAssetPurchaseModalId(purchaseEvent.eventId)}
+                                >
+                                  {purchaseEvent.label.trim() ||
+                                    ((activeScenario.assetPurchaseEvents ?? []).length > 1 ? `Edit purchase ${index + 1}` : "Edit purchase")}
+                                </button>
+                              ))}
                             <button type="button" className={styles.dangerButton} onClick={() => deleteAsset(asset.assetId)}>
                               Delete
                             </button>
@@ -3991,6 +4298,8 @@ function ProjectionsPageContent() {
                     <th>Opening balance</th>
                     <th>Interest rate</th>
                     <th>Annual repayment</th>
+                    <th>Repayment type</th>
+                    <th>Deductible interest</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -4066,9 +4375,40 @@ function ProjectionsPageContent() {
                         })}
                       </td>
                       <td>
-                        <details className={styles.rowActionMenu}>
+                        <select
+                          className={styles.compactInput}
+                          value={liability.repaymentType ?? "principal-and-interest"}
+                          onChange={(event) => updateLiability(liability.liabilityId, (draft) => {
+                            draft.repaymentType = event.target.value as NonNullable<ProjectionScenario["liabilities"][number]["repaymentType"]>;
+                          })}
+                        >
+                          <option value="principal-and-interest">Principal and interest</option>
+                          <option value="interest-only">Interest only</option>
+                        </select>
+                      </td>
+                      <td>
+                        <label className={styles.inlineCheckbox}>
+                          <input
+                            type="checkbox"
+                            checked={liability.interestDeductible ?? false}
+                            onChange={(event) => updateLiability(liability.liabilityId, (draft) => {
+                              draft.interestDeductible = event.target.checked;
+                            })}
+                          />
+                          Yes
+                        </label>
+                      </td>
+                      <td>
+                        <details className={styles.rowActionMenu} onToggle={handleRowActionMenuToggle}>
                           <summary aria-label={`Actions for ${liability.name}`}>...</summary>
                           <div className={styles.rowActionMenuList}>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => addLiabilityDrawdownEvent(liability.liabilityId)}
+                            >
+                              Add drawdown
+                            </button>
                             <button
                               type="button"
                               className={styles.secondaryButton}
@@ -4076,6 +4416,19 @@ function ProjectionsPageContent() {
                             >
                               Add payment
                             </button>
+                            {(activeScenario.liabilityDrawdownEvents ?? [])
+                              .filter((drawdownEvent) => drawdownEvent.liabilityId === liability.liabilityId)
+                              .map((drawdownEvent, index) => (
+                                <button
+                                  key={drawdownEvent.eventId}
+                                  type="button"
+                                  className={styles.secondaryButton}
+                                  onClick={() => setActiveLiabilityDrawdownModalId(drawdownEvent.eventId)}
+                                >
+                                  {drawdownEvent.label.trim() ||
+                                    ((activeScenario.liabilityDrawdownEvents ?? []).length > 1 ? `Edit drawdown ${index + 1}` : "Edit drawdown")}
+                                </button>
+                              ))}
                             {liabilityPaymentEvents.map((paymentEvent, index) => (
                               <button
                                 key={paymentEvent.eventId}
@@ -4231,7 +4584,7 @@ function ProjectionsPageContent() {
                     </td>
                   ) : null}
                   <td>
-                    <details className={styles.rowActionMenu}>
+                    <details className={styles.rowActionMenu} onToggle={handleRowActionMenuToggle}>
                       <summary aria-label={`Actions for ${account.productName}`}>...</summary>
                       <div className={styles.rowActionMenuList}>
                         {accountType === "super-accumulation" ? (
@@ -5194,6 +5547,77 @@ function ProjectionsPageContent() {
         </div>
         </div>
       </main>
+      {activeAssetEdit ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveAssetEditModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit asset"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Assets and liabilities</p>
+                <h3>Edit asset</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Asset
+                <input
+                  className={styles.compactInput}
+                  value={activeAssetEdit.name}
+                  onChange={(event) => updateAsset(activeAssetEdit.assetId, (draft) => {
+                    draft.name = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Cost base
+                {renderCurrencyInput({
+                  value: activeAssetEdit.costBase ?? activeAssetEdit.openingValue,
+                  onChange: (value) => updateAsset(activeAssetEdit.assetId, (draft) => {
+                    draft.costBase = value;
+                  }),
+                })}
+              </label>
+              <label>
+                Acquisition date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeAssetEdit.acquisitionDate ?? ""}
+                  onChange={(event) => updateAsset(activeAssetEdit.assetId, (draft) => {
+                    draft.acquisitionDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                CGT treatment
+                <select
+                  className={styles.compactInput}
+                  value={activeAssetEdit.cgtTreatment ?? defaultAssetCgtTreatment(activeAssetEdit.type)}
+                  onChange={(event) => updateAsset(activeAssetEdit.assetId, (draft) => {
+                    draft.cgtTreatment = event.target.value as NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]>;
+                  })}
+                >
+                  {projectionCgtTreatmentOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveAssetEditModalId(null)}>
+                Save
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       {activeAssetSale ? (
         <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveAssetSaleModalId(null)}>
           <section
@@ -5292,6 +5716,186 @@ function ProjectionsPageContent() {
               </button>
               <button type="button" className={styles.dangerButton} onClick={() => deleteAssetSaleEvent(activeAssetSale.eventId)}>
                 Delete sale
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {activeAssetPurchase ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveAssetPurchaseModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Asset purchase"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Assets and liabilities</p>
+                <h3>Asset purchase</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activeAssetPurchase.label}
+                  onChange={(event) => updateAssetPurchaseEvent(activeAssetPurchase.eventId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Asset
+                <input
+                  className={styles.compactInput}
+                  value={activeAssetPurchaseAsset?.name ?? "Selected asset"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Purchase date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeAssetPurchase.purchaseDate ?? ""}
+                  onChange={(event) => updateAssetPurchaseEvent(activeAssetPurchase.eventId, (draft) => {
+                    draft.purchaseDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                Pay from
+                <select
+                  className={styles.compactInput}
+                  value={
+                    activeAssetPurchase.sourceAssetId &&
+                    activeAssetPurchaseCashAssets.some((asset) => asset.assetId === activeAssetPurchase.sourceAssetId)
+                      ? activeAssetPurchase.sourceAssetId
+                      : ""
+                  }
+                  onChange={(event) => updateAssetPurchaseEvent(activeAssetPurchase.eventId, (draft) => {
+                    draft.sourceAssetId = event.target.value || null;
+                  })}
+                >
+                  <option value="">Select cash account</option>
+                  {activeAssetPurchaseCashAssets.map((asset) => (
+                    <option key={asset.assetId} value={asset.assetId}>
+                      {asset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Purchase amount
+                {renderCurrencyInput({
+                  value: activeAssetPurchase.amount,
+                  onChange: (value) => updateAssetPurchaseEvent(activeAssetPurchase.eventId, (draft) => {
+                    draft.amount = value;
+                  }),
+                })}
+              </label>
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveAssetPurchaseModalId(null)}>
+                Save
+              </button>
+              <button type="button" className={styles.dangerButton} onClick={() => deleteAssetPurchaseEvent(activeAssetPurchase.eventId)}>
+                Delete purchase
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {activeLiabilityDrawdown ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={() => setActiveLiabilityDrawdownModalId(null)}>
+          <section
+            className={styles.modalPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Liability drawdown"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className={styles.modalHeader}>
+              <div>
+                <p className={styles.eyebrow}>Assets and liabilities</p>
+                <h3>Liability drawdown</h3>
+              </div>
+            </div>
+            <div className={styles.modalGrid}>
+              <label>
+                Strategy
+                <input
+                  className={styles.compactInput}
+                  value={activeLiabilityDrawdown.label}
+                  onChange={(event) => updateLiabilityDrawdownEvent(activeLiabilityDrawdown.eventId, (draft) => {
+                    draft.label = event.target.value;
+                  })}
+                />
+              </label>
+              <label>
+                Liability
+                <input
+                  className={styles.compactInput}
+                  value={activeLiabilityDrawdownLiability?.name ?? "Selected liability"}
+                  readOnly
+                />
+              </label>
+              <label>
+                Drawdown date
+                <input
+                  type="date"
+                  className={styles.compactInput}
+                  value={activeLiabilityDrawdown.drawdownDate ?? ""}
+                  onChange={(event) => updateLiabilityDrawdownEvent(activeLiabilityDrawdown.eventId, (draft) => {
+                    draft.drawdownDate = event.target.value || null;
+                  })}
+                />
+              </label>
+              <label>
+                Funds to
+                <select
+                  className={styles.compactInput}
+                  value={
+                    activeLiabilityDrawdown.targetAssetId &&
+                    activeLiabilityDrawdownCashAssets.some((asset) => asset.assetId === activeLiabilityDrawdown.targetAssetId)
+                      ? activeLiabilityDrawdown.targetAssetId
+                      : ""
+                  }
+                  onChange={(event) => updateLiabilityDrawdownEvent(activeLiabilityDrawdown.eventId, (draft) => {
+                    draft.targetAssetId = event.target.value || null;
+                  })}
+                >
+                  <option value="">Select cash account</option>
+                  {activeLiabilityDrawdownCashAssets.map((asset) => (
+                    <option key={asset.assetId} value={asset.assetId}>
+                      {asset.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Drawdown amount
+                {renderCurrencyInput({
+                  value: activeLiabilityDrawdown.amount,
+                  onChange: (value) => updateLiabilityDrawdownEvent(activeLiabilityDrawdown.eventId, (draft) => {
+                    draft.amount = value;
+                  }),
+                })}
+              </label>
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.secondaryButton} onClick={() => setActiveLiabilityDrawdownModalId(null)}>
+                Save
+              </button>
+              <button
+                type="button"
+                className={styles.dangerButton}
+                onClick={() => deleteLiabilityDrawdownEvent(activeLiabilityDrawdown.eventId)}
+              >
+                Delete drawdown
               </button>
             </div>
           </section>

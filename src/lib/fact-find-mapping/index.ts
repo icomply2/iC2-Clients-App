@@ -301,6 +301,9 @@ const projectionScenarioSchema = {
           growthRateKey: { type: "string", enum: ["cpi", "cash", "none", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"] },
           centrelink: { type: "string", enum: ["exempt", "financial-asset", "assessable"] },
           reserveTarget: { anyOf: [{ type: "number" }, { type: "null" }] },
+          costBase: { anyOf: [{ type: "number" }, { type: "null" }] },
+          acquisitionDate: nullableString,
+          cgtTreatment: { type: "string", enum: ["taxable", "main-residence-exempt", "personal-use-exempt", "not-applicable"] },
         },
         required: [
           "assetId",
@@ -312,6 +315,9 @@ const projectionScenarioSchema = {
           "growthRateKey",
           "centrelink",
           "reserveTarget",
+          "costBase",
+          "acquisitionDate",
+          "cgtTreatment",
         ],
       },
     },
@@ -329,6 +335,8 @@ const projectionScenarioSchema = {
           annualInterestRate: { type: "number" },
           annualRepayment: { type: "number" },
           repaymentTiming: { type: "string", enum: ["start-of-year", "end-of-year"] },
+          repaymentType: { type: "string", enum: ["principal-and-interest", "interest-only"] },
+          interestDeductible: { type: "boolean" },
         },
         required: [
           "liabilityId",
@@ -339,6 +347,8 @@ const projectionScenarioSchema = {
           "annualInterestRate",
           "annualRepayment",
           "repaymentTiming",
+          "repaymentType",
+          "interestDeductible",
         ],
       },
     },
@@ -392,6 +402,8 @@ const projectionScenarioSchema = {
       },
     },
     assetSaleEvents: { type: "array", items: { type: "object" } },
+    assetPurchaseEvents: { type: "array", items: { type: "object" } },
+    liabilityDrawdownEvents: { type: "array", items: { type: "object" } },
     liabilityPaymentEvents: { type: "array", items: { type: "object" } },
     superContributionStrategies: { type: "array", items: { type: "object" } },
     superRolloverEvents: { type: "array", items: { type: "object" } },
@@ -438,6 +450,8 @@ const projectionScenarioSchema = {
     "assets",
     "liabilities",
     "assetSaleEvents",
+    "assetPurchaseEvents",
+    "liabilityDrawdownEvents",
     "liabilityPaymentEvents",
     "retirementAccounts",
     "superContributionStrategies",
@@ -554,6 +568,25 @@ function normalizeOwnerPersonId(ownerPersonId: string, people: ProjectionScenari
   }
 
   return people.some((person) => person.personId === ownerPersonId) ? ownerPersonId : primaryPersonId;
+}
+
+function defaultCgtTreatment(type: ProjectionScenario["assets"][number]["type"]): NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]> {
+  if (type === "primary-residence") return "main-residence-exempt";
+  if (["cash", "bank-account", "offset-account", "term-deposit"].includes(type)) return "not-applicable";
+  if (type === "home-contents" || type === "motor-vehicle" || type === "personal-asset") return "personal-use-exempt";
+  return "taxable";
+}
+
+function normalizeCgtTreatment(
+  value: unknown,
+  type: ProjectionScenario["assets"][number]["type"],
+): NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]> {
+  return value === "taxable" ||
+    value === "main-residence-exempt" ||
+    value === "personal-use-exempt" ||
+    value === "not-applicable"
+    ? value
+    : defaultCgtTreatment(type);
 }
 
 export async function extractFactFindText(file: File) {
@@ -715,6 +748,8 @@ export function normalizeProjectionScenario(record: ProjectionScenario, fileName
       liabilityId: slug(liability.liabilityId || liability.name || `liability-${index + 1}`) || `liability-${index + 1}`,
       ownerPersonId: normalizeOwnerPersonId(liability.ownerPersonId, people, primaryPersonId),
       annualRepayment: normalizeRepayment(normalizedLiability),
+      repaymentType: liability.repaymentType ?? "principal-and-interest",
+      interestDeductible: liability.interestDeductible ?? /investment|rental|business/i.test(`${liability.type} ${liability.name}`),
     };
   });
   const normalizedCashflowItems = (record.cashflowItems ?? [])
@@ -772,6 +807,9 @@ export function normalizeProjectionScenario(record: ProjectionScenario, fileName
         ownerPersonId: normalizeOwnerPersonId(asset.ownerPersonId, people, primaryPersonId),
         type: assetType,
         annualIncome: Number.isFinite(asset.annualIncome) ? asset.annualIncome : 0,
+        costBase: Number.isFinite(asset.costBase) ? asset.costBase : asset.openingValue,
+        acquisitionDate: asset.acquisitionDate ?? null,
+        cgtTreatment: normalizeCgtTreatment(asset.cgtTreatment, assetType),
         growthRateKey:
           assetType === "offset-account" || (assetType === "cash" && /offset/i.test(asset.name))
             ? "none"
@@ -782,6 +820,8 @@ export function normalizeProjectionScenario(record: ProjectionScenario, fileName
       };
     }),
     liabilities: normalizedLiabilities,
+    assetPurchaseEvents: record.assetPurchaseEvents ?? [],
+    liabilityDrawdownEvents: record.liabilityDrawdownEvents ?? [],
     retirementAccounts: (record.retirementAccounts ?? []).map((account, index) => ({
       ...account,
       accountId: slug(account.accountId || account.productName || `retirement-${index + 1}`) || `retirement-${index + 1}`,

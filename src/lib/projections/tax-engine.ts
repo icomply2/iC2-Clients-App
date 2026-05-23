@@ -69,12 +69,19 @@ export function calculatePersonalTax(input: {
   taxableAgePension: number;
   taxableBankInterest: number;
   taxableOtherIncome: number;
+  taxableCapitalGains?: number;
+  deductibleInterest?: number;
   taxFreeAccountBasedPension: number;
   seniorsAndPensionersTaxOffsetEligible?: boolean;
   relationshipStatus?: string | null;
   assumptions: LegislativeAssumptions;
 }): TaxProjectionYear {
-  const taxableIncome = input.taxableAgePension + input.taxableBankInterest + input.taxableOtherIncome;
+  const taxableCapitalGains = input.taxableCapitalGains ?? 0;
+  const deductibleInterest = input.deductibleInterest ?? 0;
+  const taxableIncome = Math.max(
+    input.taxableAgePension + input.taxableBankInterest + input.taxableOtherIncome + taxableCapitalGains - deductibleInterest,
+    0,
+  );
   const grossTax = calculateMarginalTax(taxableIncome, input.assumptions);
   const medicareLevy = calculateMedicareLevy(taxableIncome, input.assumptions);
   const lowIncomeTaxOffset = calculateLowIncomeTaxOffset(taxableIncome, input.assumptions);
@@ -91,6 +98,8 @@ export function calculatePersonalTax(input: {
     taxableAgePension: input.taxableAgePension,
     taxableBankInterest: input.taxableBankInterest,
     taxableOtherIncome: input.taxableOtherIncome,
+    taxableCapitalGains,
+    deductibleInterest,
     taxFreeAccountBasedPension: input.taxFreeAccountBasedPension,
     taxableIncome,
     grossTax,

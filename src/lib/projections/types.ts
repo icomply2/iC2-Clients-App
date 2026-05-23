@@ -45,6 +45,9 @@ export type ProjectionAsset = {
   growthRateKey: "none" | "cpi" | "cash" | "Defensive" | "Moderate" | "Balanced" | "Growth" | "High Growth";
   centrelink: "assessable" | "exempt" | "financial-asset";
   reserveTarget?: number | null;
+  costBase?: number | null;
+  acquisitionDate?: string | null;
+  cgtTreatment?: "taxable" | "main-residence-exempt" | "personal-use-exempt" | "not-applicable";
 };
 
 export type ProjectionLiability = {
@@ -56,6 +59,8 @@ export type ProjectionLiability = {
   annualInterestRate: number;
   annualRepayment: number;
   repaymentTiming: "start-of-year" | "end-of-year";
+  repaymentType?: "principal-and-interest" | "interest-only";
+  interestDeductible?: boolean;
 };
 
 export type AssetSaleEvent = {
@@ -77,6 +82,26 @@ export type LiabilityPaymentEvent = {
   amountMode: "full-balance" | "fixed-amount";
   fixedAmount?: number;
   sourceAssetId?: string | null;
+  enabled: boolean;
+};
+
+export type AssetPurchaseEvent = {
+  eventId: string;
+  label: string;
+  assetId: string;
+  purchaseDate: string | null;
+  amount: number;
+  sourceAssetId?: string | null;
+  enabled: boolean;
+};
+
+export type LiabilityDrawdownEvent = {
+  eventId: string;
+  label: string;
+  liabilityId: string;
+  drawdownDate: string | null;
+  amount: number;
+  targetAssetId?: string | null;
   enabled: boolean;
 };
 
@@ -167,6 +192,8 @@ export type ProjectionScenario = {
   assets: ProjectionAsset[];
   liabilities: ProjectionLiability[];
   assetSaleEvents: AssetSaleEvent[];
+  assetPurchaseEvents?: AssetPurchaseEvent[];
+  liabilityDrawdownEvents?: LiabilityDrawdownEvent[];
   liabilityPaymentEvents: LiabilityPaymentEvent[];
   retirementAccounts: RetirementAccount[];
   superContributionStrategies: SuperContributionStrategy[];
@@ -292,6 +319,8 @@ export type TaxProjectionYear = {
   taxableAgePension: number;
   taxableBankInterest: number;
   taxableOtherIncome: number;
+  taxableCapitalGains: number;
+  deductibleInterest: number;
   taxFreeAccountBasedPension: number;
   taxableIncome: number;
   grossTax: number;
@@ -373,9 +402,29 @@ export type ProjectionYearResult = {
   ageByPersonId: Record<string, number>;
   cashflowItemValues: Record<string, number>;
   assetSaleEventValues: Record<string, number>;
+  assetPurchaseEventValues: Record<string, number>;
   assetIncomeValues: Record<string, number>;
+  assetCostBases: Record<string, number>;
+  assetSaleEventCgtDetails: Record<
+    string,
+    {
+      proceeds: number;
+      costBaseUsed: number;
+      grossCapitalGain: number;
+      taxableCapitalGain: number;
+      discountApplied: number;
+      carriedForwardLossApplied: number;
+      cgtTreatment: NonNullable<ProjectionAsset["cgtTreatment"]>;
+    }
+  >;
   liabilityPaymentEventValues: Record<string, number>;
+  liabilityDrawdownEventValues: Record<string, number>;
   liabilityRepaymentValues: Record<string, number>;
+  liabilityInterestValues: Record<string, number>;
+  liabilityPrincipalRepaymentValues: Record<string, number>;
+  deductibleInterestByPersonId: Record<string, number>;
+  taxableCapitalGainsByPersonId: Record<string, number>;
+  carriedForwardCapitalLossesByPersonId: Record<string, number>;
   accountBasedPension: number;
   employerSuperContributions: number;
   concessionalContributionsTax: number;
