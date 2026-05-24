@@ -278,6 +278,14 @@
   font-weight: 800;
 }
 
+.sectionHeaderActions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
 .sectionCardText {
   color: #66788a;
   line-height: 1.6;

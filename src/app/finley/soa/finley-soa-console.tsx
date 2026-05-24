@@ -4684,9 +4684,20 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 <div className={styles.sectionCardTitle}>
                   {SECTION_CONFIGS.find((section) => section.id === activeSectionId)?.label}
                 </div>
-                <span className={`${styles.sectionStatusPill} ${styles.sectionStatusBadgeLarge} ${styles[`status${activeSectionStatus.replace(/-/g, "")}`]}`.trim()}>
-                  {getSectionStatusLabel(activeSectionStatus)}
-                </span>
+                <div className={styles.sectionHeaderActions}>
+                  {activeSectionId === "portfolio-allocation" ? (
+                    <button
+                      type="button"
+                      className={styles.sectionActionButton}
+                      onClick={() => setIsPortfolioAllocationEditing((current) => !current)}
+                    >
+                      {isPortfolioAllocationEditing ? "Save" : "Edit"}
+                    </button>
+                  ) : null}
+                  <span className={`${styles.sectionStatusPill} ${styles.sectionStatusBadgeLarge} ${styles[`status${activeSectionStatus.replace(/-/g, "")}`]}`.trim()}>
+                    {getSectionStatusLabel(activeSectionStatus)}
+                  </span>
+                </div>
               </div>
               {activeSectionId === "soa-introduction" ? (
                 <>
@@ -6577,15 +6588,6 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 <>
                   {portfolioAccountViews.some((account) => account.holdings.length || account.allocationComparison.length) ? (
                     <div className={styles.workflowDraftStack}>
-                      <div className={styles.sectionNavigationActions}>
-                        <button
-                          type="button"
-                          className={styles.sectionActionButton}
-                          onClick={() => setIsPortfolioAllocationEditing((current) => !current)}
-                        >
-                          {isPortfolioAllocationEditing ? "Save" : "Edit"}
-                        </button>
-                      </div>
                       {portfolioAccountViews.map((account) => (
                         <div key={account.accountId} className={styles.workflowDraftCard}>
                           <div className={styles.workflowDraftHeader}>
