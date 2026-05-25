@@ -40,8 +40,23 @@ export async function resolveCurrentUserFromApi(token: string) {
   }
 
   const payload = decodeJwtPayload(token);
+  const userId = payload
+    ? readStringClaim(payload, [
+        "Id",
+        "nameid",
+        "sub",
+        "uid",
+        "userId",
+        "id",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+      ])
+    : null;
+
+  if (!userId) {
+    return null;
+  }
  
-  const response = await fetch(new URL(`/api/Users/${payload.Id}`, apiBaseUrl), {
+  const response = await fetch(new URL(`/api/Users/${encodeURIComponent(userId)}`, apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",

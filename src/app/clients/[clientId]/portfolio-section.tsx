@@ -2055,7 +2055,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
                       externalClientId: event.target.value,
                     }))
                   }
-                  placeholder="e.g. 105143"
+                  placeholder={mappingForm.provider === "desktop-broker" ? "e.g. 105143" : "e.g 381407"}
                 />
               </label>
               <label className={styles.modalField}>
@@ -2069,6 +2069,7 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
                       externalAccountId: event.target.value,
                     }))
                   }
+                  placeholder={mappingForm.provider === "desktop-broker" ? "" : "e.g. XWRP007287"}
                 />
               </label>
               <label className={styles.modalField}>
