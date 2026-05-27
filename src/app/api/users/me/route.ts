@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import { resolveCurrentUserFromApi } from "@/lib/current-user";
+import { DEFAULT_DOCUMENT_STYLE_PROFILE, normalizeDocumentStyleProfile } from "@/lib/documents/document-style-profile";
 import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
+import { readUserProfileOverride } from "@/lib/user-profile-overrides-store";
 
 function decodeJwtPayload(token: string) {
   const parts = token.split(".");
@@ -43,6 +45,7 @@ export async function GET(request: NextRequest) {
             id: "mock-licensee-1",
             name: mockClientSummaries[0]?.clientAdviserLicenseeName ?? null,
           },
+          documentStyleProfile: DEFAULT_DOCUMENT_STYLE_PROFILE,
         },
       },
       { status: 200, headers: { "Cache-Control": "no-store" } },
@@ -63,7 +66,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ message: "Unable to resolve the signed-in user." }, { status: 404 });
     }
 
-    return NextResponse.json({ data: matchedUser }, { status: 200 });
+    const profileOverride = await readUserProfileOverride(matchedUser.id);
+
+    return NextResponse.json(
+      {
+        data: {
+          ...matchedUser,
+          documentStyleProfile: normalizeDocumentStyleProfile(profileOverride?.documentStyleProfile),
+        },
+      },
+      { status: 200 },
+    );
   } catch (error) {
     const message =
       error instanceof Error ? `Current user proxy failed: ${error.message}` : "Current user proxy failed.";

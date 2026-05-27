@@ -70,6 +70,19 @@ function toInputDate(value?: string | null) {
   return parsed.toISOString().slice(0, 10);
 }
 
+function dateSortValue(value?: string | null) {
+  if (!value) {
+    return 0;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+function fileNoteSortValue(note: FileNoteRecord) {
+  return dateSortValue(note.serviceDate) || dateSortValue(note.modifiedDate) || dateSortValue(note.createdDate);
+}
+
 function emptyDraft(): FileNoteDraft {
   return {
     id: null,
@@ -184,11 +197,13 @@ export function FileNotesSection({ profile, useMockFallback = false }: FileNotes
 
   const filteredNotes = useMemo(
     () =>
-      notes.filter((note) => {
-        const matchesSearch = !search || (note.subject ?? "").toLowerCase().includes(search.toLowerCase());
-        const matchesType = !typeFilter || note.type === typeFilter;
-        return matchesSearch && matchesType;
-      }),
+      notes
+        .filter((note) => {
+          const matchesSearch = !search || (note.subject ?? "").toLowerCase().includes(search.toLowerCase());
+          const matchesType = !typeFilter || note.type === typeFilter;
+          return matchesSearch && matchesType;
+        })
+        .toSorted((left, right) => fileNoteSortValue(right) - fileNoteSortValue(left)),
     [notes, search, typeFilter],
   );
 

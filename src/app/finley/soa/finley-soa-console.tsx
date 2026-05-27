@@ -2130,6 +2130,12 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
             disabled: isExtractingFactFindImport,
           });
         }
+        actions.push({
+          label: "Remove",
+          onClick: () => removeUpload(upload.id),
+          disabled: isExtractingFactFindImport && factFindImportSourceFile === upload.name,
+          variant: "danger" as const,
+        });
 
         return {
           id: upload.id,
@@ -2557,6 +2563,27 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       },
     ]);
     setIsUploadsModalOpen(true);
+  }
+
+  function removeUpload(uploadId: string) {
+    setUploads((current) => {
+      const uploadToRemove = current.find((upload) => upload.id === uploadId);
+      const nextUploads = current.filter((upload) => upload.id !== uploadId);
+
+      if (selectedProductRexUploadId === uploadId) {
+        const nextProductRexUpload = nextUploads.find((upload) => upload.productRexReport);
+        setSelectedProductRexUploadId(nextProductRexUpload?.id ?? null);
+      }
+
+      if (uploadToRemove && factFindImportSourceFile === uploadToRemove.name) {
+        setFactFindImportSourceFile(null);
+        setFactFindImportCandidate(null);
+        setFactFindImportError(null);
+        setIsFactFindImportModalOpen(false);
+      }
+
+      return nextUploads;
+    });
   }
 
   async function inspectFactFindUpload(upload: UploadedInput) {

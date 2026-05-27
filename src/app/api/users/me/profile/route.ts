@@ -140,7 +140,6 @@ export async function PATCH(request: NextRequest) {
       : {}),
   });
 
-  console.log("Updating user profile with data:", backendUserPatch);  
   if (cleanedProfile || Object.keys(supportedUserUpdate).length) {
     const response = await fetch(new URL(`/api/Users/${encodeURIComponent(currentUser.id)}`, API_BASE_URL), {
       method: "PATCH",

@@ -3,11 +3,17 @@
 import JSZip from "jszip";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { ClientProfile, ClientSummary, FileNoteRecord, PersonRecord } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
+import {
+  DEFAULT_DOCUMENT_STYLE_PROFILE,
+  DOCUMENT_STYLE_PROFILE_STORAGE_KEY,
+  normalizeDocumentStyleProfile,
+  type DocumentStyleProfile,
+} from "@/lib/documents/document-style-profile";
 import {
   FINLEY_FILE_NOTE_SUBTYPE_OPTIONS,
   type FinleyDisplayCard,
@@ -88,6 +94,8 @@ type EngagementLetterDraftCardState = {
   description: string;
   badge?: string;
   clientName: string;
+  primaryClientName?: string | null;
+  partnerName?: string | null;
   adviserName?: string | null;
   value: EngagementLetterDraftValue;
 };
@@ -203,6 +211,7 @@ type CurrentUserScope = {
     id?: string | null;
     name?: string | null;
   } | null;
+  documentStyleProfile?: Partial<DocumentStyleProfile> | null;
 };
 
 type ConciergeDocumentTag =
@@ -271,30 +280,48 @@ type FactFindApplyResponse = {
 function EngagementLetterRender({
   draft,
   clientName,
+  clientSignatureName,
+  partnerName,
   adviserName,
   practiceName,
   licenseeName,
   onExport,
   isExporting,
   exportError,
+  documentStyleProfile,
 }: {
   draft: EngagementLetterDraftValue;
   clientName: string;
+  clientSignatureName?: string | null;
+  partnerName?: string | null;
   adviserName?: string | null;
   practiceName?: string | null;
   licenseeName?: string | null;
   onExport: () => void | Promise<void>;
   isExporting: boolean;
   exportError?: string | null;
+  documentStyleProfile?: Partial<DocumentStyleProfile> | null;
 }) {
   const advicePreparationFee = parseCurrencyAmount(draft.advicePreparationFee);
   const implementationFee = parseCurrencyAmount(draft.implementationFee);
   const totalFee = advicePreparationFee + implementationFee;
+  const activeDocumentStyle = normalizeDocumentStyleProfile(documentStyleProfile);
+  const documentStyleVars = {
+    "--engagement-document-font-family": activeDocumentStyle.fontFamily,
+    "--engagement-document-body-color": activeDocumentStyle.bodyTextColor,
+    "--engagement-document-heading-color": activeDocumentStyle.headingColor,
+    "--engagement-document-table-header-bg": activeDocumentStyle.tableHeaderColor,
+    "--engagement-document-table-header-text": getDocumentTableHeaderTextColor(activeDocumentStyle.tableHeaderColor),
+  } as CSSProperties;
   const clientSalutationName = salutationName(clientName);
+  const reasonsHtml = stripHtml(draft.reasonsHtml)
+    ? draft.reasonsHtml
+    : buildDefaultEngagementReasonsHtml(adviserName);
   const servicesHtml = stripHtml(draft.servicesHtml)
     ? draft.servicesHtml
-    : buildDefaultEngagementServicesHtml(clientName);
+    : buildDefaultEngagementServicesHtml();
   const practice = practiceName?.trim() || "<<practice>>";
+  const signaturePeople = engagementSignaturePeople(clientSignatureName?.trim() || clientName, partnerName);
   const visibleExportError = exportError && !/docmosis/i.test(exportError) ? exportError : null;
 
   return (
@@ -316,124 +343,163 @@ function EngagementLetterRender({
 
       {visibleExportError ? <div className={styles.planWarning}>{visibleExportError}</div> : null}
 
-      <div className={styles.engagementPage}>
-        <div className={styles.engagementDate}>{formatToday()}</div>
-        <div className={styles.engagementAddressBlock}>
-          <strong>{clientName}</strong>
-          <span>&lt;&lt;address&gt;&gt;</span>
-          <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
-        </div>
+      <div className={styles.engagementDocument} style={documentStyleVars}>
+        <section className={styles.engagementPage}>
+          <div className={styles.engagementDate}>{formatToday()}</div>
+          <div className={styles.engagementAddressBlock}>
+            <strong>{clientName}</strong>
+            <span>&lt;&lt;address&gt;&gt;</span>
+            <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
+          </div>
 
-        <p>Dear {clientSalutationName},</p>
+          <p>Dear {clientSalutationName},</p>
 
-        <h1>Engagement Letter</h1>
+          <h1>Engagement Letter</h1>
 
-        <h2>Terms of Engagement</h2>
-        <p>
-          Further to our meeting and discussions, this document sets out to:
-        </p>
-        <ul className={styles.engagementList}>
-          <li>Detail your service expectations and outcomes, specify the service deliverables.</li>
-          <li>Provide a fee estimate.</li>
-          <li>Explain our trading terms and method of billing, and inform you of your next steps.</li>
-          <li>Provide general education information on the various financial concepts identified during our meeting.</li>
-        </ul>
-        <p>
-          An important part of our business philosophy is clear communication. We believe that it is essential that both
-          the client and the advisor have a clear understanding of their respective expectations and obligations in
-          relation to the provision of our services.
-        </p>
-        <p>
-          The world of finance, taxation and business advice has become more complex in recent years. Increasingly we
-          find ourselves advising on and providing a far broader range of services than ever before. This document
-          summarises the key elements of our future relationship so that we may ensure that your objectives are met and
-          that potential misunderstandings are avoided.
-        </p>
+          <h2>Terms of Engagement</h2>
+          <p>
+            Further to our meeting and discussions, this document sets out to:
+          </p>
+          <ul className={styles.engagementList}>
+            <li>Detail your service expectations and outcomes, specify the service deliverables.</li>
+            <li>Provide a fee estimate.</li>
+            <li>Explain our trading terms and method of billing, and inform you of your next steps.</li>
+            <li>Provide general education information on the various financial concepts identified during our meeting.</li>
+          </ul>
+          <p>
+            An important part of our business philosophy is clear communication. We believe that it is essential that both
+            the client and the advisor have a clear understanding of their respective expectations and obligations in
+            relation to the provision of our services.
+          </p>
+          <p>
+            The world of finance, taxation and business advice has become more complex in recent years. Increasingly we
+            find ourselves advising on and providing a far broader range of services than ever before. This document
+            summarises the key elements of our future relationship so that we may ensure that your objectives are met and
+            that potential misunderstandings are avoided.
+          </p>
 
-        <h2>Fee Estimate</h2>
-        <table className={styles.engagementFeeTable}>
-          <thead>
-            <tr>
-              <th>Fee type</th>
-              <th>Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Advice preparation fee</td>
-              <td>{formatCurrencyAmount(advicePreparationFee)}</td>
-            </tr>
-            <tr>
-              <td>Implementation fee</td>
-              <td>{formatCurrencyAmount(implementationFee)}</td>
-            </tr>
-            <tr className={styles.engagementFeeTotal}>
-              <td>Total</td>
-              <td>{formatCurrencyAmount(totalFee)}</td>
-            </tr>
-          </tbody>
-        </table>
+          <h2>Fee Estimate</h2>
+          <table className={styles.engagementFeeTable}>
+            <thead>
+              <tr>
+                <th>Fee type</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Advice preparation fee</td>
+                <td>{formatCurrencyAmount(advicePreparationFee)}</td>
+              </tr>
+              <tr>
+                <td>Implementation fee</td>
+                <td>{formatCurrencyAmount(implementationFee)}</td>
+              </tr>
+              <tr className={styles.engagementFeeTotal}>
+                <td>Total</td>
+                <td>{formatCurrencyAmount(totalFee)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className={styles.engagementPageNumber}>Engagement Letter</div>
+        </section>
 
-        <h2>Initial Advice Service</h2>
-        <p>
-          In order to achieve the outcomes and expectations for your particular circumstances, the services that we will
-          deliver are summarised below.
-        </p>
+        <section className={styles.engagementPage}>
+          <h2>Initial Advice Service</h2>
+          <p>
+            In order to achieve the outcomes and expectations for your particular circumstances, the services that we will
+            deliver are summarised below.
+          </p>
 
-        <h3>Tasks to be completed by us:</h3>
-        <div className={styles.engagementRichText} dangerouslySetInnerHTML={{ __html: servicesHtml }} />
+          <h3>Reasons for seeking advice</h3>
+          <div className={styles.engagementRichText} dangerouslySetInnerHTML={{ __html: reasonsHtml }} />
 
-        <p>
-          Where the implementation of your financial plan incurs additional costs, these will be disclosed to you in your
-          Statement of Advice. Where your decision leads to a clawback of commission, we reserve the right to charge a
-          fee to recoup our costs.
-        </p>
-        <p>
-          Should we discover that the advice you require is more complex than we had originally thought, we may need to
-          increase this fee. In this event, we will consult with you first before you incur any additional cost.
-        </p>
+          <h3>Tasks to be completed by us:</h3>
+          <div className={styles.engagementRichText} dangerouslySetInnerHTML={{ __html: servicesHtml }} />
 
-        <h2>Ongoing Advice Service</h2>
-        <p>
-          We may find as a result of our conversations with you that you would value ongoing advice. If this is the case,
-          we will provide you with an Ongoing Adviser Service Agreement for your consideration at the time of advice
-          presentation.
-        </p>
-        <p>
-          If you feel this service will be valuable to you, we would be happy to provide you with a fee estimate prior to
-          you engaging with our initial advice service.
-        </p>
+          <p>
+            Where the implementation of your financial plan incurs additional costs, these will be disclosed to you in your
+            Statement of Advice. Where your decision leads to a clawback of commission, we reserve the right to charge a
+            fee to recoup our costs.
+          </p>
+          <p>
+            Should we discover that the advice you require is more complex than we had originally thought, we may need to
+            increase this fee. In this event, we will consult with you first before you incur any additional cost.
+          </p>
 
-        <h2>Next Steps</h2>
-        <p>
-          Upon your completion of this engagement letter, we will contact you to begin the data collection process that
-          will allow us to completely understand your current situation, lifestyle objectives and goals.
-        </p>
+          <h2>Ongoing Advice Service</h2>
+          <p>
+            We may find as a result of our conversations with you that you would value ongoing advice. If this is the case,
+            we will provide you with an Ongoing Adviser Service Agreement for your consideration at the time of advice
+            presentation.
+          </p>
+          <p>
+            If you feel this service will be valuable to you, we would be happy to provide you with a fee estimate prior to
+            you engaging with our initial advice service.
+          </p>
 
-        <h2>Agreement</h2>
-        <p>
-          We ask that you sign this letter to confirm your understanding of these arrangements and to confirm our
-          engagement as your advisors. Could you please return a copy of this engagement letter to {practice}.
-          Alternatively, if you wish to further clarify any of the matters contained in this agreement, please contact
-          your adviser.
-        </p>
-        <p>
-          By agreeing to this document, either by printing and signing, electronic signature or written confirmation, you
-          are confirming your understanding of our business arrangements, and agreeing to pay the fee disclosed on the
-          first page of this document.
-        </p>
-        <p>This offer of engagement is valid for 30 days from its issue.</p>
-        <p>
-          We take this opportunity to once again thank you for our appointment. We look forward to a mutually beneficial
-          business partnership.
-        </p>
+          <h2>Next Steps</h2>
+          <p>
+            Upon your completion of this engagement letter, we will contact you to begin the data collection process that
+            will allow us to completely understand your current situation, lifestyle objectives and goals.
+          </p>
 
-        <div className={styles.engagementSignoff}>
-          <p>Yours sincerely,</p>
-          <strong>{adviserName?.trim() || "<<adviser.name>>"}</strong>
-          <span>{practiceName?.trim() || "<<practice.name>>"}</span>
-          <span>{licenseeName?.trim() || "<<licensee.name>>"}</span>
-        </div>
+          <h2>Agreement</h2>
+          <p>
+            We ask that you sign this letter to confirm your understanding of these arrangements and to confirm our
+            engagement as your advisors. Could you please return a copy of this engagement letter to {practice}.
+            Alternatively, if you wish to further clarify any of the matters contained in this agreement, please contact
+            your adviser.
+          </p>
+          <p>
+            By agreeing to this document, either by printing and signing, electronic signature or written confirmation, you
+            are confirming your understanding of our business arrangements, and agreeing to pay the fee disclosed on the
+            first page of this document.
+          </p>
+          <p>This offer of engagement is valid for 30 days from its issue.</p>
+          <p>
+            We take this opportunity to once again thank you for our appointment. We look forward to a mutually beneficial
+            business partnership.
+          </p>
+
+          <div className={styles.engagementSignoff}>
+            <p>Yours sincerely,</p>
+            <strong>{adviserName?.trim() || "<<adviser.name>>"}</strong>
+            <span>{practice}</span>
+            {licenseeName?.trim() ? <span>{licenseeName.trim()}</span> : null}
+          </div>
+          <div className={styles.engagementPageNumber}>Initial Advice Service</div>
+        </section>
+
+        <section className={styles.engagementPage}>
+          <div className={styles.engagementAcknowledgement}>
+            <h2>Your Acknowledgement - Engagement Letter</h2>
+            <p>You understand the engagement between you and {practice} will start on the date this agreement is signed.</p>
+            <p>You accept the services, fees and terms as outlined in this letter.</p>
+            <div
+              className={styles.engagementSignatureGrid}
+              style={{
+                gridTemplateColumns:
+                  signaturePeople.length > 1 ? "repeat(2, minmax(0, 1fr))" : "minmax(14rem, 22rem)",
+              }}
+            >
+              {signaturePeople.map((name) => (
+                <div key={name} className={styles.engagementSignatureBlock}>
+                  <div className={styles.engagementSignatureLine}>
+                    <strong>Signed:</strong>
+                    <span />
+                  </div>
+                  <div className={styles.engagementSignatureName}>{name}</div>
+                  <div className={styles.engagementSignatureLine}>
+                    <strong>Date:</strong>
+                    <span />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className={styles.engagementPageNumber}>Acknowledgement</div>
+        </section>
       </div>
     </div>
   );
@@ -976,11 +1042,13 @@ function AgreementRender({
   onExport,
   isExporting,
   exportError,
+  documentStyleProfile,
 }: {
   agreement: AgreementDraftCardState;
   onExport: () => void | Promise<void>;
   isExporting: boolean;
   exportError?: string | null;
+  documentStyleProfile?: Partial<DocumentStyleProfile> | null;
 }) {
   const isAnnual = agreement.agreementType === "annual";
   const clientSalutationName = salutationName(agreement.clientName);
@@ -1001,6 +1069,41 @@ function AgreementRender({
   const acknowledgementItems = isAnnual
     ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
     : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS;
+  const activeDocumentStyle = normalizeDocumentStyleProfile(documentStyleProfile);
+  const documentStyleVars = {
+    "--engagement-document-font-family": activeDocumentStyle.fontFamily,
+    "--engagement-document-body-color": activeDocumentStyle.bodyTextColor,
+    "--engagement-document-heading-color": activeDocumentStyle.headingColor,
+    "--engagement-document-table-header-bg": activeDocumentStyle.tableHeaderColor,
+    "--engagement-document-table-header-text": getDocumentTableHeaderTextColor(activeDocumentStyle.tableHeaderColor),
+  } as CSSProperties;
+  const firstAgreementDetailSections = detailSections.slice(0, 1);
+  const remainingAgreementDetailSections = detailSections.slice(1);
+  const arrangementLabel = isAnnual ? "fixed term fee arrangement" : "ongoing fee arrangement";
+  const consentIntro =
+    isAnnual
+      ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+      : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.";
+  const consentRequired =
+    isAnnual
+      ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+      : "This consent may be withdrawn by you at any time by notifying us in writing.";
+  const terminationText = `You can terminate this ${arrangementLabel} at any time by providing us with written notice. If you terminate the arrangement in writing, no further fees will be charged to you, and no further services will be provided by us.`;
+  const feeHeading = isAnnual
+    ? "What fees are payable under my fixed term fee arrangement?"
+    : "What fees are payable under my ongoing fee arrangement?";
+  const feeDescription = isAnnual
+    ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+    : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:";
+  const servicesDescription = isAnnual
+    ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+    : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below.";
+  const consentDuration = isAnnual
+    ? "Your fixed term fee arrangement expiry date is to be confirmed."
+    : "Your ongoing fee arrangement anniversary date is to be confirmed.";
+  const renewalNotice = isAnnual
+    ? "We will contact you before this date with instructions about how you can enter into a further fixed term fee arrangement."
+    : "We will contact you before this date with instructions about how you can renew your ongoing fee arrangement.";
 
   return (
     <div className={styles.engagementRender}>
@@ -1021,124 +1124,147 @@ function AgreementRender({
 
       {exportError ? <div className={styles.planWarning}>{exportError}</div> : null}
 
-      <div className={styles.engagementPage}>
-        <div className={styles.engagementDate}>{formatToday()}</div>
-        <div className={styles.engagementAddressBlock}>
-          <strong>{agreement.clientName}</strong>
-          {agreement.clientAddressLines?.length ? (
-            agreement.clientAddressLines.map((line) => <span key={line}>{line}</span>)
-          ) : (
-            <>
-              <span>&lt;&lt;address&gt;&gt;</span>
-              <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
-            </>
-          )}
-        </div>
-
-        <h1>{title}</h1>
-        <p>Dear {clientSalutationName},</p>
-        {openingParagraphs.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
-
-        {detailSections.map((section) => (
-          <div key={section.heading} className={styles.engagementRichText}>
-            <h2>{section.heading}</h2>
-            {section.paragraphs.map((paragraph) => (
-              <p key={paragraph}>{paragraph}</p>
-            ))}
+      <div className={styles.engagementDocument} style={documentStyleVars}>
+        <section className={styles.engagementPage}>
+          <div className={styles.engagementDate}>{formatToday()}</div>
+          <div className={styles.engagementAddressBlock}>
+            <strong>{agreement.clientName}</strong>
+            {agreement.clientAddressLines?.length ? (
+              agreement.clientAddressLines.map((line) => <span key={line}>{line}</span>)
+            ) : (
+              <>
+                <span>&lt;&lt;address&gt;&gt;</span>
+                <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
+              </>
+            )}
           </div>
-        ))}
-        <h2>Your Acknowledgement</h2>
-        {acknowledgementParagraphs.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
-        <ul>
-          {acknowledgementItems.map((item) => (
-            <li key={item}>{item}</li>
+
+          <h1>{title}</h1>
+          <p>Dear {clientSalutationName},</p>
+          {openingParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
           ))}
-        </ul>
+          {firstAgreementDetailSections.map((section) => (
+            <div key={section.heading} className={styles.engagementRichText}>
+              <h2>{section.heading}</h2>
+              {section.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </div>
+          ))}
+          <div className={styles.engagementPageNumber}>{title}</div>
+        </section>
 
-        <h2>Consent To Deduct Fees From Your Account</h2>
-        <p>
-          {isAnnual
-            ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
-            : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement."}
-        </p>
-        {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
-        <p>
-          {isAnnual
-            ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
-            : "This consent may be withdrawn by you at any time by notifying us in writing."}
-        </p>
-
-        <h2>{isAnnual ? "What fees are payable under my fixed term fee arrangement?" : "What fees are payable under my ongoing fee arrangement?"}</h2>
-        <p>
-          {isAnnual
-            ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
-            : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:"}
-        </p>
-        <table className={styles.engagementFeeTable}>
-          <thead>
-            <tr>
-              <th>Entity</th>
-              <th>Product</th>
-              <th>Fee amount</th>
-              <th>Frequency</th>
-              <th>Annual fee</th>
-            </tr>
-          </thead>
-          <tbody>
-            {fees.map((fee) => (
-              <tr key={`consent-${fee.id}`}>
-                <td>{fee.entity}</td>
-                <td>{fee.product}</td>
-                <td>{fee.feeAmount}</td>
-                <td>{fee.frequency}</td>
-                <td>{fee.annualFee}</td>
-              </tr>
+        <section className={styles.engagementPage}>
+          <h1>{title}</h1>
+          {remainingAgreementDetailSections.map((section) => (
+            <div key={section.heading} className={styles.engagementRichText}>
+              <h2>{section.heading}</h2>
+              {section.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </div>
+          ))}
+          <h2>Your Acknowledgement</h2>
+          {acknowledgementParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+          <ul className={styles.engagementList}>
+            {acknowledgementItems.map((item) => (
+              <li key={item}>{item}</li>
             ))}
-            <tr className={styles.engagementFeeTotal}>
-              <td colSpan={4}>Total annual advice fees</td>
-              <td>{totalAnnualFee}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        <h2>The services you are entitled to receive</h2>
-        <p>
-          {isAnnual
-            ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
-            : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below."}
-        </p>
-        {serviceGroups.map((group, index) => (
-          <div key={`consent-${group.heading ?? "services"}-${index}`} className={styles.engagementRichText}>
-            {group.heading ? <h3>{group.heading}</h3> : null}
-            {group.items.length ? (
-              <ul>
-                {group.items.map((item, itemIndex) => (
-                  <li key={`consent-${itemIndex}-${item}`}>{item}</li>
-                ))}
-              </ul>
-            ) : null}
+          </ul>
+          <div className={styles.engagementSignoff}>
+            <p>Signed: ______________________________</p>
+            <strong>{agreement.clientName}</strong>
+            <p>Date: ______________________________</p>
+            <p>Adviser: {agreement.adviserName?.trim() || "<<adviser.name>>"}</p>
           </div>
-        ))}
+          <div className={styles.engagementPageNumber}>{title}</div>
+        </section>
 
-        <h2>Your consent to deduct fees from your account</h2>
-        <p>
-          {isAnnual
-            ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
-            : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form."}
-        </p>
+        <section className={styles.engagementPage}>
+          <h1>Consent To Deduct Fees</h1>
+          <h2>Consent To Deduct Fees From Your Account</h2>
+          <p>{consentIntro}</p>
+          {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
+          <p>{consentRequired}</p>
+          <p>{terminationText}</p>
 
-        <div className={styles.engagementSignoff}>
-          <p>Signed: ______________________________</p>
-          <strong>{agreement.clientName}</strong>
-          <p>Date: ______________________________</p>
-          <p>Adviser: {agreement.adviserName?.trim() || "<<adviser.name>>"}</p>
-          <span>{agreement.practiceName?.trim() || "<<practice.name>>"}</span>
-          <span>{agreement.licenseeName?.trim() || "<<licensee.name>>"}</span>
-        </div>
+          <h2>{feeHeading}</h2>
+          <p>{feeDescription}</p>
+          <table className={styles.engagementFeeTable}>
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>Product</th>
+                <th>Fee amount</th>
+                <th>Frequency</th>
+                <th>Annual fee</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fees.map((fee) => (
+                <tr key={`consent-${fee.id}`}>
+                  <td>{fee.entity}</td>
+                  <td>{fee.product}</td>
+                  <td>{fee.feeAmount}</td>
+                  <td>{fee.frequency}</td>
+                  <td>{fee.annualFee}</td>
+                </tr>
+              ))}
+              <tr className={styles.engagementFeeTotal}>
+                <td colSpan={4}>Total annual advice fees</td>
+              <td>{totalAnnualFee}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className={styles.engagementPageNumber}>Consent To Deduct Fees</div>
+        </section>
+
+        <section className={styles.engagementPage}>
+          <h1>Consent To Deduct Fees</h1>
+          <h2>The services you are entitled to receive</h2>
+          <p>{servicesDescription}</p>
+          {serviceGroups.map((group, index) => (
+            <div key={`consent-${group.heading ?? "services"}-${index}`} className={styles.engagementRichText}>
+              {group.heading ? <h3>{group.heading}</h3> : null}
+              {group.items.length ? (
+                <ul>
+                  {group.items.map((item, itemIndex) => (
+                    <li key={`consent-${itemIndex}-${item}`}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ))}
+
+          <h2>Who is my financial adviser under this agreement?</h2>
+          <p>Your financial adviser and fee recipient is as follows:</p>
+          <div className={styles.engagementSignoff}>
+            <strong>{agreement.adviserName?.trim() || "<<adviser.name>>"}</strong>
+            <span>{agreement.practiceName?.trim() || "<<practice.name>>"}</span>
+            <span>{agreement.licenseeName?.trim() || "<<licensee.name>>"}</span>
+          </div>
+
+          <h2>How long will my consent last?</h2>
+          <p>{consentDuration}</p>
+          <p>{renewalNotice}</p>
+
+          <h2>Your consent to deduct fees from your account</h2>
+          <p>
+            {isAnnual
+              ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+              : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form."}
+          </p>
+
+          <div className={styles.engagementSignoff}>
+            <p>Signed: ______________________________</p>
+            <strong>{agreement.clientName}</strong>
+            <p>Date: ______________________________</p>
+          </div>
+          <div className={styles.engagementPageNumber}>Consent To Deduct Fees</div>
+        </section>
       </div>
     </div>
   );
@@ -1753,8 +1879,8 @@ function buildEngagementDraftFromUploadedContext(
     "service-agreement",
   ]);
   const fallback = {
-    reasonsHtml: buildDefaultEngagementReasonsHtml(clientName, adviserName),
-    servicesHtml: buildDefaultEngagementServicesHtml(clientName),
+    reasonsHtml: buildDefaultEngagementReasonsHtml(adviserName),
+    servicesHtml: buildDefaultEngagementServicesHtml(),
     advicePreparationFee: "",
     implementationFee: "",
   };
@@ -1779,15 +1905,15 @@ function buildEngagementDraftFromUploadedContext(
 
   return {
     reasonsHtml: [
-      `<p>Based on our discussions and the information you have provided, we understand you are seeking advice that is relevant to your current circumstances and objectives.</p>`,
+      "<p>Based on our discussions and the information you have provided, you have asked us to help with advice that is relevant to your current circumstances and objectives.</p>",
       "<ul>",
       ...(reasonLines.length
         ? reasonLines.map((line) => `<li>${escapeHtml(line)}</li>`)
-        : ["<li>Review the client’s current circumstances, retirement position, advice needs, and agreed next steps.</li>"]),
+        : ["<li>Review your current circumstances, retirement position, advice needs and agreed next steps.</li>"]),
       "</ul>",
     ].join(""),
     servicesHtml: [
-      `<p>We will provide advice and assistance that is tailored to your circumstances. This may include the following services:</p>`,
+      "<p>We will provide advice and assistance that is tailored to your circumstances. This may include the following services:</p>",
       "<ul>",
       ...(clientFacingServiceBullets.length
         ? clientFacingServiceBullets.map((line) => `<li>${escapeHtml(line)}</li>`)
@@ -2094,22 +2220,30 @@ function formatCurrencyAmount(value: number) {
   }).format(value);
 }
 
-function buildDefaultEngagementReasonsHtml(clientName: string, adviserName?: string | null) {
+function getDocumentTableHeaderTextColor(hexColor: string) {
+  const red = Number.parseInt(hexColor.slice(1, 3), 16);
+  const green = Number.parseInt(hexColor.slice(3, 5), 16);
+  const blue = Number.parseInt(hexColor.slice(5, 7), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance >= 145 ? "#113864" : "#ffffff";
+}
+
+function buildDefaultEngagementReasonsHtml(adviserName?: string | null) {
   const adviser = adviserName?.trim() || "your adviser";
 
   return [
-    `<p>${clientName} is seeking advice to confirm current priorities and set a clear scope for the next stage of advice.</p>`,
+    "<p>You have asked us to help clarify your current priorities and agree the scope of advice for the next stage of work.</p>",
     "<ul>",
-    "<li>Review your current financial position and identify the key advice needs to be addressed.</li>",
-    "<li>Clarify the advice services, deliverables, and next steps for this engagement.</li>",
-    `<li>Document the basis on which ${adviser} will provide advice and implementation support.</li>`,
+    "<li>We will review the information you have provided about your current financial position, goals and advice needs.</li>",
+    "<li>We will confirm the services, deliverables and next steps that are relevant to this engagement.</li>",
+    `<li>We will document how ${adviser} will provide advice and, where you choose to proceed, implementation support.</li>`,
     "</ul>",
   ].join("");
 }
 
-function buildDefaultEngagementServicesHtml(clientName: string) {
+function buildDefaultEngagementServicesHtml() {
   return [
-    `<p>The following services are proposed for ${clientName} as part of this engagement:</p>`,
+    "<p>As part of this engagement, we expect to provide the following services:</p>",
     "<ul>",
     "<li>Initial discovery and fact find review.</li>",
     "<li>Research and preparation of advice recommendations.</li>",
@@ -2117,6 +2251,14 @@ function buildDefaultEngagementServicesHtml(clientName: string) {
     "<li>Implementation support for agreed recommendations, where instructed.</li>",
     "</ul>",
   ].join("");
+}
+
+function engagementSignaturePeople(clientName: string, partnerName?: string | null) {
+  const names = [clientName, partnerName]
+    .map((name) => name?.trim())
+    .filter((name): name is string => Boolean(name));
+
+  return Array.from(new Map(names.map((name) => [name.toLowerCase(), name])).values());
 }
 
 type FinleyClientSummary = ClientSummary & {
@@ -2274,6 +2416,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
+  const [documentStyleProfile, setDocumentStyleProfile] = useState<DocumentStyleProfile>(
+    DEFAULT_DOCUMENT_STYLE_PROFILE,
+  );
   const [displayCard, setDisplayCard] = useState<FinleyDisplayCard | null>(null);
   const [returnDisplayCard, setReturnDisplayCard] = useState<FinleyDisplayCard | null>(null);
   const [editorCard, setEditorCard] = useState<FinleyEditorCard | FinleyTableEditorCard | null>(null);
@@ -2509,8 +2654,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ? "insurance" as const
                   : "default" as const,
         })),
-        actions:
-          upload.tags.includes("fact-find") || upload.file || upload.extractedText?.trim()
+        actions: [
+          ...(upload.tags.includes("fact-find") || upload.file || upload.extractedText?.trim()
             ? [
                 {
                   label:
@@ -2523,7 +2668,14 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   disabled: !activeClient || isExtractingFactFindImport,
                 },
               ]
-            : [],
+            : []),
+          {
+            label: "Remove",
+            onClick: () => removeConciergeUpload(upload.id),
+            disabled: isExtractingFactFindImport && factFindImportSourceFile === upload.name,
+            variant: "danger" as const,
+          },
+        ],
       })),
     [activeClient, conciergeUploads, factFindImportSourceFile, isExtractingFactFindImport],
   );
@@ -2579,6 +2731,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           body?.data?.items?.map((item) => ({
             id: item.id,
             name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
+            primaryClientName: item.client?.name?.trim() || undefined,
+            partnerName: item.partner?.name?.trim() || undefined,
             clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
             clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
             clientAdviserLicenseeName: item.clientAdviserLicenseeName ?? item.licensee,
@@ -2656,6 +2810,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         }
 
         setCurrentUserScope(body.data);
+        setDocumentStyleProfile(normalizeDocumentStyleProfile(body.data.documentStyleProfile));
       } catch {
         // Leave the new client defaults blank if the current user cannot be resolved.
       }
@@ -2666,6 +2821,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const storedProfile = window.localStorage.getItem(DOCUMENT_STYLE_PROFILE_STORAGE_KEY);
+      if (!storedProfile) {
+        return;
+      }
+
+      setDocumentStyleProfile(normalizeDocumentStyleProfile(JSON.parse(storedProfile) as Partial<DocumentStyleProfile>));
+    } catch {
+      setDocumentStyleProfile(DEFAULT_DOCUMENT_STYLE_PROFILE);
+    }
   }, []);
 
   function selectClient(clientId: string) {
@@ -3163,6 +3331,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             "Send your client an initial engagement letter to outline the services you will provide and disclose the costs of your advice.",
           badge: "Live Render",
           clientName,
+          primaryClientName: activeClient.primaryClientName ?? clientName,
+          partnerName: activeClient.partnerName ?? null,
           adviserName,
           value: uploadedDraft,
         });
@@ -3366,6 +3536,26 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     } finally {
       setIsUploadingConciergeFiles(false);
     }
+  }
+
+  function removeConciergeUpload(uploadId: string) {
+    setConciergeUploads((current) => {
+      const uploadToRemove = current.find((upload) => upload.id === uploadId);
+      const nextUploads = current.filter((upload) => upload.id !== uploadId);
+
+      if (uploadToRemove && factFindImportSourceFile === uploadToRemove.name) {
+        setFactFindImportSourceFile(null);
+        setFactFindImportCandidate(null);
+        setFactFindImportError(null);
+        setIsFactFindImportModalOpen(false);
+      }
+
+      if (!nextUploads.length) {
+        setIsConciergeSuggestionDismissed(true);
+      }
+
+      return nextUploads;
+    });
   }
 
   async function handleConciergeSuggestedTask(task: ConciergeSuggestedTask) {
@@ -5067,12 +5257,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             <EngagementLetterRender
               draft={engagementLetterDraftCard.value}
               clientName={engagementLetterDraftCard.clientName}
+              clientSignatureName={engagementLetterDraftCard.primaryClientName ?? activeClient?.primaryClientName}
+              partnerName={engagementLetterDraftCard.partnerName ?? activeClient?.partnerName}
               adviserName={engagementLetterDraftCard.adviserName}
               practiceName={activeClient?.clientAdviserPracticeName ?? currentUserScope?.practice?.name}
               licenseeName={activeClient?.clientAdviserLicenseeName}
               onExport={() => void handleEngagementLetterGenerateDocx()}
               isExporting={isGeneratingEngagementLetterDocx}
               exportError={engagementLetterWorkflowError}
+              documentStyleProfile={documentStyleProfile}
             />
           ) : null}
 
@@ -5091,6 +5284,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               onExport={() => void handleAgreementGenerateDocx()}
               isExporting={isGeneratingAgreementDocx}
               exportError={agreementWorkflowError}
+              documentStyleProfile={documentStyleProfile}
             />
           ) : null}
 
