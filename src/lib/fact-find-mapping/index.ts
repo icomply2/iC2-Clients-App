@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import {
   createEmptyFactFindImportCandidate,
+  sanitizeFactFindImportCandidate,
   type FactFindImportCandidate,
 } from "@/lib/fact-find-import";
 import type { IntakeDocumentInsightV1 } from "@/lib/soa-output-contracts";
@@ -1227,7 +1228,7 @@ function createResult(
   model: string | null,
   warning?: string,
 ): SharedFactFindMappingResult {
-  const candidate = normalizeFactFindCandidate(value.candidate, sourceFileName);
+  const candidate = sanitizeFactFindImportCandidate(normalizeFactFindCandidate(value.candidate, sourceFileName));
   const scenario = normalizeProjectionScenario(value.scenario, sourceFileName);
   const confirmationsRequired = [
     ...(value.confirmationsRequired ?? []),

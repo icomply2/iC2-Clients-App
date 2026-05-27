@@ -783,7 +783,7 @@ const collectionLookups: CollectionLookup[] = [
             formatCurrencyDisplay(item.salary),
             getEmploymentFrequency(item),
           ],
-          editAction: null,
+          editAction: item.id ? { kind: "employment", recordId: item.id, label: "Edit" } : null,
         })),
         footer: null,
       });

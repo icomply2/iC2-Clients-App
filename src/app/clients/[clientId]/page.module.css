@@ -687,6 +687,38 @@
   font-weight: 800;
 }
 
+.factFindDataTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.factFindBulkDeleteButton {
+  min-height: 2.2rem;
+  padding: 0 0.85rem;
+  border: 1px solid #f3b3ae;
+  border-radius: 0.55rem;
+  background: #fff5f5;
+  color: #b42318;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.factFindBulkDeleteButton:hover:not(:disabled) {
+  border-color: #b42318;
+  background: #fff0f0;
+}
+
+.factFindBulkDeleteButton:disabled {
+  border-color: #d7dee7;
+  background: #f8fafc;
+  color: #8a99ab;
+  cursor: not-allowed;
+}
+
 .factFindDetailSections {
   display: grid;
   gap: 0.85rem;
@@ -789,6 +821,25 @@
 
 .factFindDataTableActionHeaderCell {
   text-align: center;
+}
+
+.factFindDataTableSelectCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 0.3rem;
+  padding-left: 0.3rem;
+}
+
+.factFindRowCheckbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #f2c500;
+  cursor: pointer;
+}
+
+.factFindRowCheckbox:disabled {
+  cursor: not-allowed;
 }
 
 .factFindDataTableCell {

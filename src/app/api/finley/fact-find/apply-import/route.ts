@@ -15,7 +15,7 @@ import type {
   PersonRecord,
 } from "@/lib/api/types";
 import { readAuthTokenFromCookies, readCurrentUserFromCookies, type CurrentUser } from "@/lib/auth";
-import type { FactFindImportCandidate, FactFindOwnerRecord } from "@/lib/fact-find-import";
+import { sanitizeFactFindImportCandidate, type FactFindImportCandidate, type FactFindOwnerRecord } from "@/lib/fact-find-import";
 import { updateClientDetails, updatePartnerDetails, updatePersonRiskProfile, upsertEmploymentRecords } from "@/lib/services/client-updates";
 import { saveDependantCollection, saveEntityCollection } from "@/lib/services/identity-relations";
 import { saveAssetCollection, saveFinancialCollection } from "@/lib/services/profile-collections";
@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
     | null;
 
   const clientId = body?.clientId?.trim();
-  const candidate = body?.candidate;
+  const candidate = body?.candidate ? sanitizeFactFindImportCandidate(body.candidate) : null;
 
   if (!clientId || !candidate) {
     return NextResponse.json({ error: "Client id and extracted fact find data are required." }, { status: 400 });

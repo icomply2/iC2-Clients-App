@@ -107,6 +107,80 @@ export function getFactFindImportCounts(candidate: FactFindImportCandidate): Fac
   };
 }
 
+function parseCandidateMoneyValue(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const lowered = trimmed.toLowerCase();
+  if (["nil", "n/a", "na", "none", "no", "not applicable", "-"].includes(lowered)) {
+    return 0;
+  }
+
+  const cleaned = trimmed.replace(/[^0-9.-]/g, "");
+  if (!cleaned || cleaned === "." || cleaned === "-") {
+    return null;
+  }
+
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? Math.abs(parsed) : null;
+}
+
+function hasNonZeroMoney(value?: string | null) {
+  const parsed = parseCandidateMoneyValue(value);
+  return parsed !== null && parsed > 0;
+}
+
+function liabilityText(record: FactFindLiabilityCandidate) {
+  return [
+    record.description,
+    record.type,
+    record.bankName,
+    record.provider,
+    record.accountNumber,
+    record.notes,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isLikelyFactFindLiability(record: FactFindLiabilityCandidate) {
+  const text = liabilityText(record);
+  const hasLiabilitySignal =
+    /\b(?:mortgage|home loan|loan|line of credit|credit card|overdraft|debt|liabilit|hecs|help|margin loan|lease|finance)\b/i.test(text);
+  const hasPromptOrSectionSignal =
+    /\b(?:additional information|life insured|total issued shares|retirement goals|advice limitations|incomplete|risk profile|ease of management|access to|client declaration|category|short term|initial reason|financial adviser|superannuation objectives)\b/i.test(text) ||
+    /^(?:type|high|medium|low|client\s*\d|suzanne|mark|yes|no|n\/a|\(net of tax\))$/i.test(text.trim());
+  const hasExplicitBalance = hasNonZeroMoney(record.outstandingBalance);
+  const hasFallbackAmount = hasNonZeroMoney(record.amount);
+  const hasRepayment = hasNonZeroMoney(record.repaymentAmount);
+  const hasInterestRate = Boolean(record.interestRate?.trim());
+  const hasLender = Boolean(record.bankName?.trim() || record.provider?.trim());
+  const hasFinancialEvidence = hasExplicitBalance || (hasFallbackAmount && (hasLender || hasRepayment || hasInterestRate));
+
+  if (hasPromptOrSectionSignal && !hasLiabilitySignal) {
+    return false;
+  }
+
+  return hasFinancialEvidence && (hasLiabilitySignal || (hasLender && (hasRepayment || hasInterestRate)));
+}
+
+export function sanitizeFactFindImportCandidate(candidate: FactFindImportCandidate): FactFindImportCandidate {
+  const liabilities = candidate.liabilities.filter(isLikelyFactFindLiability);
+  const removedLiabilityCount = candidate.liabilities.length - liabilities.length;
+
+  return {
+    ...candidate,
+    liabilities,
+    warnings: removedLiabilityCount > 0
+      ? [
+          ...candidate.warnings,
+          `Skipped ${removedLiabilityCount} non-liability row${removedLiabilityCount === 1 ? "" : "s"} from the fact find liability mapping.`,
+        ]
+      : candidate.warnings,
+  };
+}
+
 export function createEmptyFactFindImportCandidate(sourceFileName: string): FactFindImportCandidate {
   return {
     sourceFileName,

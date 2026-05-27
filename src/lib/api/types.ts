@@ -148,8 +148,10 @@ export type ClientSummary = {
 
 export type AdviserSummary = {
   id?: string | null;
+  entityId?: string | null;
   name?: string | null;
   email?: string | null;
+  userRole?: string | null;
   practiceName?: string | null;
   licenseeName?: string | null;
   licenseeId?: string | null;

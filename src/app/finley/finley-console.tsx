@@ -4150,7 +4150,17 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function handleDisplayCardEdit(
-    kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants",
+    kind:
+      | "assets"
+      | "liabilities"
+      | "employment"
+      | "income"
+      | "expenses"
+      | "superannuation"
+      | "retirement-income"
+      | "insurance"
+      | "entities"
+      | "dependants",
     recordId: string,
   ) {
     if (!activeClientId || !activeClient) return;

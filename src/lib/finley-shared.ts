@@ -38,7 +38,17 @@ export type FinleyDisplayCard = {
     id: string;
     cells: string[];
     editAction?: {
-      kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
+      kind:
+        | "assets"
+        | "liabilities"
+        | "employment"
+        | "income"
+        | "expenses"
+        | "superannuation"
+        | "retirement-income"
+        | "insurance"
+        | "entities"
+        | "dependants";
       recordId: string;
       label?: string;
     } | null;

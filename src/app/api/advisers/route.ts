@@ -1,8 +1,69 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
-import type { AdviserSummary } from "@/lib/api/types";
+import type { AdviserSummary, UserSummary } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
+
+function normalizeText(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function matchesScope(record: { practiceName?: string | null; licenseeName?: string | null }, practiceName?: string | null, licenseeName?: string | null) {
+  const scopedPractice = normalizeText(practiceName);
+  const scopedLicensee = normalizeText(licenseeName);
+  const recordPractice = normalizeText(record.practiceName);
+  const recordLicensee = normalizeText(record.licenseeName);
+
+  return (!scopedPractice || recordPractice === scopedPractice) && (!scopedLicensee || recordLicensee === scopedLicensee);
+}
+
+function userToAdviserSummary(user: UserSummary): AdviserSummary | null {
+  if (normalizeText(user.userRole) !== "adviser" || !user.name?.trim()) {
+    return null;
+  }
+
+  return {
+    id: user.id ?? null,
+    entityId: user.entityId ?? null,
+    name: user.name ?? null,
+    email: user.email ?? null,
+    userRole: user.userRole ?? null,
+    practiceName: user.practice?.name ?? null,
+    licenseeName: user.licensee?.name ?? null,
+    licenseeId: user.licensee?.id ?? null,
+  };
+}
+
+async function fetchJson<T>(url: URL, token?: string | null) {
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    cache: "no-store",
+  });
+
+  const body = (await response.json().catch(() => null)) as { data?: T | null; message?: string | null } | null;
+  if (!response.ok) {
+    throw new Error(body?.message ?? `Request failed with status ${response.status}.`);
+  }
+
+  return body?.data ?? null;
+}
+
+function dedupeAdvisers(advisers: AdviserSummary[]) {
+  return Array.from(
+    new Map(
+      advisers
+        .filter((adviser) => adviser.name?.trim())
+        .map((adviser) => [
+          `${normalizeText(adviser.email)}|${normalizeText(adviser.name)}|${normalizeText(adviser.practiceName)}`,
+          adviser,
+        ]),
+    ).values(),
+  ).sort((left, right) => (left.name ?? "").localeCompare(right.name ?? ""));
+}
 
 export async function GET(request: NextRequest) {
   const apiBaseUrl = getApiBaseUrl();
@@ -61,25 +122,32 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+    const usersUrl = new URL("/api/Users", apiBaseUrl);
 
-    const response = await fetch(upstreamUrl, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      cache: "no-store",
-    });
+    const [adviserRecordsResult, userRecordsResult] = await Promise.allSettled([
+      fetchJson<AdviserSummary[]>(upstreamUrl, token),
+      fetchJson<UserSummary[]>(usersUrl, token),
+    ]);
 
-    const text = await response.text();
-    const contentType = response.headers.get("content-type") ?? "application/json";
+    const adviserRecords =
+      adviserRecordsResult.status === "fulfilled"
+        ? (adviserRecordsResult.value ?? []).filter((adviser) => matchesScope(adviser, practiceName, licenseeName))
+        : [];
+    const userAdviserRecords =
+      userRecordsResult.status === "fulfilled"
+        ? (userRecordsResult.value ?? [])
+            .map(userToAdviserSummary)
+            .filter((adviser): adviser is AdviserSummary => Boolean(adviser))
+            .filter((adviser) => matchesScope(adviser, practiceName, licenseeName))
+        : [];
 
-    return new NextResponse(text, {
-      status: response.status,
-      headers: {
-        "content-type": contentType,
-      },
-    });
+    if (!adviserRecords.length && !userAdviserRecords.length && adviserRecordsResult.status === "rejected" && userRecordsResult.status === "rejected") {
+      throw adviserRecordsResult.reason;
+    }
+
+    const advisers = dedupeAdvisers([...userAdviserRecords, ...adviserRecords]).filter((adviser) => !id || adviser.id === id || adviser.entityId === id);
+
+    return NextResponse.json({ data: advisers }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message =
       error instanceof Error ? `Adviser proxy request failed: ${error.message}` : "Adviser proxy request failed.";

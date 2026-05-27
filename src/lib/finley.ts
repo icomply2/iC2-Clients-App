@@ -22,6 +22,7 @@ import { createFileNote as createFileNoteAction } from "@/lib/services/file-note
 import {
   updateClientDetails as updateClientDetailsAction,
   updatePartnerDetails as updatePartnerDetailsAction,
+  upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
 import {
   saveAssetCollection,
@@ -76,6 +77,7 @@ type StoredPlan = {
     | "update_asset_record"
     | "update_income_record"
     | "update_expense_record"
+    | "update_employment_record"
     | "update_liability_record"
     | "update_superannuation_record"
     | "update_retirement_income_record"
@@ -134,6 +136,7 @@ const PENSION_TYPE_OPTIONS = ["Account Based Pension", "Allocated Pension", "Ann
 const INSURANCE_COVER_OPTIONS = ["Life", "TPD", "Trauma", "Income Protection", "Health", "Other"] as const;
 const INSURANCE_STATUS_OPTIONS = ["Active", "Pending", "Cancelled", "Claimed"] as const;
 const FREQUENCY_OPTIONS = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"] as const;
+const EMPLOYMENT_STATUS_OPTIONS = ["Full-time", "Part-time", "Casual", "Contract", "Self-employed", "Retired", "Unemployed"] as const;
 const ENTITY_TYPE_OPTIONS = ["SMSF", "Trust", "Company", "Partnership"] as const;
 const DEPENDANT_TYPE_OPTIONS = ["Child", "Grandchild", "Parent", "Sibling", "Other"] as const;
 const CLIENT_UPDATE_TARGET_OPTIONS = ["client", "partner"] as const;
@@ -1241,7 +1244,7 @@ function buildCollectionReadAnswer(message: string, context: LiveContext) {
             formatCurrencyDisplay(item.salary),
             getEmploymentFrequency(item),
           ],
-          editAction: null,
+          editAction: item.id ? { kind: "employment", recordId: item.id, label: "Edit" } : null,
         })),
         footer: null,
       } satisfies FinleyDisplayCard,
@@ -2702,6 +2705,69 @@ function buildIncomeEditorCard(record: ClientIncomeRecord): FinleyEditorCard {
   };
 }
 
+function buildEmploymentEditorCard(record: ClientEmploymentRecord): FinleyEditorCard {
+  const frequency = typeof record.frequency === "string" ? record.frequency : record.frequency?.value ?? record.frequency?.type ?? "";
+
+  return {
+    kind: "collection_form",
+    title: "Employment Record",
+    toolName: "update_employment_record",
+    fields: [
+      {
+        key: "jobTitle",
+        label: "Job Title",
+        input: "text",
+        value: record.jobTitle ?? record.job_title ?? "",
+      },
+      {
+        key: "status",
+        label: "Status",
+        input: "select",
+        value: record.status ?? "",
+        options: toCardOptions(EMPLOYMENT_STATUS_OPTIONS),
+      },
+      {
+        key: "employer",
+        label: "Employer",
+        input: "text",
+        value: record.employer ?? "",
+      },
+      {
+        key: "salary",
+        label: "Salary",
+        input: "text",
+        value: record.salary ?? "",
+      },
+      {
+        key: "frequency",
+        label: "Frequency",
+        input: "select",
+        value: frequency,
+        options: toCardOptions(FREQUENCY_OPTIONS),
+      },
+      {
+        key: "primaryEmployment",
+        label: "Primary Employment",
+        input: "select",
+        value: record.primaryEmployment === false ? "No" : "Yes",
+        options: toCardOptions(["Yes", "No"]),
+      },
+      {
+        key: "startDate",
+        label: "Start Date",
+        input: "text",
+        value: record.startDate ?? "",
+      },
+      {
+        key: "endDate",
+        label: "End Date",
+        input: "text",
+        value: record.endDate ?? "",
+      },
+    ],
+  };
+}
+
 function buildAssetEditorCard(record: ClientAssetRecord): FinleyEditorCard {
   return {
     kind: "collection_form",
@@ -2944,6 +3010,8 @@ function collectionKindLabel(kind: string) {
       return "asset";
     case "liabilities":
       return "liability";
+    case "employment":
+      return "employment";
     case "income":
       return "income";
     case "expenses":
@@ -2964,10 +3032,21 @@ function collectionKindLabel(kind: string) {
 }
 
 function buildCollectionUpdateIntentFromRecord(
-  kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants",
+  kind:
+    | "assets"
+    | "liabilities"
+    | "employment"
+    | "income"
+    | "expenses"
+    | "superannuation"
+    | "retirement-income"
+    | "insurance"
+    | "entities"
+    | "dependants",
   record:
     | ClientAssetRecord
     | ClientLiabilityRecord
+    | ClientEmploymentRecord
     | ClientIncomeRecord
     | ClientExpenseRecord
     | ClientSuperannuationRecord
@@ -3024,6 +3103,27 @@ function buildCollectionUpdateIntentFromRecord(
           requestedChange: requestedChange ?? null,
         },
         editorCard: buildIncomeEditorCard(income),
+      };
+    }
+    case "employment": {
+      const employment = record as ClientEmploymentRecord;
+      return {
+        kind,
+        toolName: "update_employment_record" as const,
+        summary: `Update an employment record for ${clientName}`,
+        description: "Update the selected employment record on the client profile.",
+        payload: { kind, record: employment },
+        inputsPreview: {
+          section: "Employment",
+          owner: employment.owner?.name ?? null,
+          jobTitle: employment.jobTitle ?? employment.job_title,
+          status: employment.status,
+          employer: employment.employer,
+          salary: employment.salary,
+          frequency: getEmploymentFrequency(employment),
+          requestedChange: requestedChange ?? null,
+        },
+        editorCard: buildEmploymentEditorCard(employment),
       };
     }
     case "expenses": {
@@ -3805,7 +3905,17 @@ export async function prepareFinleyDisplayCardEdit(input: {
   activeClientId?: string | null;
   activeClientName?: string | null;
   threadId?: string | null;
-  kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
+  kind:
+    | "assets"
+    | "liabilities"
+    | "employment"
+    | "income"
+    | "expenses"
+    | "superannuation"
+    | "retirement-income"
+    | "insurance"
+    | "entities"
+    | "dependants";
   recordId: string;
 }): Promise<FinleyChatResponse> {
   const liveContext = await loadLiveContext(input.activeClientId, input.activeClientName);
@@ -3840,6 +3950,7 @@ export async function prepareFinleyDisplayCardEdit(input: {
   const recordsByKind = {
     assets: profile.assets ?? [],
     liabilities: profile.liabilities ?? [],
+    employment: profile.employment ?? [],
     income: profile.income ?? [],
     expenses: profile.expense ?? [],
     superannuation: profile.superannuation ?? [],
@@ -4192,6 +4303,48 @@ async function executeCollectionPlan(
         [...(liveContext.profile?.assets ?? [])],
       );
       await saveAssetCollection(profileId, nextRecords, context);
+      return;
+    }
+    case "employment": {
+      const employmentUpdates = normalizedRecords as unknown as ClientEmploymentRecord[];
+      const ownerIds = Array.from(new Set(employmentUpdates.map((entry) => entry.owner?.id).filter((id): id is string => Boolean(id))));
+      if (!ownerIds.length) {
+        throw new Error("Finley could not determine the employment owner for this update.");
+      }
+
+      for (const ownerId of ownerIds) {
+        const ownerRecords = employmentUpdates.filter((entry) => entry.owner?.id === ownerId);
+        const ownerName = ownerRecords[0]?.owner?.name ?? "";
+        const existingForOwner = (liveContext.profile?.employment ?? [])
+          .filter((entry) => entry.owner?.id === ownerId)
+          .filter((entry) => !ownerRecords.some((update) => update.id && update.id === entry.id));
+        const request = [...existingForOwner, ...ownerRecords].map((entry, index) => ({
+          id: entry.id ?? undefined,
+          jobTitle: entry.jobTitle ?? entry.job_title ?? "",
+          status: entry.status ?? "",
+          employer: entry.employer ?? "",
+          salary: entry.salary ?? "",
+          frequency: getEmploymentFrequency(entry),
+          primaryEmployment:
+            typeof (entry as { primaryEmployment?: unknown }).primaryEmployment === "string"
+              ? ((entry as { primaryEmployment?: string }).primaryEmployment ?? "")
+              : entry.primaryEmployment === false
+                ? "No"
+                : index === 0
+                  ? "Yes"
+                  : "No",
+          startDate: entry.startDate ?? "",
+          endDate: entry.endDate ?? "",
+        }));
+        await upsertEmploymentRecords(
+          {
+            profileId,
+            owner: { id: ownerId, name: ownerName },
+            request,
+          },
+          context,
+        );
+      }
       return;
     }
     case "liabilities": {
