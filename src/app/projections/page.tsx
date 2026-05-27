@@ -6,6 +6,7 @@ import JSZip from "jszip";
 import { currentProjectionAssumptions } from "@/lib/projections/assumptions";
 import { isCashAssetType, isInvestmentAssetType } from "@/lib/projections/assets-engine";
 import { runProjection } from "@/lib/projections/engine";
+import { isCashflowExpenseCategory, isCashflowIncomeCategory } from "@/lib/projections/types";
 import type { ProjectionScenario } from "@/lib/projections/types";
 import {
   readSoaProjectionPackage,
@@ -167,6 +168,36 @@ const scenarioInputTabs: Array<{ id: ScenarioInputTab; label: string }> = [
   { id: "assets-liabilities", label: "Assets and liabilities" },
   { id: "superannuation", label: "Superannuation" },
   { id: "pensions", label: "Pensions" },
+];
+
+const incomeCategoryOptions: Array<{ value: ProjectionScenario["cashflowItems"][number]["category"]; label: string }> = [
+  { value: "employment-income", label: "Employment income" },
+  { value: "salary-income", label: "Salary or wages" },
+  { value: "business-income", label: "Business income" },
+  { value: "rental-income", label: "Rental income" },
+  { value: "investment-income", label: "Investment income" },
+  { value: "superannuation-income", label: "Superannuation income" },
+  { value: "pension-income", label: "Pension income" },
+  { value: "centrelink-income", label: "Centrelink income" },
+  { value: "annuity-income", label: "Annuity income" },
+  { value: "other-income", label: "Other income" },
+];
+
+const expenseCategoryOptions: Array<{ value: ProjectionScenario["cashflowItems"][number]["category"]; label: string }> = [
+  { value: "living-expense", label: "Living expense" },
+  { value: "housing-expense", label: "Housing expense" },
+  { value: "rent-expense", label: "Rent" },
+  { value: "mortgage-repayment", label: "Mortgage repayment" },
+  { value: "loan-repayment", label: "Loan repayment" },
+  { value: "insurance-premium", label: "Insurance premium" },
+  { value: "medical-expense", label: "Medical expense" },
+  { value: "transport-expense", label: "Transport expense" },
+  { value: "education-expense", label: "Education expense" },
+  { value: "travel-expense", label: "Travel expense" },
+  { value: "entertainment-expense", label: "Entertainment expense" },
+  { value: "tax-expense", label: "Tax expense" },
+  { value: "advice-fee", label: "Advice fee" },
+  { value: "other-expense", label: "Other expense" },
 ];
 
 function normalizeScenarioInputTab(tab: StoredProjectionWorkspaceState["activeScenarioInputTab"] | null | undefined): ScenarioInputTab {
@@ -482,9 +513,15 @@ function makeId(prefix: string) {
 }
 
 function projectionWorkspaceStorageKey(clientId: string, soaId: string) {
-  return clientId && soaId
-    ? `ic2:projection-workspace:${clientId}:${soaId}`
-    : "ic2:projection-workspace:standalone";
+  if (clientId && soaId) {
+    return `ic2:projection-workspace:${clientId}:${soaId}`;
+  }
+
+  if (clientId) {
+    return `ic2:projection-workspace:${clientId}:standalone`;
+  }
+
+  return "ic2:projection-workspace:standalone";
 }
 
 function buildStoredProjectionWorkspaceState(
@@ -655,6 +692,37 @@ function annualizeAmount(amount: unknown, frequency: unknown) {
   if (frequencyText.includes("month")) return value * 12;
   if (frequencyText.includes("quarter")) return value * 4;
   return value;
+}
+
+function incomeCategoryFromText(value: string): ProjectionScenario["cashflowItems"][number]["category"] {
+  const text = value.toLowerCase();
+  if (/employment|salary|wage|payg/.test(text)) return "employment-income";
+  if (/business|self.?employed|sole trader/.test(text)) return "business-income";
+  if (/rent|rental/.test(text)) return "rental-income";
+  if (/dividend|interest|distribution|investment/.test(text)) return "investment-income";
+  if (/super|superannuation/.test(text)) return "superannuation-income";
+  if (/age pension|pension/.test(text)) return "pension-income";
+  if (/centrelink|jobseeker|family tax|disability support/.test(text)) return "centrelink-income";
+  if (/annuity/.test(text)) return "annuity-income";
+  return "other-income";
+}
+
+function expenseCategoryFromText(value: string): ProjectionScenario["cashflowItems"][number]["category"] {
+  const text = value.toLowerCase();
+  if (/mortgage/.test(text)) return "mortgage-repayment";
+  if (/loan|repayment|debt/.test(text)) return "loan-repayment";
+  if (/\brent\b/.test(text)) return "rent-expense";
+  if (/home|housing|rates|strata|utilities|electricity|gas|water/.test(text)) return "housing-expense";
+  if (/insurance|premium/.test(text)) return "insurance-premium";
+  if (/medical|health|doctor|hospital|pharmacy/.test(text)) return "medical-expense";
+  if (/car|vehicle|transport|fuel|rego|registration/.test(text)) return "transport-expense";
+  if (/education|school|university/.test(text)) return "education-expense";
+  if (/holiday|travel/.test(text)) return "travel-expense";
+  if (/entertainment|dining|restaurant|recreation/.test(text)) return "entertainment-expense";
+  if (/\btax\b|ato/.test(text)) return "tax-expense";
+  if (/advice|advisor|adviser|fee/.test(text)) return "advice-fee";
+  if (/living|household|grocer|food/.test(text)) return "living-expense";
+  return "other-expense";
 }
 
 function calculateStartAge(dateOfBirth: string | null | undefined, startYear: number, startMonth: number) {
@@ -830,7 +898,7 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
       return {
         itemId: slug(entry.id || `${entry.owner?.name ?? "employment"}-${index}`) || `employment-${index + 1}`,
         ownerPersonId: ownerId,
-        category: "other-income" as const,
+        category: "employment-income" as const,
         label: `${owner?.name ?? people[0]?.name ?? "Client"} employment income`,
         annualAmount: annualizeAmount(entry.salary, entry.frequency),
         startDate: entry.startDate ?? null,
@@ -844,7 +912,7 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     .map((entry, index) => ({
       itemId: slug(entry.id || entry.description || entry.type || `income-${index + 1}`) || `income-${index + 1}`,
       ownerPersonId: ownerPersonId(entry),
-      category: "other-income" as const,
+      category: incomeCategoryFromText(`${entry.type ?? ""} ${entry.description ?? ""}`),
       label: textValue(entry.description) || textValue(entry.type) || `Income ${index + 1}`,
       annualAmount: annualizeAmount(entry.amount, entry.frequency),
       startDate: null,
@@ -857,7 +925,7 @@ function mapClientProfileToProjectionScenario(profile: ClientProfile): Projectio
     .map((entry, index) => ({
       itemId: slug(entry.id || entry.description || entry.type || `expense-${index + 1}`) || `expense-${index + 1}`,
       ownerPersonId: ownerPersonId(entry),
-      category: /living|household|expense/i.test(`${entry.type ?? ""} ${entry.description ?? ""}`) ? "living-expense" as const : "other-expense" as const,
+      category: expenseCategoryFromText(`${entry.type ?? ""} ${entry.description ?? ""}`),
       label: textValue(entry.description) || textValue(entry.type) || `Expense ${index + 1}`,
       annualAmount: annualizeAmount(entry.amount, entry.frequency),
       startDate: null,
@@ -1105,7 +1173,7 @@ function assignChartColors(rows: Array<{ label: string; rawValues: number[] }>):
 }
 
 const mappedIncomeRawRows = activeScenario.cashflowItems
-  .filter((item) => item.category === "other-income")
+  .filter((item) => isCashflowIncomeCategory(item.category))
   .map((item) => ({
     label: cashflowItemLabel(item),
     rawValues: projectionRows.map((row) => row.cashflowItemValues[item.itemId] ?? 0),
@@ -1174,8 +1242,7 @@ const pensionLumpSumRows = pensionLumpSumRawRows.map((row) => ({
 const mappedExpenseRows = activeScenario.cashflowItems
   .filter(
     (item) =>
-      (item.category === "living-expense" || item.category === "other-expense") &&
-      !liabilityRepaymentItemIds.has(item.itemId),
+      isCashflowExpenseCategory(item.category) && !liabilityRepaymentItemIds.has(item.itemId),
   )
   .map((item) => ({
     label: cashflowItemLabel(item),
@@ -1569,7 +1636,7 @@ const pensionProjectionGroups = retirementDisplayAccounts
 const taxProjectionRowsByPersonId = Object.fromEntries(
   activeScenario.people.map((person) => {
     const taxableIncomeRows = activeScenario.cashflowItems
-      .filter((item) => item.category === "other-income" && item.taxable && ownerIncludesPerson(item.ownerPersonId, person.personId))
+      .filter((item) => isCashflowIncomeCategory(item.category) && item.taxable && ownerIncludesPerson(item.ownerPersonId, person.personId))
       .map((item) => ({
         label: cashflowItemLabel(item),
         values: projectionRows.map((row) => money((row.cashflowItemValues[item.itemId] ?? 0) * ownerShare(item.ownerPersonId))),
@@ -1752,7 +1819,7 @@ const assets = [
 
 const cashflowRows = [
   ...activeScenario.cashflowItems
-    .filter((item) => item.category === "other-income")
+    .filter((item) => isCashflowIncomeCategory(item.category))
     .map((item) => ({
       section: "Inflow",
       item: item.label,
@@ -1790,8 +1857,7 @@ const cashflowRows = [
   ...activeScenario.cashflowItems
     .filter(
       (item) =>
-        (item.category === "living-expense" || item.category === "other-expense") &&
-        !liabilityRepaymentItemIds.has(item.itemId),
+        isCashflowExpenseCategory(item.category) && !liabilityRepaymentItemIds.has(item.itemId),
     )
     .map((item) => ({
       section: "Outflow",
@@ -1877,7 +1943,7 @@ const assumptionSources = [
 
 function ProjectionsPageContent() {
   const searchParams = useSearchParams();
-  const linkedClientId = searchParams.get("clientId")?.trim() ?? "";
+  const linkedClientId = (searchParams.get("clientId") ?? searchParams.get("clientid"))?.trim() ?? "";
   const linkedSoaId = searchParams.get("soaId")?.trim() ?? "";
   const hasLinkedSoaContext = Boolean(linkedClientId && linkedSoaId);
   const [scenarioUploadName, setScenarioUploadName] = useState<string | null>(null);
@@ -2432,17 +2498,12 @@ function ProjectionsPageContent() {
         itemId: createScenarioInputId("cashflow"),
         ownerPersonId: draft.primaryPersonId,
         category,
-        label:
-          category === "other-income"
-            ? "New income"
-            : category === "living-expense"
-              ? "New living expense"
-              : "New other expense",
+        label: isCashflowIncomeCategory(category) ? "New income" : "New expense",
         annualAmount: 0,
         startDate: null,
         endDate: null,
-        indexedToCpi: category !== "other-income",
-        taxable: category === "other-income",
+        indexedToCpi: isCashflowExpenseCategory(category),
+        taxable: isCashflowIncomeCategory(category),
       });
     });
   }
@@ -3970,127 +4031,182 @@ function ProjectionsPageContent() {
     }
 
     if (activeScenarioInputTab === "cashflow") {
+      const editableCashflowItems = activeScenario.cashflowItems.filter(
+        (item) => !activeLiabilityRepaymentItemIds.has(item.itemId),
+      );
+      const incomeItems = editableCashflowItems.filter((item) => isCashflowIncomeCategory(item.category));
+      const expenseItems = editableCashflowItems.filter((item) => isCashflowExpenseCategory(item.category));
+      const renderCashflowRows = (
+        items: ProjectionScenario["cashflowItems"],
+        emptyMessage: string,
+        mode: "income" | "expense",
+      ) => (
+        <tbody>
+          {items.length ? (
+            items.map((item) => (
+              <tr key={item.itemId}>
+                <td>
+                  <input
+                    className={styles.compactInput}
+                    value={item.label}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.label = event.target.value;
+                    })}
+                  />
+                </td>
+                <td>
+                  <select
+                    className={styles.compactInput}
+                    value={item.category}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      const nextCategory = event.target.value as ProjectionScenario["cashflowItems"][number]["category"];
+                      draft.category = nextCategory;
+                      draft.taxable = isCashflowIncomeCategory(nextCategory);
+                      draft.indexedToCpi = isCashflowExpenseCategory(nextCategory);
+                    })}
+                  >
+                    {(mode === "income" ? incomeCategoryOptions : expenseCategoryOptions).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <select
+                    className={styles.compactInput}
+                    value={item.ownerPersonId}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.ownerPersonId = event.target.value;
+                    })}
+                  >
+                    {activeScenario.people.length > 1 ? <option value={jointOwnerId}>Joint</option> : null}
+                    {activeScenario.people.map((person) => (
+                      <option key={person.personId} value={person.personId}>
+                        {person.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  {renderCurrencyInput({
+                    value: item.annualAmount,
+                    onChange: (value) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.annualAmount = value;
+                    }),
+                  })}
+                </td>
+                <td>
+                  <input
+                    type="date"
+                    className={styles.compactInput}
+                    value={item.startDate ?? ""}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.startDate = event.target.value || null;
+                    })}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="date"
+                    className={styles.compactInput}
+                    value={item.endDate ?? ""}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.endDate = event.target.value || null;
+                    })}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={item.indexedToCpi}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.indexedToCpi = event.target.checked;
+                    })}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={item.taxable}
+                    onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
+                      draft.taxable = event.target.checked;
+                    })}
+                  />
+                </td>
+                <td>
+                  <button type="button" className={styles.dangerButton} onClick={() => deleteCashflowItem(item.itemId)}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={9}>{emptyMessage}</td>
+            </tr>
+          )}
+        </tbody>
+      );
+
       return (
         <div className={styles.inputStack}>
-          <div className={styles.tableActions}>
-            <button type="button" className={styles.secondaryButton} onClick={() => addCashflowItem("other-income")}>
-              Add income
-            </button>
-            <button type="button" className={styles.secondaryButton} onClick={() => addCashflowItem("living-expense")}>
-              Add expense
-            </button>
-          </div>
-          <div className={styles.tableWrap}>
-            <table className={styles.dataTable}>
-              <thead>
-                <tr>
-                  <th>Item</th>
-                  <th>Category</th>
-                  <th>Owner</th>
-                  <th>Annual amount</th>
-                  <th>Start date</th>
-                  <th>End date</th>
-                  <th>Indexed</th>
-                  <th>Taxable</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-              {activeScenario.cashflowItems.filter((item) => !activeLiabilityRepaymentItemIds.has(item.itemId)).map((item) => (
-                  <tr key={item.itemId}>
-                    <td>
-                      <input
-                        className={styles.compactInput}
-                        value={item.label}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.label = event.target.value;
-                        })}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        className={styles.compactInput}
-                        value={item.category}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.category = event.target.value as ProjectionScenario["cashflowItems"][number]["category"];
-                        })}
-                      >
-                        <option value="other-income">Income</option>
-                        <option value="living-expense">Living expense</option>
-                        <option value="other-expense">Other expense</option>
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        className={styles.compactInput}
-                        value={item.ownerPersonId}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.ownerPersonId = event.target.value;
-                        })}
-                      >
-                        {activeScenario.people.length > 1 ? <option value={jointOwnerId}>Joint</option> : null}
-                        {activeScenario.people.map((person) => (
-                          <option key={person.personId} value={person.personId}>
-                            {person.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      {renderCurrencyInput({
-                        value: item.annualAmount,
-                        onChange: (value) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.annualAmount = value;
-                        }),
-                      })}
-                    </td>
-                    <td>
-                      <input
-                        type="date"
-                        className={styles.compactInput}
-                        value={item.startDate ?? ""}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.startDate = event.target.value || null;
-                        })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="date"
-                        className={styles.compactInput}
-                        value={item.endDate ?? ""}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.endDate = event.target.value || null;
-                        })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={item.indexedToCpi}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.indexedToCpi = event.target.checked;
-                        })}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={item.taxable}
-                        onChange={(event) => updateCashflowItem(item.itemId, (draft) => {
-                          draft.taxable = event.target.checked;
-                        })}
-                      />
-                    </td>
-                    <td>
-                      <button type="button" className={styles.dangerButton} onClick={() => deleteCashflowItem(item.itemId)}>
-                        Delete
-                      </button>
-                    </td>
+          <div className={styles.inputCard}>
+            <div className={styles.inputCardHeader}>
+              <h4>Income</h4>
+              <div className={styles.tableActions}>
+                <button type="button" className={styles.secondaryButton} onClick={() => addCashflowItem("other-income")}>
+                  Add income
+                </button>
+              </div>
+            </div>
+            <div className={styles.tableWrap}>
+              <table className={styles.dataTable}>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Category</th>
+                    <th>Owner</th>
+                    <th>Annual amount</th>
+                    <th>Start date</th>
+                    <th>End date</th>
+                    <th>Indexed</th>
+                    <th>Taxable</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                {renderCashflowRows(incomeItems, "No income rows recorded.", "income")}
+              </table>
+            </div>
+          </div>
+
+          <div className={styles.inputCard}>
+            <div className={styles.inputCardHeader}>
+              <h4>Expenses</h4>
+              <div className={styles.tableActions}>
+                <button type="button" className={styles.secondaryButton} onClick={() => addCashflowItem("living-expense")}>
+                  Add expense
+                </button>
+              </div>
+            </div>
+            <div className={styles.tableWrap}>
+              <table className={styles.dataTable}>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Category</th>
+                    <th>Owner</th>
+                    <th>Annual amount</th>
+                    <th>Start date</th>
+                    <th>End date</th>
+                    <th>Indexed</th>
+                    <th>Taxable</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                {renderCashflowRows(expenseItems, "No expense rows recorded.", "expense")}
+              </table>
+            </div>
           </div>
         </div>
       );

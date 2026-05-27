@@ -11,12 +11,19 @@ export async function POST(request: NextRequest) {
     const mapped = contentType.includes("multipart/form-data")
       ? await mapFromFormData(request)
       : await mapFromJson(request);
+    const candidateWarnings = [
+      ...mapped.candidate.warnings,
+      ...mapped.warnings,
+    ].filter((warning, index, warnings) => warning && warnings.indexOf(warning) === index);
 
     return NextResponse.json({
-      candidate: mapped.candidate,
+      candidate: {
+        ...mapped.candidate,
+        warnings: candidateWarnings,
+      },
       source: mapped.source,
       model: mapped.model,
-      warning: mapped.warning ?? mapped.warnings[0] ?? null,
+      warning: mapped.warning ?? null,
       mappingNotes: mapped.mappingNotes,
       confirmationsRequired: mapped.confirmationsRequired,
       documentInsight: mapped.documentInsight,

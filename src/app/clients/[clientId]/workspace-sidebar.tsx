@@ -50,7 +50,7 @@ const navItems = [
 function resolveHref(clientId: string, key: string, href: string) {
   switch (key) {
     case "projections":
-      return `https://www.finleyai.com.au/projections?clientid=${encodeURIComponent(clientId)}`;
+      return `https://www.finleyai.com.au/projections?clientId=${encodeURIComponent(clientId)}`;
     case "details":
       return `/clients/${clientId}`;
     case "identity-check":

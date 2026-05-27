@@ -41,6 +41,10 @@ function badgeClassName(tone: UploadedFileBadgeTone = "default") {
 }
 
 export function UploadedFilesModal({ clientName, files, onAddMore, onClose }: UploadedFilesModalProps) {
+  const scopeText = clientName === "Finley workspace"
+    ? "the Finley workspace"
+    : `Finley for ${clientName}`;
+
   return (
     <div className={styles.modalOverlay} role="presentation" onClick={onClose}>
       <div
@@ -58,7 +62,7 @@ export function UploadedFilesModal({ clientName, files, onAddMore, onClose }: Up
 
         <div className={styles.modalBody}>
           <div className={styles.uploadedFilesText}>
-            These are the files currently loaded into Finley for {clientName}.
+            These are the files currently loaded into {scopeText}.
           </div>
           <div className={styles.uploadedFilesList}>
             {files.map((file) => (

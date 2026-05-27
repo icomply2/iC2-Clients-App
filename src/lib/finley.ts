@@ -46,6 +46,7 @@ import {
   type FinleyChatRequest,
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
+import { answerClientProfileLookup } from "@/lib/finley-profile-lookup";
 
 type LiveContext = {
   profile: ClientProfile | null;
@@ -913,6 +914,21 @@ function resolvePersonForRead(profile: ClientProfile | null, target: "client" | 
 }
 
 function buildProfileReadAnswer(message: string, context: LiveContext) {
+  const genericAnswer = answerClientProfileLookup({
+    message,
+    profile: context.profile,
+    resolvedClientName: context.resolvedClientName,
+  });
+
+  if (genericAnswer.matched) {
+    return {
+      ...genericAnswer,
+      displayCard: genericAnswer.displayCard ?? null,
+      missingInformation: [],
+      warnings: genericAnswer.warnings ?? [],
+    };
+  }
+
   const lower = message.toLowerCase();
   const target = /\bpartner\b/.test(lower) ? "partner" : "client";
   const person = resolvePersonForRead(context.profile, target);
@@ -1036,6 +1052,21 @@ function buildProfileReadAnswer(message: string, context: LiveContext) {
 }
 
 function buildCollectionReadAnswer(message: string, context: LiveContext) {
+  const genericAnswer = answerClientProfileLookup({
+    message,
+    profile: context.profile,
+    resolvedClientName: context.resolvedClientName,
+  });
+
+  if (genericAnswer.matched) {
+    return {
+      ...genericAnswer,
+      displayCard: genericAnswer.displayCard ?? null,
+      missingInformation: [],
+      warnings: genericAnswer.warnings ?? [],
+    };
+  }
+
   const lower = message.toLowerCase();
   const clientName = context.resolvedClientName ?? "the selected client";
 
@@ -4830,6 +4861,143 @@ async function buildUploadedDocumentReview(files?: FinleyChatRequest["uploadedFi
   }
 }
 
+function isUploadedDocumentReviewRequest(message: string, uploads: ReturnType<typeof normalizeUploadedFiles>) {
+  if (!uploads.length) return false;
+
+  const lower = message.toLowerCase();
+  return (
+    /\b(?:summari[sz]e|review|read|analyse|analyze|what(?:'s| is) in|tell me about)\b/.test(lower) &&
+    /\b(?:upload|uploaded|document|documents|file|files|this|these)\b/.test(lower)
+  );
+}
+
+function isNoClientClientScopedRequest(message: string) {
+  const lower = normaliseConversationalMessage(message);
+  const writeWorkflow =
+    /\b(?:update|change|set|apply|map|save|create|prepare|generate|draft|issue|record)\b/.test(lower) &&
+    /\b(?:client|profile|fact find|file note|engagement|letter|invoice|agreement|record of advice|statement of advice|soa|roa|income|asset|liability|expense|super|pension|insurance|dependant|entity|dob|date of birth|address|email|phone)\b/.test(lower);
+  const readQuestion =
+    /\b(?:what is|what's|show|tell me|get|list|summarise|summarize|who is|do they|does he|does she|does the client)\b/.test(lower);
+  const personalField =
+    /\b(?:date of birth|dob|address|email|phone|risk profile|marital status|residency|resident status|client status|client category)\b/.test(lower);
+  const collectionField =
+    /\b(?:assets?|liabilities|income|expenses?|superannuation|super|pensions?|insurance|dependants?|employment|entities)\b/.test(lower);
+  const targetMarker =
+    /\b(?:this client|the client|client's|client profile|their|theirs|his|her|hers)\b/.test(lower) ||
+    /\b\w+['’]s\s+(?:date of birth|dob|address|email|phone|risk profile|income|assets?|liabilities|expenses?|super|pension|insurance|profile)\b/.test(lower);
+
+  return (
+    writeWorkflow ||
+    /\b(?:map to profile|client profile|fact find|file note|record of advice|statement of advice)\b/.test(lower) ||
+    (readQuestion && (personalField || collectionField) && targetMarker)
+  );
+}
+
+function buildNoClientFallbackAnswer(message: string, uploads: ReturnType<typeof normalizeUploadedFiles>) {
+  if (uploads.length) {
+    const fileList = uploads
+      .map((upload) => `${upload.name}${upload.tags.length ? ` (${upload.tags.join(", ")})` : ""}`)
+      .join("; ");
+    return [
+      `I can help with that in the Finley workspace. I have ${uploads.length} uploaded file${uploads.length > 1 ? "s" : ""} available: ${fileList}.`,
+      "Ask me to summarise or review the uploaded documents and I can prepare a workspace summary before you select a client.",
+      "When you want to map facts, update a profile, or create client records, select or create the client first.",
+    ].join("\n\n");
+  }
+
+  return [
+    "I can help with general adviser-practice questions before a client is selected.",
+    "Select a client when you want profile lookups, fact-find mapping, profile updates, file notes, invoices, agreements, or client document generation.",
+    `You asked: "${message}". Ask a general advice-process question, or upload a file and I can review it in the Finley workspace.`,
+  ].join("\n\n");
+}
+
+async function buildGlobalFinleyAnswer(
+  message: string,
+  uploads: ReturnType<typeof normalizeUploadedFiles>,
+  currentUser?: UserSummary | null,
+) {
+  if (!OPENAI_API_KEY) {
+    return {
+      assistantMessage: buildNoClientFallbackAnswer(message, uploads),
+      warnings: [
+        "Finley used the local no-client fallback because OPENAI_API_KEY is not configured. Configure the chat model to enable LLM-backed general answers.",
+      ],
+    };
+  }
+
+  try {
+    const isAzure = isAzureOpenAiBaseUrl(OPENAI_BASE_URL);
+    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(isAzure ? { "api-key": OPENAI_API_KEY } : { authorization: `Bearer ${OPENAI_API_KEY}` }),
+      },
+      body: JSON.stringify({
+        model: OPENAI_DOCUMENT_REVIEW_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are Finley, an advice practice concierge inside iC2.",
+              "No client is currently selected. You may answer general adviser-assistant questions and use uploaded document text as temporary workspace context.",
+              "Do not infer, read, or update any client profile. Do not claim that any record has been saved.",
+              "If the user asks for profile reads, profile writes, fact-find mapping, file notes, invoices, agreements, or client document generation, tell them to select or create a client first.",
+              "Keep answers concise, practical, and written for an Australian financial advice practice.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              message,
+              adviser: currentUser
+                ? {
+                    name: currentUser.name ?? null,
+                    role: currentUser.userRole ?? null,
+                    practice: currentUser.practice?.name ?? null,
+                    licensee: currentUser.licensee?.name ?? null,
+                  }
+                : null,
+              uploadedFiles: uploads.map((upload) => ({
+                name: upload.name,
+                tags: upload.tags,
+                extractedText: upload.extractedText.slice(0, 6000),
+              })),
+            }),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`No-client chat request failed with status ${response.status}.`);
+    }
+
+    const body = (await response.json().catch(() => null)) as
+      | {
+          choices?: Array<{
+            message?: {
+              content?: string | null;
+            } | null;
+          }>;
+        }
+      | null;
+    const assistantMessage = body?.choices?.[0]?.message?.content?.trim();
+    if (!assistantMessage) {
+      throw new Error("No-client chat response did not include message content.");
+    }
+
+    return { assistantMessage, warnings: [] };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Unable to run no-client chat.";
+    return {
+      assistantMessage: buildNoClientFallbackAnswer(message, uploads),
+      warnings: [`Finley could not reach the configured chat model (${reason}), so it used the local no-client fallback.`],
+    };
+  }
+}
+
 function buildFileNoteTextFromUploadedFiles(message: string, files?: FinleyChatRequest["uploadedFiles"]) {
   const uploads = normalizeUploadedFiles(files);
   if (!uploads.length) return normalizeFileNoteText(message);
@@ -4911,16 +5079,59 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
   }
 
   if (!liveContext.resolvedClientId) {
+    const uploads = normalizeUploadedFiles(request.uploadedFiles);
+
+    if (isUploadedDocumentReviewRequest(message, uploads)) {
+      const documentReview = await buildUploadedDocumentReview(request.uploadedFiles, null);
+
+      return {
+        ...base,
+        status: "completed",
+        responseMode: "inform",
+        assistantMessage: "I've summarised the uploaded document and prepared a review card in the workspace.",
+        plan: null,
+        results: [],
+        missingInformation: [],
+        warnings: documentReview?.warning ? [documentReview.warning] : [],
+        errors: [],
+        displayCard: documentReview ? buildUploadedDocumentReviewCard(documentReview) : null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
+    if (isNoClientClientScopedRequest(message)) {
+      return {
+        ...base,
+        status: "needs_clarification",
+        responseMode: "clarification",
+        assistantMessage:
+          "I can help with that, but I need a client selected before I can access or update a profile, map fact-find data, create records, or generate client documents. Select a client from the left rail or create a new one, then send the request again.",
+        plan: null,
+        results: [],
+        missingInformation: [{ field: "activeClientId", question: "Which client should I work on?" }],
+        warnings: [],
+        errors: [],
+        displayCard: null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
+    const globalAnswer = await buildGlobalFinleyAnswer(message, uploads, liveContext.currentUser);
+
     return {
       ...base,
-      status: "needs_clarification",
-      responseMode: "clarification",
-      assistantMessage: "Select a client first so Finley can scope the request to the correct record.",
+      status: "completed",
+      responseMode: "inform",
+      assistantMessage: globalAnswer.assistantMessage,
       plan: null,
       results: [],
-      missingInformation: [{ field: "activeClientId", question: "Which client should I work on?" }],
-      warnings: [],
+      missingInformation: [],
+      warnings: globalAnswer.warnings,
       errors: [],
+      displayCard: null,
+      editorCard: null,
       suggestedActions: [],
     };
   }
@@ -4970,9 +5181,9 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         plan: null,
         results: [],
         missingInformation: readAnswer.missingInformation,
-        warnings: readAnswer.warnings,
+        warnings: readAnswer.warnings ?? [],
         errors: [],
-        displayCard: null,
+        displayCard: "displayCard" in readAnswer ? readAnswer.displayCard ?? null : null,
         editorCard: null,
         suggestedActions: [],
       };
@@ -4989,7 +5200,7 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         plan: null,
         results: [],
         missingInformation: collectionReadAnswer.missingInformation,
-        warnings: collectionReadAnswer.warnings,
+        warnings: collectionReadAnswer.warnings ?? [],
         errors: [],
         displayCard: collectionReadAnswer.displayCard ?? null,
         editorCard: null,
