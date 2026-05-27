@@ -15,6 +15,7 @@ export type UploadedFilesModalFile = {
     label: string;
     onClick: () => void;
     disabled?: boolean;
+    variant?: "default" | "danger";
   }>;
 };
 
@@ -38,6 +39,14 @@ function badgeClassName(tone: UploadedFileBadgeTone = "default") {
     default:
       return styles.uploadFileBadge;
   }
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" className={styles.uploadedFileActionIcon} viewBox="0 0 24 24">
+      <path d="M6 7h12m-10 0 .8 13h6.4L16 7M9 7V4h6v3" />
+    </svg>
+  );
 }
 
 export function UploadedFilesModal({ clientName, files, onAddMore, onClose }: UploadedFilesModalProps) {
@@ -85,17 +94,28 @@ export function UploadedFilesModal({ clientName, files, onAddMore, onClose }: Up
                       <button
                         key={`${file.id}-${action.label}`}
                         type="button"
-                        className={styles.uploadedFileActionButton}
+                        className={
+                          action.variant === "danger"
+                            ? `${styles.uploadedFileActionButton} ${styles.uploadedFileIconButton} ${styles.uploadedFileActionButtonDanger}`.trim()
+                            : styles.uploadedFileActionButton
+                        }
                         onClick={action.onClick}
                         disabled={action.disabled}
+                        aria-label={action.label}
+                        title={action.label}
                       >
-                        {action.label}
+                        {action.variant === "danger" ? <TrashIcon /> : action.label}
                       </button>
                     ))}
                   </div>
                 ) : null}
               </div>
             ))}
+            {!files.length ? (
+              <div className={styles.uploadedFilesEmpty}>
+                No files are currently loaded.
+              </div>
+            ) : null}
           </div>
         </div>
 

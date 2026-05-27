@@ -57,7 +57,6 @@ export async function readCurrentUserFromCookies(): Promise<CurrentUser | null> 
   }
 
   const id = readStringClaim(payload, [
-    "Id",
     "nameid",
     "sub",
     "uid",

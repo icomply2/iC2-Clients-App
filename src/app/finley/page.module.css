@@ -395,16 +395,32 @@
   cursor: not-allowed;
 }
 
+.engagementDocument {
+  --engagement-document-font-family: "Titillium Web", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --engagement-document-body-color: #2f4a6d;
+  --engagement-document-heading-color: #b3742a;
+  --engagement-document-table-header-bg: #faf7eb;
+  --engagement-document-table-header-text: #113864;
+
+  display: grid;
+  gap: 1.25rem;
+  width: min(100%, 48rem);
+  margin: 0 auto;
+}
+
 .engagementPage {
+  position: relative;
+  box-sizing: border-box;
   width: min(100%, 48rem);
   min-height: 68rem;
   margin: 0 auto;
-  padding: 3rem 3.25rem;
+  padding: 3rem 3.25rem 4.25rem;
   border: 1px solid #d8e2ed;
   border-radius: 0.55rem;
   background: #fff;
-  color: #20364f;
+  color: var(--engagement-document-body-color);
   box-shadow: 0 16px 38px rgba(15, 46, 87, 0.12);
+  font-family: var(--engagement-document-font-family);
   font-size: 0.92rem;
   line-height: 1.6;
 }
@@ -420,23 +436,67 @@
   margin: 1.6rem 0;
 }
 
+.engagementAcknowledgement {
+  margin-top: 0;
+}
+
+.engagementSignatureGrid {
+  display: grid;
+  gap: 1.4rem;
+  margin-top: 1rem;
+}
+
+.engagementSignatureBlock {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.engagementSignatureLine {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr);
+  align-items: end;
+  gap: 0.4rem;
+}
+
+.engagementSignatureLine span {
+  display: block;
+  min-height: 1.4rem;
+  border-bottom: 1px solid var(--engagement-document-body-color);
+}
+
+.engagementSignatureName {
+  min-height: 1.2rem;
+  padding-left: 3.2rem;
+  color: var(--engagement-document-body-color);
+  font-size: 0.86rem;
+}
+
+.engagementPageNumber {
+  position: absolute;
+  right: 2rem;
+  bottom: 1.35rem;
+  color: #6b7280;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .engagementPage h1 {
   margin: 1.5rem 0 1rem;
-  color: #b3742a;
+  color: var(--engagement-document-heading-color);
   font-size: 1.55rem;
   line-height: 1.2;
 }
 
 .engagementPage h2 {
   margin: 1.35rem 0 0.45rem;
-  color: #b3742a;
+  color: var(--engagement-document-heading-color);
   font-size: 1.05rem;
   line-height: 1.25;
 }
 
 .engagementPage h3 {
   margin: 0.95rem 0 0.35rem;
-  color: #20364f;
+  color: var(--engagement-document-heading-color);
   font-size: 0.92rem;
   line-height: 1.25;
 }
@@ -464,7 +524,7 @@
   width: 100%;
   margin: 0.55rem 0 1rem;
   border-collapse: collapse;
-  color: #20364f;
+  color: var(--engagement-document-body-color);
 }
 
 .engagementFeeTable th,
@@ -475,8 +535,8 @@
 }
 
 .engagementFeeTable th {
-  background: #f8f4e8;
-  color: #0f2e57;
+  background: var(--engagement-document-table-header-bg);
+  color: var(--engagement-document-table-header-text);
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -489,7 +549,8 @@
 }
 
 .engagementFeeTotal td {
-  background: #f8f4e8;
+  background: var(--engagement-document-table-header-bg);
+  color: var(--engagement-document-table-header-text);
   font-weight: 800;
 }
 
@@ -1437,7 +1498,9 @@
 }
 
 .uploadedFilesModal {
-  width: min(42rem, 100%);
+  width: min(52rem, 100%);
+  max-height: min(44rem, calc(100vh - 2.5rem));
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .uploadedFilesText {
@@ -1450,6 +1513,9 @@
   display: grid;
   gap: 0.65rem;
   margin-top: 1rem;
+  max-height: min(28rem, calc(100vh - 17rem));
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .uploadedFileItem {
@@ -1467,6 +1533,7 @@
   display: grid;
   gap: 0.45rem;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .uploadedFileName {
@@ -1482,6 +1549,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+}
+
+.uploadedFileActions {
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .uploadedFileBadge {
@@ -1539,6 +1613,40 @@
 .uploadedFileActionButton:disabled {
   color: #7a8da3;
   cursor: not-allowed;
+}
+
+.uploadedFileActionButtonDanger {
+  border-color: #f0b4ae;
+  color: #b42318;
+}
+
+.uploadedFileIconButton {
+  min-width: 2.35rem;
+  width: 2.35rem;
+  padding: 0;
+}
+
+.uploadedFileActionIcon {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.uploadedFileActionButtonDanger:hover:not(:disabled) {
+  border-color: #e25b51;
+  background: #fff5f4;
+}
+
+.uploadedFilesEmpty {
+  padding: 0.85rem;
+  border: 1px dashed #dbe4ee;
+  border-radius: 0.85rem;
+  color: #607086;
+  text-align: center;
 }
 
 .attachmentRemoveButton {
