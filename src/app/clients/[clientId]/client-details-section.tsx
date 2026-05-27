@@ -10,7 +10,7 @@ import {
   updatePersonRiskProfile,
   upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
-import type { ClientAdviserRecord, ClientEmploymentRecord, ClientProfile, PersonRecord, UserSummary, AdviserSummary } from "@/lib/api/types";
+import type { AdviserSummary, ClientAdviserRecord, ClientEmploymentRecord, ClientProfile, PersonRecord } from "@/lib/api/types";
 import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
@@ -562,7 +562,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
   const [saving, setSaving] = useState(false);
   const [removedEmploymentIds, setRemovedEmploymentIds] = useState<string[]>([]);
   const [adviserName, setAdviserName] = useState(profile.adviser?.name ?? "");
-  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; entityId: string; name: string; email: string }>>([]);
   const hasPartner = hasMeaningfulPerson(partner);
 
   const activePerson = selectedPerson === "partner" && hasPartner ? partner : client;
@@ -573,8 +573,8 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
 
     async function loadAdviserOptions() {
       const params = new URLSearchParams();
-      const licenseeName = profile.licensee?.trim();
-      const practiceName = profile.practice?.trim();
+      const licenseeName = currentUserScope?.licensee?.name?.trim() || profile.licensee?.trim();
+      const practiceName = currentUserScope?.practice?.name?.trim() || profile.practice?.trim();
 
       if (licenseeName) {
         params.set("licenseeName", licenseeName);
@@ -614,8 +614,13 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
               .filter((adviser) => adviser?.practiceName?.trim() === practiceName) 
               .filter((adviser) => typeof adviser.name === "string" && adviser.name.trim())
               .map((adviser) => [
-                adviser.id ?? adviser.name!,
-                { id: adviser.id ?? adviser.name!, name: adviser.name!.trim(), email: adviser.email?.trim() ?? "" },
+                adviser.entityId ?? adviser.id ?? adviser.name!,
+                {
+                  id: adviser.id ?? adviser.name!,
+                  entityId: adviser.entityId?.trim() ?? "",
+                  name: adviser.name!.trim(),
+                  email: adviser.email?.trim() ?? "",
+                },
               ]),
           ).values(),
         ).sort((left, right) => left.name.localeCompare(right.name));
@@ -633,7 +638,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     return () => {
       isMounted = false;
     };
-  }, [currentUserScope?.practice?.name]);
+  }, [currentUserScope?.licensee?.name, currentUserScope?.practice?.name, profile.licensee, profile.practice]);
 
   function updateEmploymentRow(id: string, field: keyof EmploymentDraft, value: string) {
     setDraft((current) => ({
@@ -692,15 +697,20 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
 
     try {
       const selectedAdviserOption = adviserOptions.find((option) => option.name === draft.adviser) ?? null;
+      const selectedAdviserEntity = selectedAdviserOption?.entityId || profile.adviser?.entity || "";
       const nextAdviser: ClientAdviserRecord | null =
         draft.adviser.trim()
           ? {
               id: selectedAdviserOption?.id ?? profile.adviser?.id ?? null,
               name: draft.adviser.trim(),
               email: selectedAdviserOption?.email || profile.adviser?.email || null,
-              entity: profile.adviser?.entity ?? null,
+              entity: selectedAdviserEntity || null,
             }
           : null;
+
+      if (nextAdviser && !nextAdviser.entity) {
+        throw new Error("This adviser is missing an adviser entity id, so the profile cannot be saved yet.");
+      }
 
       const changes = {
         title: draft.title,
@@ -1030,7 +1040,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
                       {currentUserScope?.practice?.name ? "Select adviser" : "No practice selected"}
                     </option>
                     {adviserOptions.map((option) => (
-                      <option key={option.id} value={option.name}>
+                      <option key={`${option.entityId}-${option.id}-${option.email}-${option.name}`} value={option.name}>
                         {option.name}
                       </option>
                     ))}
