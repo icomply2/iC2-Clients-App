@@ -8,6 +8,7 @@ import {
 } from "./liabilities-engine";
 import { projectRetirementAccount } from "./retirement-engine";
 import { calculatePersonalTax } from "./tax-engine";
+import { isCashflowExpenseCategory, isCashflowIncomeCategory } from "./types";
 import type { ProjectionAssumptions, ProjectionResult, ProjectionScenario, ProjectionYearResult } from "./types";
 
 const JOINT_OWNER_ID = "joint";
@@ -171,7 +172,12 @@ function allocateAmountByOwner(
 
 function getEmploymentIncomeByPersonId(scenario: ProjectionScenario, yearIndex: number, assumptions: ProjectionAssumptions) {
   return scenario.cashflowItems
-    .filter((item) => item.category === "other-income" && item.taxable && /employment|salary|wage/i.test(item.label))
+    .filter(
+      (item) =>
+        isCashflowIncomeCategory(item.category) &&
+        item.taxable &&
+        (item.category === "employment-income" || item.category === "salary-income" || /employment|salary|wage/i.test(item.label)),
+    )
     .reduce<Record<string, number>>((incomeByPersonId, item) => {
       const annualAmount = getCashflowItemValue(item, scenario, yearIndex, assumptions);
 
@@ -972,10 +978,10 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
       }, emptyPersonValues(scenario));
     const liabilityRepaymentItemIds = new Set(scenario.liabilities.map((liability) => `${liability.liabilityId}-repayment`));
     const otherIncome = scenario.cashflowItems
-      .filter((item) => item.category === "other-income")
+      .filter((item) => isCashflowIncomeCategory(item.category))
       .reduce((total, item) => total + (cashflowItemValues[item.itemId] ?? 0), 0);
     const taxableOtherIncomeByPersonId = scenario.cashflowItems
-      .filter((item) => item.category === "other-income" && item.taxable)
+      .filter((item) => isCashflowIncomeCategory(item.category) && item.taxable)
       .reduce<Record<string, number>>((values, item) => {
         allocateAmountByOwner(scenario, values, item.ownerPersonId, cashflowItemValues[item.itemId] ?? 0);
         return values;
@@ -984,8 +990,7 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
     const expenses = scenario.cashflowItems
       .filter(
         (item) =>
-          (item.category === "living-expense" || item.category === "other-expense") &&
-          !liabilityRepaymentItemIds.has(item.itemId),
+          isCashflowExpenseCategory(item.category) && !liabilityRepaymentItemIds.has(item.itemId),
       )
       .reduce((total, item) => total + (cashflowItemValues[item.itemId] ?? 0), 0) +
       sumValues(liabilityRepaymentValues) +

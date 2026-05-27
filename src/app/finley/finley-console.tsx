@@ -17,6 +17,7 @@ import {
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
 import { cacheFileNoteAttachments } from "@/lib/file-note-attachment-cache";
+import type { RoaDraftValue } from "@/lib/roa-draft-service";
 import {
   ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
   ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
@@ -39,6 +40,28 @@ type FinleyConsoleProps = {
 };
 
 const isMockAuthEnabled = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+const clientDataColumnLimit = 3;
+
+function buildDisplayCardTableView(card: FinleyDisplayCard, options?: { preserveAllColumns?: boolean }) {
+  const hasActions = card.rows.some((row) => row.editAction);
+  const visibleColumnCount = options?.preserveAllColumns
+    ? card.columns.length
+    : Math.min(card.columns.length, clientDataColumnLimit);
+  const visibleColumns = card.columns.slice(0, visibleColumnCount);
+  const gridTemplateColumns = hasActions
+    ? `${visibleColumns.map(() => "minmax(0, 1fr)").join(" ")} minmax(5rem, 5.75rem)`
+    : `repeat(${Math.max(visibleColumns.length, 1)}, minmax(0, 1fr))`;
+
+  return {
+    columns: visibleColumns,
+    hasActions,
+    gridTemplateColumns,
+    rows: card.rows.map((row) => ({
+      ...row,
+      cells: row.cells.slice(0, visibleColumnCount),
+    })),
+  };
+}
 
 type Message = {
   id: string;
@@ -67,6 +90,27 @@ type EngagementLetterDraftCardState = {
   clientName: string;
   adviserName?: string | null;
   value: EngagementLetterDraftValue;
+};
+
+type RoaDraftCardState = {
+  title: string;
+  description: string;
+  badge?: string;
+  clientName: string;
+  adviserName?: string | null;
+  letterDetails?: RoaLetterDetails | null;
+  value: RoaDraftValue;
+};
+
+type RoaLetterDetails = {
+  addressee: string;
+  addressLines: string[];
+  adviserName: string;
+  adviserSignatureName: string;
+  adviserPracticeName: string;
+  adviserLicenseeName: string;
+  adviserAbn: string;
+  adviserAfsl: string;
 };
 
 type EngagementLetterDraftValue = {
@@ -114,6 +158,7 @@ type ActiveOutputEditResponse = {
     fees?: Array<Partial<Omit<AgreementFeeRow, "id">> & { id?: string | null }> | null;
     consentNotes?: string | null;
   } | null;
+  updatedRecordOfAdvice?: RoaDraftValue | null;
   warning?: string | null;
 };
 
@@ -389,6 +434,538 @@ function EngagementLetterRender({
           <span>{practiceName?.trim() || "<<practice.name>>"}</span>
           <span>{licenseeName?.trim() || "<<licensee.name>>"}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function roaParagraphs(value: string) {
+  return value
+    .split(/\n{2,}|\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+}
+
+function RoaParagraphBlock({ value }: { value: string }) {
+  const paragraphs = roaParagraphs(value);
+  if (!paragraphs.length) {
+    return <p>To be confirmed.</p>;
+  }
+
+  return (
+    <>
+      {paragraphs.map((paragraph, index) => (
+        <p key={`${index}-${paragraph.slice(0, 18)}`}>{paragraph}</p>
+      ))}
+    </>
+  );
+}
+
+function RoaBulletList({ items }: { items: string[] }) {
+  const cleanItems = items.map((item) => item.trim()).filter(Boolean);
+
+  if (!cleanItems.length) return null;
+
+  return (
+    <ul className={styles.roaBulletList}>
+      {cleanItems.map((item, index) => (
+        <li key={`${index}-${item.slice(0, 18)}`}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function RoaTextSectionView({ title, section }: {
+  title: string;
+  section: RoaDraftValue["scopeOfAdvice"];
+}) {
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>{title}</h2>
+      <RoaParagraphBlock value={section.body} />
+      <RoaBulletList items={section.bullets} />
+      <div className={styles.roaPageNumber}>{title}</div>
+    </section>
+  );
+}
+
+function RoaRecommendationBlock({ title, recommendations }: {
+  title: string;
+  recommendations: RoaDraftValue["strategyRecommendations"];
+}) {
+  return (
+    <>
+      {recommendations.length ? (
+        recommendations.map((recommendation, index) => (
+          <section key={`${recommendation.heading}-${index}`} className={styles.roaPage}>
+            {index === 0 ? (
+              <>
+                <h2 className={styles.roaSectionHeading}>{title}</h2>
+                <p className={styles.roaSectionIntro}>
+                  This section outlines our recommendations, the benefits to you, how these strategies place you in a
+                  better position and other key information.
+                </p>
+              </>
+            ) : null}
+            <div className={styles.roaRecommendationBlock}>
+              <h3>{`Recommendation ${index + 1}`}</h3>
+              <p className={styles.roaRecommendationText}>{recommendation.recommendationText || "To be confirmed."}</p>
+              <div className={styles.roaDetailStack}>
+                <div className={styles.roaCard}>
+                  <h4>Benefits</h4>
+                  <RoaBulletList items={recommendation.benefits.length ? recommendation.benefits : ["To be confirmed."]} />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Consequences and trade-offs</h4>
+                  <RoaBulletList
+                    items={recommendation.consequences.length ? recommendation.consequences : ["To be confirmed."]}
+                  />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Alternatives considered</h4>
+                  <RoaBulletList
+                    items={
+                      recommendation.alternativesConsidered.length
+                        ? recommendation.alternativesConsidered
+                        : ["To be confirmed."]
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div className={styles.roaPageNumber}>{title}</div>
+          </section>
+        ))
+      ) : (
+        <section className={styles.roaPage}>
+          <h2 className={styles.roaSectionHeading}>{title}</h2>
+          <p className={styles.roaEmptyState}>No strategy recommendations have been drafted.</p>
+          <div className={styles.roaPageNumber}>{title}</div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function RoaProductRecommendationBlock({ recommendations }: {
+  recommendations: RoaDraftValue["productRecommendations"];
+}) {
+  return (
+    <>
+      {recommendations.length ? (
+        recommendations.map((recommendation, index) => (
+          <section key={`${recommendation.heading}-${index}`} className={styles.roaPage}>
+            <h2 className={styles.roaSectionHeading}>Product Recommendations</h2>
+            <div className={styles.roaRecommendationBlock}>
+              <h3>{`Product Recommendation ${index + 1}`}</h3>
+              <table className={styles.roaTable}>
+                <tbody>
+                  <tr>
+                    <th>Action</th>
+                    <td>{recommendation.action || "To be confirmed"}</td>
+                  </tr>
+                  <tr>
+                    <th>Product</th>
+                    <td>{recommendation.productName || "To be confirmed"}</td>
+                  </tr>
+                  <tr>
+                    <th>Provider</th>
+                    <td>{recommendation.provider || "To be confirmed"}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className={styles.roaRecommendationText}>{recommendation.recommendationText || "To be confirmed."}</p>
+              <div className={styles.roaDetailStack}>
+                <div className={styles.roaCard}>
+                  <h4>Benefits</h4>
+                  <RoaBulletList items={recommendation.benefits.length ? recommendation.benefits : ["To be confirmed."]} />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Consequences and trade-offs</h4>
+                  <RoaBulletList
+                    items={recommendation.consequences.length ? recommendation.consequences : ["To be confirmed."]}
+                  />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Costs</h4>
+                  <RoaBulletList items={recommendation.costs.length ? recommendation.costs : ["To be confirmed."]} />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Alternatives considered</h4>
+                  <RoaBulletList
+                    items={
+                      recommendation.alternativesConsidered.length
+                        ? recommendation.alternativesConsidered
+                        : ["To be confirmed."]
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div className={styles.roaPageNumber}>Product Recommendations</div>
+          </section>
+        ))
+      ) : (
+        <section className={styles.roaPage}>
+          <h2 className={styles.roaSectionHeading}>Product Recommendations</h2>
+          <p className={styles.roaEmptyState}>No product recommendations have been drafted.</p>
+          <div className={styles.roaPageNumber}>Product Recommendations</div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function RoaInvestmentPortfolioView({ section }: { section: RoaDraftValue["investmentPortfolioRecommendations"] }) {
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>Investment Portfolio Recommendations</h2>
+      <div className={styles.roaCard}>
+        <h3>Recommended Holdings</h3>
+        <h4>{section.ownerName || "To be confirmed"}</h4>
+        {section.body ? <RoaParagraphBlock value={section.body} /> : null}
+        <table className={styles.roaTable}>
+          <thead>
+            <tr>
+              <th>Fund</th>
+              <th>Current</th>
+              <th>Change</th>
+              <th>Proposed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {section.holdings.map((row, index) => {
+              if (row.rowType === "platform") {
+                return (
+                  <tr key={`${row.fund}-${index}`} className={styles.roaPlatformRow}>
+                    <td colSpan={4}>{row.fund}</td>
+                  </tr>
+                );
+              }
+
+              return (
+                <tr
+                  key={`${row.fund}-${index}`}
+                  className={row.rowType === "subtotal" ? styles.roaPlatformSubtotalRow : undefined}
+                >
+                  <td>{row.fund}</td>
+                  <td>{row.current}</td>
+                  <td>{row.change}</td>
+                  <td>{row.proposed}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <RoaBulletList items={section.bullets} />
+      </div>
+      <div className={styles.roaPageNumber}>Investment Portfolio Recommendations</div>
+    </section>
+  );
+}
+
+function RoaPortfolioAllocationView({ allocation }: { allocation: RoaDraftValue["portfolioAllocation"] }) {
+  return (
+    <section className={styles.roaPage}>
+      <div className={styles.roaDetailStack}>
+        <div className={styles.roaCard}>
+          <h3>Asset Allocation Comparison</h3>
+          <p>Upon implementation of our recommendations, the asset allocation of each entity will be as shown below:</p>
+          <RoaParagraphBlock value={allocation.rationale} />
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Asset Class</th>
+                <th>Current</th>
+                <th>Risk Profile</th>
+                <th>Recommended</th>
+                <th>Variance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allocation.rows.map((row, index) => {
+                const isTotalRow = row.assetClass.toLowerCase().includes("total");
+                return (
+                  <tr key={`${row.assetClass}-${index}`} className={isTotalRow ? styles.roaTotalRow : undefined}>
+                    <td>{row.assetClass}</td>
+                    <td>{row.current}</td>
+                    <td>{row.riskProfile}</td>
+                    <td>{row.recommended}</td>
+                    <td>{row.variance}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className={styles.roaCard}>
+          <h3>Recommended Asset Allocation Split</h3>
+          <RoaParagraphBlock value={allocation.implementationNotes} />
+        </div>
+      </div>
+      <div className={styles.roaPageNumber}>Portfolio Allocation</div>
+    </section>
+  );
+}
+
+function parseCurrencyLikeAmount(value: string) {
+  const numeric = Number(value.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatRoaCurrency(value: number) {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function RoaFeesView({ fees, recommendedProducts }: {
+  fees: RoaDraftValue["feesAndDisclosures"];
+  recommendedProducts: string[];
+}) {
+  const normalizedRecommendedProducts = recommendedProducts
+    .map((product) => product.trim().toLowerCase())
+    .filter(Boolean);
+  const recommendedRows = fees.productFeeRows.filter((row) => row.rowStatus === "recommended");
+  const legacyRecommendedRows = !recommendedRows.length && normalizedRecommendedProducts.length
+    ? fees.productFeeRows.filter((row) => normalizedRecommendedProducts.includes(row.product.trim().toLowerCase()))
+    : [];
+  const visibleProductFeeRows = recommendedRows.length
+    ? recommendedRows
+    : legacyRecommendedRows.length
+      ? legacyRecommendedRows
+      : fees.productFeeRows.filter((row) => row.rowStatus !== "current" && row.rowStatus !== "alternative");
+  const productFeeRows = visibleProductFeeRows.length
+    ? visibleProductFeeRows
+    : [{ rowStatus: "recommended" as const, product: "To be confirmed", feeType: "Confirm recommended product fees.", percentage: "-", amount: "To be confirmed" }];
+  const productFeeTotal = productFeeRows.reduce((sum, row) => sum + (parseCurrencyLikeAmount(row.amount) ?? 0), 0);
+  const hasProductFeeTotal = productFeeRows.some((row) => parseCurrencyLikeAmount(row.amount) != null);
+
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>Fees and Disclosures</h2>
+      <p className={styles.roaSectionIntro}>
+        This section outlines the amounts you pay for our advice and the services provided. We have also shown the
+        amounts we receive. All amounts are inclusive of GST where applicable.
+      </p>
+      <div className={styles.roaDetailStack}>
+        <div className={styles.roaCard}>
+          <h3>Advice Preparation &amp; Implementation Fee</h3>
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Fee Type</th>
+                <th>Amount (Include GST)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(fees.adviceFeeRows.length
+                ? fees.adviceFeeRows
+                : [{ feeType: "Advice Fee", amount: "Confirm advice fees." }]
+              ).map((row, index) => (
+                <tr key={`${index}-${row.feeType}`}>
+                  <td>{row.feeType}</td>
+                  <td>{row.amount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className={styles.roaCard}>
+          <h3>Product Fees</h3>
+          <p>The following tables outline the ongoing fees you will incur because of implementing the recommended products in this report:</p>
+          <h4>{fees.productFeeOwnerName || "To be confirmed"}</h4>
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Fee Type</th>
+                <th>%</th>
+                <th>$</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productFeeRows.map((row, index) => (
+                <tr key={`${index}-${row.product}-${row.feeType}`}>
+                  <td>{row.product}</td>
+                  <td>{row.feeType}</td>
+                  <td>{row.percentage}</td>
+                  <td>{row.amount}</td>
+                </tr>
+              ))}
+              {hasProductFeeTotal ? (
+                <tr className={styles.roaProductFeeTotalRow}>
+                  <td colSpan={3}>Total</td>
+                  <td>{formatRoaCurrency(productFeeTotal)}</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <div className={styles.roaCard}>
+          <h3>Commissions and Disclosure Notes</h3>
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Disclosure type</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Commissions</td>
+                <td>{fees.commissions.length ? fees.commissions.join("; ") : "Confirm commissions."}</td>
+              </tr>
+              <tr>
+                <td>Disclosure Notes</td>
+                <td>{fees.disclosureNotes.length ? fees.disclosureNotes.join("; ") : "Confirm material disclosures."}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className={styles.roaPageNumber}>Fees and Disclosures</div>
+    </section>
+  );
+}
+
+function RoaAuthorityView({ authority, letterDetails, adviserName }: {
+  authority: RoaDraftValue["authorityToProceed"];
+  letterDetails: RoaLetterDetails;
+  adviserName?: string | null;
+}) {
+  const adviser = adviserName?.trim() || letterDetails.adviserName || "my adviser";
+  const practiceName = letterDetails.adviserPracticeName || letterDetails.adviserLicenseeName || "the advice practice";
+  const authorityBullets = [
+    `I have read and understood this Record of Advice (ROA) prepared by my adviser and dated ${formatToday()}, including the disclosure of fees and commission.`,
+    "I confirm that the information provided by me and restated in this ROA accurately summarises my current circumstances. I understand that if any of this information is incomplete or inaccurate then the advice may not be appropriate to my circumstances.",
+    "I understand that the recommendations in this ROA have been prepared for my sole use and are current for a period of 60 days from the date of the ROA. I acknowledge that after this time I should not implement the recommendations without further review from my adviser to ensure they remain appropriate.",
+    "I have received your Financial Services Guide and understood the contents.",
+    "I have received Product Disclosure Statements for all products recommended within this ROA and any additional information listed in this ROA, where applicable.",
+    `I/we consent to ${practiceName} receiving any monetary benefits disclosed in connection with the recommendations set out in this ROA.`,
+    ...authority.confirmations,
+  ];
+
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>Authority to Proceed</h2>
+      <div className={styles.roaAuthorityIntro}>
+        <div>{formatToday()}</div>
+        <div>{letterDetails.addressee}</div>
+        {letterDetails.addressLines.length ? (
+          letterDetails.addressLines.map((line) => <div key={line}>{line}</div>)
+        ) : (
+          <>
+            <div>&lt;&lt;address&gt;&gt;</div>
+            <div>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</div>
+          </>
+        )}
+      </div>
+      <div className={styles.roaAuthorityText}>
+        <RoaBulletList items={authorityBullets} />
+        <p>I accept the recommendations offered in this document and authorise {adviser} to implement all recommendations.</p>
+        {authority.actions.length ? (
+          <p>{authority.actions.join(" ")}</p>
+        ) : null}
+        {authority.outstandingItems.length ? (
+          <p>Outstanding items: {authority.outstandingItems.join("; ")}</p>
+        ) : null}
+      </div>
+      <table className={styles.roaTable}>
+        <tbody>
+          <tr>
+            <th>Signed</th>
+            <td>________________________________</td>
+          </tr>
+          <tr>
+            <th>Date</th>
+            <td>________________________________</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className={styles.roaPageNumber}>Authority to Proceed</div>
+    </section>
+  );
+}
+
+function defaultRoaLetterDetails(clientName: string, adviserName?: string | null): RoaLetterDetails {
+  return {
+    addressee: clientName,
+    addressLines: [],
+    adviserName: adviserName?.trim() || "Adviser",
+    adviserSignatureName: adviserName?.trim() || "Adviser",
+    adviserPracticeName: "",
+    adviserLicenseeName: "",
+    adviserAbn: "",
+    adviserAfsl: "368175",
+  };
+}
+
+function RecordOfAdviceRender({ draft, clientName, adviserName, letterDetails }: {
+  draft: RoaDraftValue;
+  clientName: string;
+  adviserName?: string | null;
+  letterDetails?: RoaLetterDetails | null;
+}) {
+  const details = letterDetails ?? defaultRoaLetterDetails(clientName, adviserName);
+
+  return (
+    <div className={styles.roaRender}>
+      <div className={styles.engagementRenderToolbar}>
+        <div>
+          <div className={styles.planLabel}>Live ROA Render</div>
+          <div className={styles.engagementRenderTitle}>Record of Advice</div>
+        </div>
+        <div className={styles.workflowStepBadge}>Editable Draft</div>
+      </div>
+
+      <div className={styles.roaDocument}>
+        <section className={`${styles.roaPage} ${styles.roaLetterPage}`}>
+          <div>{formatToday()}</div>
+          <div className={styles.roaAddressBlock}>
+            <div>{details.addressee}</div>
+            {details.addressLines.length ? (
+              details.addressLines.map((line) => <div key={line}>{line}</div>)
+            ) : (
+              <>
+                <div>&lt;&lt;address&gt;&gt;</div>
+                <div>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</div>
+              </>
+            )}
+          </div>
+          <div className={styles.roaGreeting}>Dear {details.addressee},</div>
+          <h1>Record of Advice</h1>
+          <RoaParagraphBlock value={draft.frontPageLetter} />
+          <div className={styles.roaSignoff}>
+            <p>Yours sincerely,</p>
+            <div className={styles.roaSignatureMark}>{details.adviserSignatureName}</div>
+            <div>{details.adviserName}</div>
+            {details.adviserPracticeName ? <div>{details.adviserPracticeName}</div> : null}
+            {details.adviserLicenseeName ? <div>{details.adviserLicenseeName}</div> : null}
+            {details.adviserAbn ? <div>ABN: {details.adviserAbn}</div> : null}
+            {details.adviserAfsl ? <div>AFSL: {details.adviserAfsl}</div> : null}
+          </div>
+          <div className={styles.roaPageNumber}>Record of Advice</div>
+        </section>
+
+        <RoaTextSectionView title="Scope of Advice" section={draft.scopeOfAdvice} />
+        <RoaRecommendationBlock title="Strategy Recommendations" recommendations={draft.strategyRecommendations} />
+        <RoaProductRecommendationBlock recommendations={draft.productRecommendations} />
+        <RoaInvestmentPortfolioView section={draft.investmentPortfolioRecommendations} />
+        <RoaPortfolioAllocationView allocation={draft.portfolioAllocation} />
+        <RoaTextSectionView title="Replacement Analysis" section={draft.replacementAnalysis} />
+        <RoaFeesView
+          fees={draft.feesAndDisclosures}
+          recommendedProducts={draft.productRecommendations.map((recommendation) => recommendation.productName)}
+        />
+        <RoaAuthorityView
+          authority={draft.authorityToProceed}
+          letterDetails={details}
+          adviserName={adviserName}
+        />
       </div>
     </div>
   );
@@ -1698,10 +2275,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
   const [displayCard, setDisplayCard] = useState<FinleyDisplayCard | null>(null);
+  const [returnDisplayCard, setReturnDisplayCard] = useState<FinleyDisplayCard | null>(null);
   const [editorCard, setEditorCard] = useState<FinleyEditorCard | FinleyTableEditorCard | null>(null);
   const [factFindWorkflow, setFactFindWorkflow] = useState<FinleyFactFindWorkflow | null>(null);
   const [factFindStepIndex, setFactFindStepIndex] = useState(0);
   const [engagementLetterDraftCard, setEngagementLetterDraftCard] = useState<EngagementLetterDraftCardState | null>(null);
+  const [roaDraftCard, setRoaDraftCard] = useState<RoaDraftCardState | null>(null);
   const [agreementDraftCard, setAgreementDraftCard] = useState<AgreementDraftCardState | null>(null);
   const [documentPlaceholderCard, setDocumentPlaceholderCard] = useState<EngagementLetterPlaceholderCard | null>(null);
   const [invoicePlaceholderCard, setInvoicePlaceholderCard] = useState<InvoicePlaceholderCard | null>(null);
@@ -1803,6 +2382,25 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       });
     }
 
+    if (
+      activeClient &&
+      (
+        conciergeUploadTags.has("fact-find") ||
+        conciergeUploadTags.has("meeting-transcript") ||
+        conciergeUploadTags.has("productrex") ||
+        conciergeUploadTags.has("strategy-paper") ||
+        conciergeUploadTags.has("record-of-advice")
+      )
+    ) {
+      tasks.push({
+        id: "prepare-record-of-advice-from-upload",
+        title: "Prepare a Record of Advice",
+        description: "Use the uploaded evidence and active client profile to start the live ROA draft.",
+        actionLabel: "Record of Advice",
+        action: "record_of_advice",
+      });
+    }
+
     if (conciergeUploadTags.has("service-agreement")) {
       tasks.push({
         id: "prepare-service-agreement",
@@ -1823,7 +2421,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       });
     }
 
-    if (conciergeUploads.length && !tasks.length) {
+    if (conciergeUploads.length && !tasks.some((task) => task.action === "summarise_documents")) {
       tasks.push({
         id: "summarise-uploaded-documents",
         title: "Review uploaded documents",
@@ -1833,14 +2431,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       });
     }
 
-    return tasks.slice(0, 5);
-  }, [conciergeUploadTags, conciergeUploads.length]);
+    return tasks.slice(0, 6);
+  }, [activeClient, conciergeUploadTags, conciergeUploads.length]);
   const conciergeInsightText = useMemo(() => {
     if (!conciergeUploads.length) {
       return "";
     }
 
     if (conciergeUploadTags.has("fact-find")) {
+      if (!activeClient) {
+        return "I found a fact find in the uploaded files. I can summarise it now; select a client before mapping profile data or creating client records.";
+      }
+
       return `I found a fact find for ${activeClient?.name ?? "this client"}. The most useful next step is to review the client profile updates before preparing client-facing documents. After that, I can create a file note or prepare the engagement letter.`;
     }
 
@@ -1856,10 +2458,41 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return `I found ProductRex material. This is more likely to support advice preparation, but I can still summarise the product and replacement context here.`;
     }
 
-    return `I’ve added the uploaded document${conciergeUploads.length > 1 ? "s" : ""}. I can review the content and suggest what to do next.`;
+    return `I’ve loaded the uploaded document${conciergeUploads.length > 1 ? "s" : ""} into Finley. I can review the content and suggest what to do next.`;
   }, [activeClient?.name, conciergeUploadTags, conciergeUploads.length]);
-  const primaryConciergeTask = conciergeSuggestedTasks[0] ?? null;
-  const secondaryConciergeTasks = conciergeSuggestedTasks.slice(1, 4);
+  const visibleConciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
+    if (activeClient) {
+      return conciergeSuggestedTasks;
+    }
+
+    const summariseTask = conciergeSuggestedTasks.find((task) => task.action === "summarise_documents");
+    if (summariseTask) {
+      return [
+        {
+          ...summariseTask,
+          title: "Review uploaded documents",
+          description: "Finley can summarise the uploaded files before you select a client.",
+          actionLabel: "Summarise documents",
+        },
+      ];
+    }
+
+    if (!conciergeUploads.length) {
+      return [];
+    }
+
+    return [
+      {
+        id: "summarise-uploaded-documents",
+        title: "Review uploaded documents",
+        description: "Finley can summarise the uploaded files before you select a client.",
+        actionLabel: "Summarise documents",
+        action: "summarise_documents",
+      },
+    ];
+  }, [activeClient, conciergeSuggestedTasks, conciergeUploads.length]);
+  const primaryConciergeTask = visibleConciergeSuggestedTasks[0] ?? null;
+  const secondaryConciergeTasks = visibleConciergeSuggestedTasks.slice(1, 4);
   const uploadedFilesModalFiles = useMemo<UploadedFilesModalFile[]>(
     () =>
       conciergeUploads.map((upload) => ({
@@ -1881,16 +2514,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             ? [
                 {
                   label:
-                    isExtractingFactFindImport && factFindImportSourceFile === upload.name
+                    !activeClient
+                      ? "Select client to map"
+                      : isExtractingFactFindImport && factFindImportSourceFile === upload.name
                       ? "Inspecting..."
                       : "Map to profile",
-                  onClick: () => void inspectFactFindUpload(upload),
-                  disabled: isExtractingFactFindImport,
+                  onClick: activeClient ? () => void inspectFactFindUpload(upload) : () => undefined,
+                  disabled: !activeClient || isExtractingFactFindImport,
                 },
               ]
             : [],
       })),
-    [conciergeUploads, factFindImportSourceFile, isExtractingFactFindImport],
+    [activeClient, conciergeUploads, factFindImportSourceFile, isExtractingFactFindImport],
   );
   const currentFactFindStep = useMemo(
     () =>
@@ -2059,10 +2694,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setPendingPlanId(null);
     setComposerValue("");
     setDisplayCard(null);
+    setReturnDisplayCard(null);
     setEditorCard(null);
     setFactFindWorkflow(null);
     setFactFindStepIndex(0);
     setEngagementLetterDraftCard(null);
+    setRoaDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
     setIsSavingFactFindStep(false);
@@ -2085,6 +2722,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
   function clearLiveRenderOutputs() {
     setEngagementLetterDraftCard(null);
+    setRoaDraftCard(null);
     setAgreementDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
@@ -2134,6 +2772,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setWarnings([]);
     setPendingPlanId(null);
     setDisplayCard(null);
+    setReturnDisplayCard(null);
     setEditorCard(null);
     setFactFindWorkflow(null);
     setFactFindStepIndex(0);
@@ -2142,6 +2781,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setAgreementWorkflowError(null);
     setInvoiceWorkflowError(null);
     setEngagementLetterDraftCard(null);
+    setRoaDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
     const profile = activeClient.id ? await loadClientProfileForPreview(activeClient.id).catch(() => null) : null;
@@ -2174,6 +2814,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
 
     return null;
+  }
+
+  function shouldBypassActiveOutputEdit(message: string) {
+    const lower = message.toLowerCase();
+    return /\b(update fact find|fact find|create file note|file note|create invoice|invoice|engagement letter|ongoing agreement|annual agreement|statement of advice)\b/.test(lower);
   }
 
   function openCreateClient() {
@@ -2217,6 +2862,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setWarnings([]);
     setPendingPlanId(null);
     setDisplayCard(null);
+    setReturnDisplayCard(null);
     setEditorCard(null);
     clearLiveRenderOutputs();
     setFactFindWorkflow(normalizeFactFindWorkflow(body.workflow));
@@ -2445,6 +3091,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setFactFindWorkflowError(null);
         setInvoiceWorkflowError(null);
         setEngagementLetterDraftCard(null);
+        setRoaDraftCard(null);
         setAgreementDraftCard(null);
         setDocumentPlaceholderCard(null);
         setInvoicePlaceholderCard({
@@ -2509,6 +3156,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setInvoicePlaceholderCard(null);
         setAgreementDraftCard(null);
         setDocumentPlaceholderCard(null);
+        setRoaDraftCard(null);
         setEngagementLetterDraftCard({
           title: `Prepare an engagement letter for ${clientName}`,
           description:
@@ -2521,48 +3169,109 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         return;
       }
 
-      const placeholder =
-        action === "record_of_advice"
-          ? {
-              title: `Prepare a Record of Advice for ${activeClient.name}`,
-              description:
-                "This workflow will guide the adviser through changed circumstances, recommendation updates, and supporting rationale before generating the final Record of Advice.",
-              sections: [
-                "Client and review context",
-                "Changed circumstances and relevant updates",
-                "Recommendation summary and rationale",
-                "Implementation notes and disclosures",
-              ],
-              note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
-              badge: "ROA Placeholder",
-            }
-          : action === "statement_of_advice"
-            ? {
-                title: `Prepare a Statement of Advice for ${activeClient.name}`,
-                description:
-                  "This workflow will guide the adviser through full advice preparation, narrative drafting, recommendations, and disclosures before generating the final Statement of Advice.",
-                sections: [
-                  "Client circumstances and objectives",
-                  "Strategy recommendations and product scope",
-                  "Risks, research, and disclosures",
-                  "Implementation, fees, and next steps",
-                ],
-                note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
-                badge: "SOA Placeholder",
+      if (action === "record_of_advice") {
+        setIsSending(true);
+        setMessages([
+          {
+            id: `assistant-roa-draft-start-${Date.now()}`,
+            role: "assistant",
+            content: `I’m preparing a live Record of Advice draft for ${activeClient.name}. I’ll use the selected client profile and any uploaded supporting evidence, then show the editable draft in the workspace.`,
+          },
+        ]);
+
+        try {
+          const response = await fetch("/api/finley/roa/draft", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              clientId: activeClient.id,
+              clientName: activeClient.name,
+              adviserName: activeClient.clientAdviserName ?? currentUserScope?.name ?? null,
+              uploadedFiles: conciergeUploads.map((upload) => ({
+                name: upload.name,
+                tags: upload.tags,
+                extractedText: upload.extractedText?.slice(0, 7000) ?? null,
+              })),
+            }),
+          });
+          const body = (await response.json().catch(() => null)) as
+            | {
+                draft?: RoaDraftValue;
+                source?: "llm" | "fallback";
+                warning?: string | null;
+                letterDetails?: RoaLetterDetails | null;
+                error?: string | null;
               }
-            : {
-                title: `Prepare an engagement letter for ${activeClient.name}`,
-                description:
-                  "This workflow will guide the adviser through scope, fees, disclosures, and acknowledgements before generating the final engagement letter.",
-                sections: [
-                  "Client and adviser details",
-                  "Scope of advice and services",
-                  "Fee and payment terms",
-                  "Authority, acknowledgements, and signatures",
-                ],
-                note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
-                badge: "Placeholder",
-              };
+            | null;
+
+          if (!response.ok || !body?.draft) {
+            throw new Error(body?.error || "Unable to prepare the Record of Advice draft right now.");
+          }
+
+          setMessages([
+            {
+              id: `assistant-roa-draft-${Date.now()}`,
+              role: "assistant",
+              content:
+                body.source === "fallback"
+                  ? `I prepared a safe Record of Advice skeleton for ${activeClient.name}. Review the live draft and tell me what to refine.`
+                  : `I prepared a live Record of Advice draft for ${activeClient.name}. Review the sections and tell me what to refine.`,
+            },
+          ]);
+          setPlanSummary(null);
+          setPlanSteps([]);
+          setWarnings(body.warning ? [body.warning] : []);
+          setPendingPlanId(null);
+          setDisplayCard(null);
+          setEditorCard(null);
+          setFactFindWorkflow(null);
+          setFactFindStepIndex(0);
+          setFactFindWorkflowError(null);
+          setEngagementLetterWorkflowError(null);
+          setAgreementWorkflowError(null);
+          setInvoiceWorkflowError(null);
+          setInvoicePlaceholderCard(null);
+          setAgreementDraftCard(null);
+          setDocumentPlaceholderCard(null);
+          setEngagementLetterDraftCard(null);
+          setRoaDraftCard({
+            title: `Prepare a Record of Advice for ${activeClient.name}`,
+            description: "Live Record of Advice draft using the selected client profile and supporting evidence.",
+            badge: body.source === "fallback" ? "Safe Skeleton" : "Live Draft",
+            clientName: activeClient.name ?? "this client",
+            adviserName: activeClient.clientAdviserName ?? currentUserScope?.name ?? null,
+            letterDetails: body.letterDetails ?? null,
+            value: body.draft,
+          });
+        } catch (error) {
+          setMessages([
+            {
+              id: `assistant-roa-draft-error-${Date.now()}`,
+              role: "assistant",
+              content: error instanceof Error ? error.message : "Unable to prepare the Record of Advice draft right now.",
+            },
+          ]);
+        } finally {
+          setIsSending(false);
+        }
+        return;
+      }
+
+      const placeholder = {
+        title: `Prepare a Statement of Advice for ${activeClient.name}`,
+        description:
+          "This workflow will guide the adviser through full advice preparation, narrative drafting, recommendations, and disclosures before generating the final Statement of Advice.",
+        sections: [
+          "Client circumstances and objectives",
+          "Strategy recommendations and product scope",
+          "Risks, research, and disclosures",
+          "Implementation, fees, and next steps",
+        ],
+        note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
+        badge: "SOA Placeholder",
+      };
 
       setMessages([
         {
@@ -2606,7 +3315,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function addConciergeUploads(files: FileList | null) {
-    if (!files?.length || !activeClient) {
+    if (!files?.length) {
       return;
     }
 
@@ -2638,14 +3347,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
       setConciergeUploads((current) => [...current, ...nextUploads]);
       setIsConciergeSuggestionDismissed(false);
+      const activeClientName = activeClient?.name?.trim();
       setMessages((current) => [
         ...current,
         {
           id: `assistant-upload-${Date.now()}`,
           role: "assistant",
           content: detectedLabels.length
-            ? `I reviewed ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClient.name}. Detected: ${detectedLabels.join(", ")}. I’ve suggested the next useful tasks below.`
-            : `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClient.name}. I can review the documents and suggest what to do next.`,
+            ? activeClientName
+              ? `I reviewed ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClientName}. Detected: ${detectedLabels.join(", ")}. I’ve suggested the next useful tasks below.`
+              : `I reviewed ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} into Finley. Detected: ${detectedLabels.join(", ")}. Select a client when you’re ready to map profile data or create client records.`
+            : activeClientName
+              ? `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClientName}. I can review the documents and suggest what to do next.`
+              : `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} into Finley. I can review the documents now, and you can select a client later for profile work.`,
         },
       ]);
       setIsUploadsModalOpen(true);
@@ -2655,6 +3369,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function handleConciergeSuggestedTask(task: ConciergeSuggestedTask) {
+    if (!activeClient && task.action !== "summarise_documents") {
+      await handleSend("I need to select a client before using this upload for a client workflow.");
+      return;
+    }
+
     if (task.action === "file_note" && conciergeUploadTags.has("meeting-transcript")) {
       const transcriptContext = buildUploadedDocumentContext(conciergeUploads, ["meeting-transcript"]);
       await handleSend(
@@ -2992,6 +3711,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           outputKind: "engagement_letter" as const,
           currentOutput: engagementLetterDraftCard.value,
         }
+      : roaDraftCard
+        ? {
+            outputKind: "record_of_advice" as const,
+            currentOutput: roaDraftCard.value,
+          }
       : agreementDraftCard
         ? {
             outputKind: agreementDraftCard.agreementType === "annual" ? ("annual_agreement" as const) : ("ongoing_agreement" as const),
@@ -3011,6 +3735,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         : null;
 
     if (!activeOutput) {
+      return false;
+    }
+
+    if (shouldBypassActiveOutputEdit(message)) {
       return false;
     }
 
@@ -3053,6 +3781,17 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             ? {
                 ...current,
                 value: body.updatedEngagementLetter!,
+              }
+            : current,
+        );
+      }
+
+      if (activeOutput.outputKind === "record_of_advice" && body.updatedRecordOfAdvice) {
+        setRoaDraftCard((current) =>
+          current
+            ? {
+                ...current,
+                value: body.updatedRecordOfAdvice!,
               }
             : current,
         );
@@ -3108,11 +3847,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   async function handleSend(nextMessage?: string) {
     const message = (nextMessage ?? composerValue).trim();
 
-    if (!message || !activeClient) {
+    if (!message) {
       return;
     }
 
     const isFileNoteAssistRequest =
+      !!activeClient &&
       editorCard?.kind === "collection_form" &&
       editorCard.toolName === "create_file_note" &&
       !!activeAssistField &&
@@ -3188,13 +3928,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         return;
       }
 
-      const activeOutputHandled = await tryHandleActiveOutputInstruction(message, userMessage);
+      const activeOutputHandled = activeClient
+        ? await tryHandleActiveOutputInstruction(message, userMessage)
+        : false;
       if (activeOutputHandled) {
         return;
       }
 
       const requestedAgreementType = detectAgreementRequest(message);
-      if (requestedAgreementType) {
+      if (activeClient && requestedAgreementType) {
         await activateAgreementWorkflow(requestedAgreementType, "append");
         return;
       }
@@ -3208,8 +3950,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         },
         body: JSON.stringify({
           message,
-          activeClientId: activeClient.id,
-          activeClientName: activeClient.name,
+          activeClientId: activeClient?.id ?? null,
+          activeClientName: activeClient?.name ?? null,
           threadId,
           recentMessages: [...messages.slice(-4), userMessage].map((entry) => ({
             role: entry.role,
@@ -3252,6 +3994,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         clearLiveRenderOutputs();
       }
       setDisplayCard(body.displayCard ?? null);
+      setReturnDisplayCard(null);
       setEditorCard(nextEditorCard);
       setFileNoteSubjectManuallyEdited(false);
     } catch (error) {
@@ -3268,6 +4011,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setWarnings([]);
       setPendingPlanId(null);
       setDisplayCard(null);
+      setReturnDisplayCard(null);
       setEditorCard(null);
       setActiveAssistField(null);
       setFileNoteSubjectManuallyEdited(false);
@@ -3363,7 +4107,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setPlanSteps([]);
         setWarnings([]);
         setPendingPlanId(null);
-        setDisplayCard(body.displayCard ?? null);
+        setDisplayCard(body.displayCard ?? returnDisplayCard ?? null);
+        setReturnDisplayCard(null);
         setEditorCard(null);
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
@@ -3380,6 +4125,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setWarnings(body.warnings ?? []);
         setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
         setDisplayCard(body.displayCard ?? null);
+        if (body.displayCard) {
+          setReturnDisplayCard(null);
+        }
         setEditorCard(normalizeEditorCard(body.editorCard ?? null));
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
@@ -3394,7 +4142,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           content: error instanceof Error ? error.message : "Unable to complete the requested plan action.",
         },
       ]);
-      setDisplayCard(null);
+      setDisplayCard(returnDisplayCard ?? null);
+      setReturnDisplayCard(null);
     } finally {
       setIsSending(false);
     }
@@ -3429,6 +4178,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         throw new Error("Unable to prepare that record for editing right now.");
       }
 
+      setReturnDisplayCard(displayCard);
       setMessages((current) => [
         ...current,
         {
@@ -3448,6 +4198,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setWarnings(body.warnings ?? []);
       setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
       setDisplayCard(body.displayCard ?? null);
+      if (body.displayCard) {
+        setReturnDisplayCard(null);
+      }
       setEditorCard(normalizeEditorCard(body.editorCard ?? null));
       setFileNoteSubjectManuallyEdited(false);
       setFileNoteAttachments([]);
@@ -3748,7 +4501,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           ) : null}
 
-          {activeClient && conciergeUploads.length && !isConciergeSuggestionDismissed ? (
+          {conciergeUploads.length && !isConciergeSuggestionDismissed ? (
             <section className={styles.conciergeSuggestionPanel} aria-label="Suggested next steps">
               <div className={styles.conciergeSuggestionHeader}>
                 <div>
@@ -3809,59 +4562,69 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ) : null}
                 </div>
               ) : null}
-              <div className={styles.conciergeCommonTasks}>
-                <span>Other things I can help with:</span>
-                <div>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("file_note")}
-                    disabled={isSending}
-                  >
-                    Create file note
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("engagement_letter")}
-                    disabled={isSending}
-                  >
-                    Engagement letter
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("create_invoice")}
-                    disabled={isSending}
-                  >
-                    Invoice
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("ongoing_agreement")}
-                    disabled={isSending}
-                  >
-                    Ongoing agreement
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("annual_agreement")}
-                    disabled={isSending}
-                  >
-                    Annual agreement
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleSend("check what information is missing for this client")}
-                    disabled={isSending}
-                  >
-                    Check missing info
-                  </button>
+              {activeClient ? (
+                <div className={styles.conciergeCommonTasks}>
+                  <span>Other things I can help with:</span>
+                  <div>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("file_note")}
+                      disabled={isSending}
+                    >
+                      Create file note
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("engagement_letter")}
+                      disabled={isSending}
+                    >
+                      Engagement letter
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("create_invoice")}
+                      disabled={isSending}
+                    >
+                      Invoice
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("ongoing_agreement")}
+                      disabled={isSending}
+                    >
+                      Ongoing agreement
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("annual_agreement")}
+                      disabled={isSending}
+                    >
+                      Annual agreement
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("record_of_advice")}
+                      disabled={isSending}
+                    >
+                      Record of Advice
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleSend("check what information is missing for this client")}
+                      disabled={isSending}
+                    >
+                      Check missing info
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -3942,6 +4705,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ) : null}
                 </div>
               ))}
+              {isSending ? (
+                <div className={styles.finleyRespondingCard} role="status" aria-live="polite">
+                  <span className={styles.finleyRespondingDot} aria-hidden="true" />
+                  <div>
+                    <div className={styles.finleyRespondingTitle}>Finley is responding</div>
+                    <div className={styles.finleyRespondingText}>Preparing the next response now.</div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -3964,12 +4736,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ? activeAssistField
                     ? `Use "Finley:" to draft the file note ${activeAssistField === "content" ? "body" : activeAssistField}...`
                     : `Ask Finley to work on ${activeClient.name ?? "this client"}...`
-                  : "Select a client to start chatting with Finley..."
+                  : "Select a client, or ask Finley a general question..."
               }
               rows={2}
               value={composerValue}
               onChange={(event) => setComposerValue(event.target.value)}
-              disabled={!activeClient}
             />
             <div className={styles.composerFooter}>
               <div className={styles.composerHint}>
@@ -3977,7 +4748,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ? activeAssistField
                     ? `Selected field: ${activeAssistField === "content" ? "File note body" : "File note subject"}. Start your message with "Finley:" to draft into that field.`
                     : ""
-                  : "Client context will appear here once you select a client."}
+                  : "General questions and document summaries work now. Select a client before mapping profile data or creating client records."}
               </div>
               <div className={styles.composerActions}>
                 <button
@@ -3990,7 +4761,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                     }
                     conciergeUploadInputRef.current?.click();
                   }}
-                  disabled={!activeClient || isUploadingConciergeFiles}
+                  disabled={isUploadingConciergeFiles}
                 >
                   {isUploadingConciergeFiles
                     ? "Uploading..."
@@ -4010,7 +4781,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   type="button"
                   className={styles.sendButton}
                   onClick={() => void handleSend()}
-                  disabled={isSending || !activeClient}
+                  disabled={isSending || !composerValue.trim()}
                 >
                   {isSending ? "Sending..." : "Send"}
                 </button>
@@ -4022,7 +4793,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
       <aside className={styles.outputPane} aria-label="Finley output">
         <div className={styles.outputSurface}>
-          {!engagementLetterDraftCard && !agreementDraftCard && !invoicePlaceholderCard ? (
+          {!engagementLetterDraftCard && !roaDraftCard && !agreementDraftCard && !invoicePlaceholderCard ? (
             <div className={styles.outputHeader}>
               <div>
                 <div className={styles.sidebarLabel}>Output</div>
@@ -4033,6 +4804,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
           {!currentFactFindStep &&
           !engagementLetterDraftCard &&
+          !roaDraftCard &&
           !agreementDraftCard &&
           !documentPlaceholderCard &&
           !invoicePlaceholderCard &&
@@ -4076,47 +4848,51 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               </div>
 
               {currentFactFindStep.displayCard ? (
-                <div className={styles.dataCard}>
-                  <div className={styles.planLabel}>Client Data</div>
-                  <div className={styles.planSummary}>{currentFactFindStep.displayCard.title}</div>
-                  <div className={styles.dataTableWrap}>
-                    <div className={styles.dataTableHeader}>
-                      {currentFactFindStep.displayCard.columns.map((column) => (
-                        <span key={column} className={styles.dataTableHeaderCell}>
-                          {column}
-                        </span>
-                      ))}
-                      {currentFactFindStep.displayCard.rows.some((row) => row.editAction) ? (
-                        <span className={styles.dataTableHeaderCell}>Action</span>
-                      ) : null}
-                    </div>
-                    {currentFactFindStep.displayCard.rows.map((row) => (
-                      <div key={row.id} className={styles.dataTableRow}>
-                        {row.cells.map((cell, index) => (
-                          <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
-                            {cell || "-"}
-                          </span>
+                (() => {
+                  const tableView = buildDisplayCardTableView(currentFactFindStep.displayCard);
+
+                  return (
+                    <div className={styles.dataCard}>
+                      <div className={styles.planLabel}>Client Data</div>
+                      <div className={styles.planSummary}>{currentFactFindStep.displayCard.title}</div>
+                      <div className={styles.dataTableWrap}>
+                        <div className={styles.dataTableHeader} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                          {tableView.columns.map((column) => (
+                            <span key={column} className={styles.dataTableHeaderCell}>
+                              {column}
+                            </span>
+                          ))}
+                          {tableView.hasActions ? <span className={styles.dataTableHeaderCell}>Action</span> : null}
+                        </div>
+                        {tableView.rows.map((row) => (
+                          <div key={row.id} className={styles.dataTableRow} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                            {row.cells.map((cell, index) => (
+                              <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
+                                {cell || "-"}
+                              </span>
+                            ))}
+                            {tableView.hasActions ? (
+                              <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
+                                {row.editAction ? (
+                                  <button
+                                    type="button"
+                                    className={styles.dataTableEditButton}
+                                    onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
+                                    disabled={isSending}
+                                  >
+                                    {row.editAction.label ?? "Edit"}
+                                  </button>
+                                ) : (
+                                  <span className={styles.dataTableActionPlaceholder}>-</span>
+                                )}
+                              </span>
+                            ) : null}
+                          </div>
                         ))}
-                        {currentFactFindStep.displayCard!.rows.some((entry) => entry.editAction) ? (
-                          <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
-                            {row.editAction ? (
-                              <button
-                                type="button"
-                                className={styles.dataTableEditButton}
-                                onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
-                                disabled={isSending}
-                              >
-                                {row.editAction.label ?? "Edit"}
-                              </button>
-                            ) : (
-                              <span className={styles.dataTableActionPlaceholder}>-</span>
-                            )}
-                          </span>
-                        ) : null}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  );
+                })()
               ) : null}
 
               {currentFactFindStep.editorCard ? (
@@ -4290,6 +5066,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             />
           ) : null}
 
+          {roaDraftCard ? (
+            <RecordOfAdviceRender
+              draft={roaDraftCard.value}
+              clientName={roaDraftCard.clientName}
+              adviserName={roaDraftCard.adviserName}
+              letterDetails={roaDraftCard.letterDetails}
+            />
+          ) : null}
+
           {agreementDraftCard ? (
             <AgreementRender
               agreement={agreementDraftCard}
@@ -4350,50 +5135,53 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           ) : null}
 
           {displayCard ? (
-            <div className={styles.dataCard}>
-              <div className={styles.planLabel}>
-                {displayCard.title.toLowerCase().includes("document") ? "Document Review" : "Client Data"}
-              </div>
-              <div className={styles.planSummary}>{displayCard.title}</div>
-              <div className={styles.dataTableWrap}>
-                <div className={styles.dataTableHeader}>
-                  {displayCard.columns.map((column) => (
-                    <span key={column} className={styles.dataTableHeaderCell}>
-                      {column}
-                    </span>
-                  ))}
-                  {displayCard.rows.some((row) => row.editAction) ? (
-                    <span className={styles.dataTableHeaderCell}>Action</span>
-                  ) : null}
-                </div>
-                {displayCard.rows.map((row) => (
-                  <div key={row.id} className={styles.dataTableRow}>
-                    {row.cells.map((cell, index) => (
-                      <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
-                        {cell || "-"}
-                      </span>
+            (() => {
+              const isDocumentReview = displayCard.title.toLowerCase().includes("document");
+              const tableView = buildDisplayCardTableView(displayCard, { preserveAllColumns: isDocumentReview });
+
+              return (
+                <div className={styles.dataCard}>
+                  <div className={styles.planLabel}>{isDocumentReview ? "Document Review" : "Client Data"}</div>
+                  <div className={styles.planSummary}>{displayCard.title}</div>
+                  <div className={styles.dataTableWrap}>
+                    <div className={styles.dataTableHeader} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                      {tableView.columns.map((column) => (
+                        <span key={column} className={styles.dataTableHeaderCell}>
+                          {column}
+                        </span>
+                      ))}
+                      {tableView.hasActions ? <span className={styles.dataTableHeaderCell}>Action</span> : null}
+                    </div>
+                    {tableView.rows.map((row) => (
+                      <div key={row.id} className={styles.dataTableRow} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                        {row.cells.map((cell, index) => (
+                          <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
+                            {cell || "-"}
+                          </span>
+                        ))}
+                        {tableView.hasActions ? (
+                          <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
+                            {row.editAction ? (
+                              <button
+                                type="button"
+                                className={styles.dataTableEditButton}
+                                onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
+                                disabled={isSending}
+                              >
+                                {row.editAction.label ?? "Edit"}
+                              </button>
+                            ) : (
+                              <span className={styles.dataTableActionPlaceholder}>-</span>
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
                     ))}
-                    {displayCard.rows.some((entry) => entry.editAction) ? (
-                      <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
-                        {row.editAction ? (
-                          <button
-                            type="button"
-                            className={styles.dataTableEditButton}
-                            onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
-                            disabled={isSending}
-                          >
-                            {row.editAction.label ?? "Edit"}
-                          </button>
-                        ) : (
-                          <span className={styles.dataTableActionPlaceholder}>-</span>
-                        )}
-                      </span>
-                    ) : null}
                   </div>
-                ))}
-              </div>
-              {displayCard.footer ? <div className={styles.planWarning}>{displayCard.footer}</div> : null}
-            </div>
+                  {displayCard.footer ? <div className={styles.planWarning}>{displayCard.footer}</div> : null}
+                </div>
+              );
+            })()
           ) : null}
 
           {planSummary ? (
@@ -4963,9 +5751,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         </div>
       ) : null}
 
-      {isUploadsModalOpen && activeClient ? (
+      {isUploadsModalOpen ? (
         <UploadedFilesModal
-          clientName={activeClient.name ?? "this client"}
+          clientName={activeClient?.name ?? "Finley workspace"}
           files={uploadedFilesModalFiles}
           onClose={() => setIsUploadsModalOpen(false)}
           onAddMore={() => {

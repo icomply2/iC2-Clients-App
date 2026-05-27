@@ -165,10 +165,52 @@ export type PensionWithdrawalEvent = {
   enabled: boolean;
 };
 
+export const projectionIncomeCategories = [
+  "employment-income",
+  "salary-income",
+  "business-income",
+  "rental-income",
+  "investment-income",
+  "superannuation-income",
+  "pension-income",
+  "centrelink-income",
+  "annuity-income",
+  "other-income",
+] as const;
+
+export const projectionExpenseCategories = [
+  "living-expense",
+  "housing-expense",
+  "rent-expense",
+  "mortgage-repayment",
+  "loan-repayment",
+  "insurance-premium",
+  "medical-expense",
+  "transport-expense",
+  "education-expense",
+  "travel-expense",
+  "entertainment-expense",
+  "tax-expense",
+  "advice-fee",
+  "other-expense",
+] as const;
+
+export type CashflowIncomeCategory = typeof projectionIncomeCategories[number];
+export type CashflowExpenseCategory = typeof projectionExpenseCategories[number];
+export type CashflowCategory = CashflowIncomeCategory | CashflowExpenseCategory;
+
+export function isCashflowIncomeCategory(category: CashflowCategory) {
+  return (projectionIncomeCategories as readonly string[]).includes(category);
+}
+
+export function isCashflowExpenseCategory(category: CashflowCategory) {
+  return (projectionExpenseCategories as readonly string[]).includes(category);
+}
+
 export type CashflowItem = {
   itemId: string;
   ownerPersonId: string;
-  category: "living-expense" | "other-income" | "other-expense";
+  category: CashflowCategory;
   label: string;
   annualAmount: number;
   startDate?: string | null;

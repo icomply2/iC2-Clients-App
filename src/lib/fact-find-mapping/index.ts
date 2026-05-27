@@ -4,13 +4,27 @@ import {
   type FactFindImportCandidate,
 } from "@/lib/fact-find-import";
 import type { IntakeDocumentInsightV1 } from "@/lib/soa-output-contracts";
-import type { ProjectionScenario } from "@/lib/projections/types";
+import {
+  projectionExpenseCategories,
+  projectionIncomeCategories,
+  type ProjectionScenario,
+} from "@/lib/projections/types";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim() ?? "";
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
 const OPENAI_MODEL = process.env.OPENAI_SOA_INTAKE_MODEL?.trim() || "gpt-5.2";
 const CURRENT_YEAR = 2026;
 const nullableString = { anyOf: [{ type: "string" }, { type: "null" }] };
+const emptyObjectSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+  required: [],
+};
+
+function isAzureOpenAiBaseUrl(baseUrl: string) {
+  return /(?:\.openai\.azure\.com|\.services\.ai\.azure\.com)/i.test(baseUrl);
+}
 
 const ownerRecordSchema = {
   type: "object",
@@ -401,13 +415,13 @@ const projectionScenarioSchema = {
         ],
       },
     },
-    assetSaleEvents: { type: "array", items: { type: "object" } },
-    assetPurchaseEvents: { type: "array", items: { type: "object" } },
-    liabilityDrawdownEvents: { type: "array", items: { type: "object" } },
-    liabilityPaymentEvents: { type: "array", items: { type: "object" } },
-    superContributionStrategies: { type: "array", items: { type: "object" } },
-    superRolloverEvents: { type: "array", items: { type: "object" } },
-    pensionWithdrawalEvents: { type: "array", items: { type: "object" } },
+    assetSaleEvents: { type: "array", items: emptyObjectSchema },
+    assetPurchaseEvents: { type: "array", items: emptyObjectSchema },
+    liabilityDrawdownEvents: { type: "array", items: emptyObjectSchema },
+    liabilityPaymentEvents: { type: "array", items: emptyObjectSchema },
+    superContributionStrategies: { type: "array", items: emptyObjectSchema },
+    superRolloverEvents: { type: "array", items: emptyObjectSchema },
+    pensionWithdrawalEvents: { type: "array", items: emptyObjectSchema },
     cashflowItems: {
       type: "array",
       items: {
@@ -416,7 +430,7 @@ const projectionScenarioSchema = {
         properties: {
           itemId: { type: "string" },
           ownerPersonId: { type: "string" },
-          category: { type: "string", enum: ["living-expense", "other-income", "other-expense"] },
+          category: { type: "string", enum: [...projectionIncomeCategories, ...projectionExpenseCategories] },
           label: { type: "string" },
           annualAmount: { type: "number" },
           startDate: nullableString,
@@ -1259,16 +1273,16 @@ function fallbackResult(sourceFileName: string, extractedText: string, warning?:
     },
     "fallback",
     null,
-    warning,
   );
 }
 
 async function mapWithOpenAi(sourceFileName: string, extractedText: string, clientName?: string | null) {
+  const isAzure = isAzureOpenAiBaseUrl(OPENAI_BASE_URL);
   const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${OPENAI_API_KEY}`,
+      ...(isAzure ? { "api-key": OPENAI_API_KEY } : { authorization: `Bearer ${OPENAI_API_KEY}` }),
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
@@ -1276,7 +1290,7 @@ async function mapWithOpenAi(sourceFileName: string, extractedText: string, clie
         {
           role: "system",
           content:
-            "You are Finley, mapping an Australian financial advice fact find into shared evidence for a client profile, an SOA intake, and a deterministic projection engine. Extract only facts supported by the document. Do not invent balances, dates, owners, drawdowns, expenses, homeownership, relationship status, product details, policy status, or contact details. Separate client and partner data. Preserve ownership, product names, providers, account numbers, dates, frequencies, dollar amounts, interest rates, repayment amounts, premiums, cover amounts, risk profiles, employment details, dependants, entities, estate-planning notes, and uncertainties. For projection scenario data: employment income must be taxable other-income cashflow items; asset income such as rent or distributions belongs on the asset annualIncome; Age Pension must not be mapped as income unless the document says the client receives it; mortgage repayments must be annual amounts; interest rates must be decimal annual rates; offset accounts are cash assets with growthRateKey none; non-super ETF/share portfolios are investment assets with a mapped investment profile. Do not include proposed/recommended future insurance premiums, education savings, or implementation actions as current cashflow unless they already exist. Use conservative defaults only where the schema requires a value, and explain uncertainty in confirmationsRequired or warnings.",
+            "You are Finley, mapping an Australian financial advice fact find into shared evidence for a client profile, an SOA intake, and a deterministic projection engine. Extract only facts supported by the document. Do not invent balances, dates, owners, drawdowns, expenses, homeownership, relationship status, product details, policy status, or contact details. Separate client and partner data. Preserve ownership, product names, providers, account numbers, dates, frequencies, dollar amounts, interest rates, repayment amounts, premiums, cover amounts, risk profiles, employment details, dependants, entities, estate-planning notes, and uncertainties. For projection scenario data: employment income must be taxable employment-income cashflow items; asset income such as rent or distributions belongs on the asset annualIncome; Age Pension must not be mapped as income unless the document says the client receives it; mortgage repayments must be annual amounts; interest rates must be decimal annual rates; offset accounts are cash assets with growthRateKey none; non-super ETF/share portfolios are investment assets with a mapped investment profile. Do not include proposed/recommended future insurance premiums, education savings, or implementation actions as current cashflow unless they already exist. Use conservative defaults only where the schema requires a value, and explain uncertainty in confirmationsRequired or warnings.",
         },
         {
           role: "user",
@@ -1298,6 +1312,11 @@ async function mapWithOpenAi(sourceFileName: string, extractedText: string, clie
   });
 
   if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    console.warn("Shared fact-find mapping request failed", {
+      status: response.status,
+      body: errorText.slice(0, 1200),
+    });
     throw new Error(`Shared fact-find mapping failed with status ${response.status}.`);
   }
 
