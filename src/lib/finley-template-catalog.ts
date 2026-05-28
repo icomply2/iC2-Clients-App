@@ -26,8 +26,8 @@ export const FINLEY_MANAGED_TEMPLATES: FinleyManagedTemplate[] = [
     description: "Ongoing service agreement and fee consent sections.",
     engine: "Finley DOCX",
     scope: "Standalone document",
-    mergeEnabled: false,
-    status: "Planned",
+    mergeEnabled: true,
+    status: "Active",
   },
   {
     documentType: "annual-agreement",
@@ -35,8 +35,8 @@ export const FINLEY_MANAGED_TEMPLATES: FinleyManagedTemplate[] = [
     description: "Fixed-term annual agreement and fee consent sections.",
     engine: "Finley DOCX",
     scope: "Standalone document",
-    mergeEnabled: false,
-    status: "Planned",
+    mergeEnabled: true,
+    status: "Active",
   },
   {
     documentType: "record-of-advice",

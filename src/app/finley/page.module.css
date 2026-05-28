@@ -1030,16 +1030,150 @@
 }
 
 .assistantBubble {
+  position: relative;
+  padding-right: 3rem;
   border: 1px solid #d9e0e8;
   background: #f3f5f8;
   color: #243b53;
   box-shadow: 0 10px 24px rgba(15, 35, 55, 0.12);
 }
 
+.copyResponseButton {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #cbd8e6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #123763;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.copyResponseButton svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.assistantBubble:hover .copyResponseButton,
+.copyResponseButton:focus-visible {
+  opacity: 1;
+}
+
+.copyResponseButton:hover {
+  border-color: #123763;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.copyResponseButton:focus-visible {
+  outline: 3px solid rgba(248, 203, 15, 0.45);
+  outline-offset: 2px;
+}
+
 .assistantMessageStack {
   display: grid;
   justify-items: start;
   gap: 0.55rem;
+}
+
+.markdownContent {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.markdownContent strong {
+  color: #123763;
+  font-weight: 800;
+}
+
+.markdownContent code {
+  padding: 0.08rem 0.28rem;
+  border: 1px solid #ccd8e6;
+  border-radius: 0.35rem;
+  background: #ffffff;
+  color: #123763;
+  font-family: "Courier New", monospace;
+  font-size: 0.9em;
+}
+
+.markdownParagraph {
+  margin: 0;
+}
+
+.markdownHeading,
+.markdownHeadingLarge {
+  color: #123763;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.markdownHeadingLarge {
+  font-size: 1.05rem;
+}
+
+.markdownHeading {
+  font-size: 0.98rem;
+}
+
+.markdownList {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.markdownList li + li {
+  margin-top: 0.25rem;
+}
+
+.markdownTableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #d7e1ec;
+  border-radius: 0.65rem;
+  background: #ffffff;
+}
+
+.markdownTable {
+  width: 100%;
+  min-width: 28rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.markdownTable th,
+.markdownTable td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid #e1e8f0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdownTable th {
+  background: #f7f1d8;
+  color: #123763;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.markdownTable tr:last-child td {
+  border-bottom: 0;
 }
 
 .finleyRespondingCard {

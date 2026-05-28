@@ -3,7 +3,7 @@
 import JSZip from "jszip";
 import Image from "next/image";
 import Link from "next/link";
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { ClientProfile, ClientSummary, FileNoteRecord, PersonRecord } from "@/lib/api/types";
@@ -94,6 +94,7 @@ type EngagementLetterDraftCardState = {
   description: string;
   badge?: string;
   clientName: string;
+  clientAddressLines?: string[];
   primaryClientName?: string | null;
   partnerName?: string | null;
   adviserName?: string | null;
@@ -280,6 +281,7 @@ type FactFindApplyResponse = {
 function EngagementLetterRender({
   draft,
   clientName,
+  clientAddressLines,
   clientSignatureName,
   partnerName,
   adviserName,
@@ -292,6 +294,7 @@ function EngagementLetterRender({
 }: {
   draft: EngagementLetterDraftValue;
   clientName: string;
+  clientAddressLines?: string[];
   clientSignatureName?: string | null;
   partnerName?: string | null;
   adviserName?: string | null;
@@ -323,6 +326,7 @@ function EngagementLetterRender({
   const practice = practiceName?.trim() || "<<practice>>";
   const signaturePeople = engagementSignaturePeople(clientSignatureName?.trim() || clientName, partnerName);
   const visibleExportError = exportError && !/docmosis/i.test(exportError) ? exportError : null;
+  const addressLines = clientAddressLines?.map((line) => line.trim()).filter(Boolean) ?? [];
 
   return (
     <div className={styles.engagementRender}>
@@ -348,8 +352,14 @@ function EngagementLetterRender({
           <div className={styles.engagementDate}>{formatToday()}</div>
           <div className={styles.engagementAddressBlock}>
             <strong>{clientName}</strong>
-            <span>&lt;&lt;address&gt;&gt;</span>
-            <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
+            {addressLines.length ? (
+              addressLines.map((line) => <span key={line}>{line}</span>)
+            ) : (
+              <>
+                <span>&lt;&lt;address&gt;&gt;</span>
+                <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
+              </>
+            )}
           </div>
 
           <p>Dear {clientSalutationName},</p>
@@ -1572,6 +1582,199 @@ function normalizeText(value?: string | null) {
   return value?.trim().toLowerCase() ?? "";
 }
 
+function CopyResponseIcon({ copied }: { copied: boolean }) {
+  if (copied) {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function renderInlineMarkdown(value: string, keyPrefix: string) {
+  const parts: ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+?\*\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let index = 0;
+
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(value.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("**")) {
+      parts.push(<strong key={`${keyPrefix}-strong-${index}`}>{token.slice(2, -2)}</strong>);
+    } else {
+      parts.push(<code key={`${keyPrefix}-code-${index}`}>{token.slice(1, -1)}</code>);
+    }
+
+    lastIndex = pattern.lastIndex;
+    index += 1;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.slice(lastIndex));
+  }
+
+  return parts.length ? parts : value;
+}
+
+function isMarkdownTableSeparator(value: string) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(value);
+}
+
+function isMarkdownTableStart(lines: string[], index: number) {
+  return Boolean(lines[index]?.includes("|") && lines[index + 1] && isMarkdownTableSeparator(lines[index + 1] ?? ""));
+}
+
+function splitMarkdownTableRow(value: string) {
+  return value
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function MarkdownTable({ lines, tableIndex }: { lines: string[]; tableIndex: number }) {
+  const headers = splitMarkdownTableRow(lines[0] ?? "");
+  const rows = lines.slice(2).map(splitMarkdownTableRow);
+
+  return (
+    <div className={styles.markdownTableWrap}>
+      <table className={styles.markdownTable}>
+        <thead>
+          <tr>
+            {headers.map((header, index) => (
+              <th key={`table-${tableIndex}-head-${index}`}>
+                {renderInlineMarkdown(header, `table-${tableIndex}-head-${index}`)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`table-${tableIndex}-row-${rowIndex}`}>
+              {headers.map((_, cellIndex) => (
+                <td key={`table-${tableIndex}-row-${rowIndex}-cell-${cellIndex}`}>
+                  {renderInlineMarkdown(row[cellIndex] ?? "", `table-${tableIndex}-row-${rowIndex}-cell-${cellIndex}`)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  const lines = content.replace(/\r/g, "").split("\n");
+  const nodes: ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (isMarkdownTableStart(lines, index)) {
+      const tableLines = [line, lines[index + 1] ?? ""];
+      index += 2;
+
+      while (index < lines.length && (lines[index] ?? "").includes("|") && (lines[index] ?? "").trim()) {
+        tableLines.push(lines[index] ?? "");
+        index += 1;
+      }
+
+      nodes.push(<MarkdownTable key={`table-${nodes.length}`} lines={tableLines} tableIndex={nodes.length} />);
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1]?.length ?? 2;
+      const text = headingMatch[2] ?? "";
+      const className = level === 1 ? styles.markdownHeadingLarge : styles.markdownHeading;
+      nodes.push(
+        <div className={className} key={`heading-${nodes.length}`}>
+          {renderInlineMarkdown(text, `heading-${nodes.length}`)}
+        </div>,
+      );
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*]\s+/.test((lines[index] ?? "").trim())) {
+        items.push((lines[index] ?? "").trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      nodes.push(
+        <ul className={styles.markdownList} key={`list-${nodes.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`list-${nodes.length}-${itemIndex}`}>{renderInlineMarkdown(item, `list-${nodes.length}-${itemIndex}`)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\d+\.\s+/.test((lines[index] ?? "").trim())) {
+        items.push((lines[index] ?? "").trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      nodes.push(
+        <ol className={styles.markdownList} key={`ordered-${nodes.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ordered-${nodes.length}-${itemIndex}`}>{renderInlineMarkdown(item, `ordered-${nodes.length}-${itemIndex}`)}</li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (
+      index < lines.length &&
+      (lines[index] ?? "").trim() &&
+      !isMarkdownTableStart(lines, index) &&
+      !/^(#{1,3})\s+/.test((lines[index] ?? "").trim()) &&
+      !/^[-*]\s+/.test((lines[index] ?? "").trim()) &&
+      !/^\d+\.\s+/.test((lines[index] ?? "").trim())
+    ) {
+      paragraphLines.push((lines[index] ?? "").trim());
+      index += 1;
+    }
+
+    nodes.push(
+      <p className={styles.markdownParagraph} key={`paragraph-${nodes.length}`}>
+        {renderInlineMarkdown(paragraphLines.join(" "), `paragraph-${nodes.length}`)}
+      </p>,
+    );
+  }
+
+  return <div className={styles.markdownContent}>{nodes}</div>;
+}
+
 function isTextExtractableFile(file: File) {
   const lowerName = file.name.toLowerCase();
   return (
@@ -2414,6 +2617,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
   const [threadId] = useState(() => `thr_${crypto.randomUUID()}`);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
   const [documentStyleProfile, setDocumentStyleProfile] = useState<DocumentStyleProfile>(
@@ -3291,6 +3495,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       if (action === "engagement_letter") {
         const clientName = activeClient.name ?? "this client";
         const adviserName = activeClient.clientAdviserName ?? currentUserScope?.name ?? "";
+        const profile = activeClient.id ? await loadClientProfileForPreview(activeClient.id).catch(() => null) : null;
+        const clientAddressLines = personAddressLines(profile?.client);
         const uploadedDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, conciergeUploads);
         const usedUploadContext = Boolean(buildUploadedDocumentContext(conciergeUploads, [
           "fact-find",
@@ -3331,6 +3537,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             "Send your client an initial engagement letter to outline the services you will provide and disclose the costs of your advice.",
           badge: "Live Render",
           clientName,
+          clientAddressLines,
           primaryClientName: activeClient.primaryClientName ?? clientName,
           partnerName: activeClient.partnerName ?? null,
           adviserName,
@@ -4032,6 +4239,31 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setFileNoteSubjectManuallyEdited(false);
 
     return true;
+  }
+
+  async function handleCopyAssistantMessage(messageId: string, content: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = content;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => {
+        setCopiedMessageId((currentId) => (currentId === messageId ? null : currentId));
+      }, 1800);
+    } catch {
+      setWarnings((current) => ["I couldn't copy that response to the clipboard.", ...current].slice(0, 3));
+    }
   }
 
   async function handleSend(nextMessage?: string) {
@@ -4833,7 +5065,22 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               {messages.map((message) => (
                 <div key={message.id} className={message.role === "assistant" ? styles.assistantMessageStack : ""}>
                   <div className={message.role === "assistant" ? styles.assistantBubble : styles.userBubble}>
-                    {message.content}
+                    {message.role === "assistant" ? (
+                      <>
+                        <button
+                          type="button"
+                          className={styles.copyResponseButton}
+                          onClick={() => void handleCopyAssistantMessage(message.id, message.content)}
+                          aria-label={copiedMessageId === message.id ? "Finley response copied" : "Copy Finley response"}
+                          title={copiedMessageId === message.id ? "Copied" : "Copy response"}
+                        >
+                          <CopyResponseIcon copied={copiedMessageId === message.id} />
+                        </button>
+                        <AssistantMarkdown content={message.content} />
+                      </>
+                    ) : (
+                      message.content
+                    )}
                   </div>
                   {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient ? (
                     <div className={styles.workflowPillRow} aria-label="Suggested Finley workflows">
@@ -5257,6 +5504,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             <EngagementLetterRender
               draft={engagementLetterDraftCard.value}
               clientName={engagementLetterDraftCard.clientName}
+              clientAddressLines={engagementLetterDraftCard.clientAddressLines}
               clientSignatureName={engagementLetterDraftCard.primaryClientName ?? activeClient?.primaryClientName}
               partnerName={engagementLetterDraftCard.partnerName ?? activeClient?.partnerName}
               adviserName={engagementLetterDraftCard.adviserName}
