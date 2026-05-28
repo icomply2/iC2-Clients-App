@@ -8,7 +8,11 @@ import {
   type DocumentStyleProfile,
 } from "@/lib/documents/document-style-profile";
 import { readAppDefaultFinleyTemplate, readLicenseeFinleyTemplate } from "@/lib/finley-template-store";
-import { validateFinleyTemplateDocx } from "@/lib/finley-template-validation";
+import { buildProfileScalarTemplateFields } from "@/lib/finley-template-profile-fields";
+import {
+  extractFinleyTemplateFieldsFromXml,
+  validateFinleyTemplateDocx,
+} from "@/lib/finley-template-validation";
 
 export type EngagementLetterTemplateInput = {
   reasonsHtml?: string | null;
@@ -91,10 +95,6 @@ function escapeXml(value: string) {
     .replace(/'/g, "&apos;");
 }
 
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function decodeEntities(value: string) {
   return value
     .replace(/&nbsp;/gi, " ")
@@ -104,6 +104,15 @@ function decodeEntities(value: string) {
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
     .replace(/&apos;/gi, "'");
+}
+
+function decodeXmlText(value: string) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 function text(value?: string | null) {
@@ -550,7 +559,7 @@ function defaultEngagementTemplateDocumentXml() {
     headingXml("Your Acknowledgement - Engagement Letter", 2),
     paragraphXml("You understand the engagement between you and <<practice.name>> will start on the date this agreement is signed.", { spacingAfter: 120 }),
     paragraphXml("You accept the services, fees and terms as outlined in this letter.", { spacingAfter: 160 }),
-    placeholderParagraphXml("engagement.clientAcknowledgementSignatures"),
+    placeholderParagraphXml("client.signatureBlock"),
   ].join("");
 
   return baseDocumentXml(body);
@@ -571,20 +580,156 @@ function templateTokens(fieldName: string) {
   return [`&lt;&lt;${fieldName}&gt;&gt;`, `<<${fieldName}>>`];
 }
 
+type XmlTextChar = {
+  char: string;
+  start: number;
+  end: number;
+};
+
+type TemplateTokenOccurrence = {
+  fieldName: string;
+  start: number;
+  end: number;
+};
+
+function decodeXmlTextWithRanges(value: string, offset: number) {
+  const chars: XmlTextChar[] = [];
+  let index = 0;
+
+  while (index < value.length) {
+    if (value[index] === "&") {
+      const entityEnd = value.indexOf(";", index);
+
+      if (entityEnd !== -1) {
+        const entity = value.slice(index, entityEnd + 1);
+        const decoded = decodeXmlText(entity);
+
+        if (decoded.length === 1) {
+          chars.push({ char: decoded, start: offset + index, end: offset + entityEnd + 1 });
+          index = entityEnd + 1;
+          continue;
+        }
+      }
+    }
+
+    chars.push({ char: value[index] ?? "", start: offset + index, end: offset + index + 1 });
+    index += 1;
+  }
+
+  return chars;
+}
+
+function findTemplateTokenOccurrences(xml: string, fieldName?: string) {
+  const chars: XmlTextChar[] = [];
+  const textNodePattern = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+  let textNodeMatch: RegExpExecArray | null;
+
+  while ((textNodeMatch = textNodePattern.exec(xml)) !== null) {
+    const content = textNodeMatch[1] ?? "";
+    const contentOffset = textNodeMatch.index + textNodeMatch[0].indexOf(">") + 1;
+    chars.push(...decodeXmlTextWithRanges(content, contentOffset));
+  }
+
+  const visibleText = chars.map((item) => item.char).join("");
+  const tokenPattern = /<<\s*([^<>]+?)\s*>>/g;
+  const occurrences: TemplateTokenOccurrence[] = [];
+  let tokenMatch: RegExpExecArray | null;
+
+  while ((tokenMatch = tokenPattern.exec(visibleText)) !== null) {
+    const matchedFieldName = tokenMatch[1]?.trim();
+    const matchLength = tokenMatch[0].length;
+    const firstChar = chars[tokenMatch.index];
+    const lastChar = chars[tokenMatch.index + matchLength - 1];
+
+    if (!matchedFieldName || !firstChar || !lastChar || (fieldName && matchedFieldName !== fieldName)) {
+      continue;
+    }
+
+    occurrences.push({
+      fieldName: matchedFieldName,
+      start: firstChar.start,
+      end: lastChar.end,
+    });
+  }
+
+  return occurrences;
+}
+
+function replaceTemplateTokenText(xml: string, fieldName: string, value: string) {
+  return findTemplateTokenOccurrences(xml, fieldName)
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (current, occurrence) => `${current.slice(0, occurrence.start)}${escapeXml(value)}${current.slice(occurrence.end)}`,
+      xml,
+    );
+}
+
+function findParagraphStartBefore(xml: string, index: number) {
+  const precedingXml = xml.slice(0, index);
+  const starts = Array.from(precedingXml.matchAll(/<w:p(?:\s|>)/g));
+
+  return starts.length ? starts[starts.length - 1]?.index ?? -1 : -1;
+}
+
 function replaceInlineField(xml: string, fieldName: string, value: string) {
-  return templateTokens(fieldName).reduce(
+  const rawTokenReplaced = templateTokens(fieldName).reduce(
     (current, token) => current.replaceAll(token, escapeXml(value)),
     xml,
   );
+
+  return replaceTemplateTokenText(rawTokenReplaced, fieldName, value);
+}
+
+function replaceParagraphContainingField(xml: string, fieldName: string, valueXml: string) {
+  let nextXml = xml;
+  const occurrences = findTemplateTokenOccurrences(xml, fieldName).sort((left, right) => right.start - left.start);
+
+  for (const occurrence of occurrences) {
+    const paragraphStart = findParagraphStartBefore(nextXml, occurrence.start);
+    const paragraphEnd = nextXml.indexOf("</w:p>", occurrence.end);
+
+    if (paragraphStart === -1 || paragraphEnd === -1) {
+      nextXml = `${nextXml.slice(0, occurrence.start)}${valueXml}${nextXml.slice(occurrence.end)}`;
+      continue;
+    }
+
+    const replacementEnd = paragraphEnd + "</w:p>".length;
+    nextXml = `${nextXml.slice(0, paragraphStart)}${valueXml}${nextXml.slice(replacementEnd)}`;
+  }
+
+  return nextXml;
 }
 
 function replaceBlockField(xml: string, fieldName: string, valueXml: string) {
-  return templateTokens(fieldName).reduce((current, token) => {
-    const paragraphPattern = new RegExp(`<w:p\\b[\\s\\S]*?${escapeRegex(token)}[\\s\\S]*?<\\/w:p>`, "g");
-    const replacedParagraphs = current.replace(paragraphPattern, valueXml);
+  const rawTokenReplaced = templateTokens(fieldName).reduce((current, token) => {
+    let nextXml = current;
+    let searchFrom = 0;
 
-    return replacedParagraphs.replaceAll(token, valueXml);
+    while (searchFrom < nextXml.length) {
+      const tokenIndex = nextXml.indexOf(token, searchFrom);
+
+      if (tokenIndex === -1) {
+        break;
+      }
+
+      const paragraphStart = findParagraphStartBefore(nextXml, tokenIndex);
+      const paragraphEnd = nextXml.indexOf("</w:p>", tokenIndex);
+
+      if (paragraphStart === -1 || paragraphEnd === -1) {
+        nextXml = `${nextXml.slice(0, tokenIndex)}${valueXml}${nextXml.slice(tokenIndex + token.length)}`;
+        searchFrom = tokenIndex + valueXml.length;
+        continue;
+      }
+
+      const replacementEnd = paragraphEnd + "</w:p>".length;
+      nextXml = `${nextXml.slice(0, paragraphStart)}${valueXml}${nextXml.slice(replacementEnd)}`;
+      searchFrom = paragraphStart + valueXml.length;
+    }
+
+    return nextXml;
   }, xml);
+
+  return replaceParagraphContainingField(rawTokenReplaced, fieldName, valueXml);
 }
 
 function replaceImageFieldWithEmpty(xml: string, fieldName: string) {
@@ -616,6 +761,7 @@ function buildTemplateModel(profile: ClientProfile, draft: EngagementLetterTempl
 
   return {
     inline: {
+      ...buildProfileScalarTemplateFields(profile),
       "document.date": formatDate(),
       "client.addressee": clientName,
       "client.salutation": salutationName(clientName),
@@ -625,6 +771,7 @@ function buildTemplateModel(profile: ClientProfile, draft: EngagementLetterTempl
     },
     blocks: {
       "client.addressBlock": addressLines.map((line) => paragraphXml(line)).join(""),
+      "client.signatureBlock": signatureTableXml([clientSignatureName, partnerSignatureName]),
       "engagement.reasonsForSeekingAdvice": reasonsXml,
       "engagement.tasksToBeCompleted": servicesXml,
       "engagement.feeEstimateTable": feeEstimateTableXml(advicePreparationFee, implementationFee),
@@ -670,7 +817,7 @@ async function mergeTemplateBuffer(templateBuffer: Buffer, profile: ClientProfil
           xml = image ? replaceBlockField(xml, fieldName, imageParagraphXml(image)) : replaceImageFieldWithEmpty(xml, fieldName);
         }
 
-        if (/(?:&lt;&lt;|<<)\s*[^<>]+?\s*(?:&gt;&gt;|>>)/.test(xml)) {
+        if (extractFinleyTemplateFieldsFromXml(xml).length) {
           xml = `${xml.replace("</w:body>", `${paragraphXml(TEMPLATE_PLACEHOLDER_WARNING, { italic: true })}</w:body>`)}`;
         }
 

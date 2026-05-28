@@ -84,7 +84,12 @@ function validationSummary(validation: FinleyTemplateValidationResult | null) {
     return `${validation.supportedFields.length} supported fields, ${validation.warnings.length} warnings.`;
   }
 
-  return `${validation.unknownFields.length} unknown fields, ${validation.missingRequiredFields.length} missing required fields.`;
+  const issues = [
+    validation.unknownFields.length ? `${validation.unknownFields.length} unknown fields` : null,
+    validation.unsupportedConstructs.length ? `${validation.unsupportedConstructs.length} unsupported constructs` : null,
+  ].filter(Boolean);
+
+  return issues.length ? issues.join(", ") : "Template validation failed.";
 }
 
 async function parseActionResponse(response: Response) {
@@ -158,7 +163,7 @@ export default function DefaultTemplateManager() {
 
   function handleUploadClick() {
     if (!selectedTemplate?.uploadEnabled) {
-      setError("Only Engagement Letter default templates are upload-enabled in V1.");
+      setError(`${selectedTemplate?.displayName ?? "This template"} is not upload-enabled in V1.`);
       return;
     }
 
@@ -190,7 +195,7 @@ export default function DefaultTemplateManager() {
     if (!selectedTemplate) return;
 
     if (!selectedTemplate.uploadEnabled) {
-      setError("Only Engagement Letter default templates are rename-enabled in V1.");
+      setError(`${selectedTemplate.displayName} is not rename-enabled in V1.`);
       return;
     }
 
@@ -216,7 +221,7 @@ export default function DefaultTemplateManager() {
     if (!selectedTemplate) return;
 
     if (!selectedTemplate.uploadEnabled) {
-      setError("Only Engagement Letter default templates are reset-enabled in V1.");
+      setError(`${selectedTemplate.displayName} is not reset-enabled in V1.`);
       return;
     }
 

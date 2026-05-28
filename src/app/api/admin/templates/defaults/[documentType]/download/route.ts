@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { buildAgreementTemplateSampleDocx } from "@/lib/agreement-docx-export";
 import { buildEngagementLetterTemplateSampleDocx } from "@/lib/finley-engagement-template-docx";
 import { getManagedFinleyTemplate } from "@/lib/finley-template-catalog";
 import { readAppDefaultFinleyTemplate } from "@/lib/finley-template-store";
@@ -28,7 +29,10 @@ export async function GET(_request: Request, context: { params: Promise<{ docume
   }
 
   const storedTemplate = await readAppDefaultFinleyTemplate(documentType);
-  const buffer = storedTemplate?.content ?? await buildEngagementLetterTemplateSampleDocx();
+  const buffer = storedTemplate?.content
+    ?? (documentType === "engagement-letter"
+      ? await buildEngagementLetterTemplateSampleDocx()
+      : await buildAgreementTemplateSampleDocx(documentType));
   const fileName = storedTemplate?.metadata.fileName
     ?? `${sanitizeFilename(template.label) || "Finley"}-Default-Template.docx`;
 

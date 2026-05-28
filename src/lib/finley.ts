@@ -5052,15 +5052,17 @@ function buildNoClientFallbackAnswer(message: string, uploads: ReturnType<typeof
       .map((upload) => `${upload.name}${upload.tags.length ? ` (${upload.tags.join(", ")})` : ""}`)
       .join("; ");
     return [
-      `I can help with that in the Finley workspace. I have ${uploads.length} uploaded file${uploads.length > 1 ? "s" : ""} available: ${fileList}.`,
-      "Ask me to summarise or review the uploaded documents and I can prepare a workspace summary before you select a client.",
-      "When you want to map facts, update a profile, or create client records, select or create the client first.",
+      "**Uploaded Documents**",
+      `- I have ${uploads.length} uploaded file${uploads.length > 1 ? "s" : ""} available: ${fileList}.`,
+      "- Ask me to summarise or review the uploaded documents and I can prepare a workspace summary before you select a client.",
+      "- When you want to map facts, update a profile, or create client records, select or create the client first.",
     ].join("\n\n");
   }
 
   return [
-    "I can help with general adviser-practice questions before a client is selected.",
-    "Select a client when you want profile lookups, fact-find mapping, profile updates, file notes, invoices, agreements, or client document generation.",
+    "**Finley Workspace**",
+    "- I can help with general adviser-practice questions before a client is selected.",
+    "- Select a client when you want profile lookups, fact-find mapping, profile updates, file notes, invoices, agreements, or client document generation.",
     `You asked: "${message}". Ask a general advice-process question, or upload a file and I can review it in the Finley workspace.`,
   ].join("\n\n");
 }
@@ -5097,6 +5099,10 @@ async function buildGlobalFinleyAnswer(
               "No client is currently selected. You may answer general adviser-assistant questions and use uploaded document text as temporary workspace context.",
               "Do not infer, read, or update any client profile. Do not claim that any record has been saved.",
               "If the user asks for profile reads, profile writes, fact-find mapping, file notes, invoices, agreements, or client document generation, tell them to select or create a client first.",
+              "Return structured Markdown. Prefer short bold section headings, bullet lists, and Markdown tables where they improve scanning.",
+              "When answering from uploaded document text, group extracted facts under clear headings such as Objectives, Preferences, Constraints, Advice areas, and Next steps when relevant.",
+              "For calculation questions, show the source values used, the formula or calculation steps, a Markdown table of the result, and an Assumptions section. Label model-derived calculations as estimates unless a deterministic system calculator was used.",
+              "Ask for missing inputs instead of inventing rates, dates, residency status, offsets, thresholds, or other material assumptions.",
               "Keep answers concise, practical, and written for an Australian financial advice practice.",
             ].join(" "),
           },

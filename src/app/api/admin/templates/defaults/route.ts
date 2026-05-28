@@ -8,6 +8,7 @@ import {
   writeAppDefaultFinleyTemplate,
   writeAppDefaultFinleyTemplateMetadata,
 } from "@/lib/finley-template-store";
+import { buildAgreementTemplateSampleDocx } from "@/lib/agreement-docx-export";
 import { buildEngagementLetterTemplateSampleDocx } from "@/lib/finley-engagement-template-docx";
 import { validateFinleyTemplateDocx, type FinleyTemplateDocumentType } from "@/lib/finley-template-validation";
 
@@ -39,6 +40,11 @@ async function buildTemplateRow(documentType: FinleyTemplateDocumentType) {
 async function buildGeneratedTemplateValidation(documentType: FinleyTemplateDocumentType) {
   if (documentType === "engagement-letter") {
     const sample = await buildEngagementLetterTemplateSampleDocx();
+    return validateFinleyTemplateDocx(documentType, sample);
+  }
+
+  if (documentType === "ongoing-agreement" || documentType === "annual-agreement") {
+    const sample = await buildAgreementTemplateSampleDocx(documentType);
     return validateFinleyTemplateDocx(documentType, sample);
   }
 
