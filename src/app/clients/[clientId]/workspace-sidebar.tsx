@@ -30,28 +30,27 @@ type SidebarNavProps = {
 };
 
 const navItems = [
-  { label: "All Clients", icon: "◔", href: "/clients", key: "all-clients" },
-  { label: "Client Details", icon: "◕", href: "", key: "details" },
-  { label: "Entities", icon: "⌘", href: "/entities", key: "entities" },
-  { label: "Identity Check", icon: "◉", href: "/identity-check", key: "identity-check" },
-  { label: "Client File Notes", icon: "◫", href: "/file-notes", key: "file-notes" },
-  { label: "iC2 Wizards", icon: "✲", href: "/wizards", key: "wizards" },
-  { label: "Projections", icon: "▥", href: "/projections", key: "projections", newTab: true },
-  { label: "Dependents", icon: "◔", href: "/dependents", key: "dependents" },
-  { label: "Assets", icon: "$", href: "/assets", key: "assets" },
-  { label: "Liability", icon: "▤", href: "/liabilities", key: "liabilities" },
-  { label: "Superannuation", icon: "▮", href: "/superannuation", key: "superannuation" },
-  { label: "Pensions", icon: "◫", href: "/retirement-income", key: "retirement-income" },
-  { label: "Insurance", icon: "✚", href: "/insurance", key: "insurance" },
-  { label: "Income", icon: "▥", href: "/income", key: "income" },
-  { label: "Expense", icon: "∿", href: "/expenses", key: "expenses" },
-  { label: "Portfolio", icon: "⌘", href: "/portfolio", key: "portfolio" },
+  { label: "Client Details", href: "", key: "details" },
+  { label: "Entities", href: "/entities", key: "entities" },
+  { label: "Identity Check", href: "/identity-check", key: "identity-check" },
+  { label: "Client File Notes", href: "/file-notes", key: "file-notes" },
+  { label: "iC2 Wizards", href: "/wizards", key: "wizards" },
+  { label: "Projections", href: "/projections", key: "projections", newTab: true },
+  { label: "Dependents", href: "/dependents", key: "dependents" },
+  { label: "Assets", href: "/assets", key: "assets" },
+  { label: "Liability", href: "/liabilities", key: "liabilities" },
+  { label: "Superannuation", href: "/superannuation", key: "superannuation" },
+  { label: "Pensions", href: "/retirement-income", key: "retirement-income" },
+  { label: "Insurance", href: "/insurance", key: "insurance" },
+  { label: "Income", href: "/income", key: "income" },
+  { label: "Expense", href: "/expenses", key: "expenses" },
+  { label: "Portfolio", href: "/portfolio", key: "portfolio" },
 ] as const;
 
 function resolveHref(clientId: string, key: string, href: string) {
   switch (key) {
     case "projections":
-      return `https://www.finleyai.com.au/projections?clientid=${encodeURIComponent(clientId)}`;
+      return `https://www.finleyai.com.au/projections?clientId=${encodeURIComponent(clientId)}`;
     case "details":
       return `/clients/${clientId}`;
     case "identity-check":
@@ -113,7 +112,6 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
                 onClick={() => setWizardsOpen((current) => !current)}
                 aria-expanded={wizardsOpen}
               >
-                <span className={styles.navIcon}>{item.icon}</span>
                 <span className={styles.navLabel}>{item.label}</span>
                 <span className={styles.navCaret}>{wizardsOpen ? "▾" : "▸"}</span>
               </button>
@@ -161,7 +159,6 @@ export function WorkspaceSidebar({ clientId, section }: SidebarNavProps) {
             rel={"newTab" in item && item.newTab ? "noopener noreferrer" : undefined}
             className={`${styles.navItem} ${isActive ? styles.navItemActive : ""}`.trim()}
           >
-            <span className={styles.navIcon}>{item.icon}</span>
             <span className={styles.navLabel}>{item.label}</span>
           </Link>
         );

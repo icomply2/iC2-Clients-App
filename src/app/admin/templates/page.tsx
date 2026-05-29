@@ -1,44 +1,17 @@
-import { DOCUMENT_TEMPLATES, type DocumentSectionKey } from "@/lib/documents/document-sections";
+import DefaultTemplateManager from "@/app/admin/templates/default-template-manager";
+import { FINLEY_MANAGED_TEMPLATES } from "@/lib/finley-template-catalog";
+import {
+  getFinleyDocumentSpecificTemplateFields,
+  getFinleyGlobalTemplateFields,
+  type FinleyTemplateFieldDefinition,
+} from "@/lib/finley-template-validation";
 import styles from "../admin.module.css";
 
-const sectionLabels: Record<DocumentSectionKey, string> = {
-  factFind: "Fact Find",
-  engagementLetter: "Engagement Letter",
-  invoice: "Invoice",
-  coverPage: "Cover Page",
-  tableOfContents: "Table of Contents",
-  letter: "Letter",
-  executiveSummary: "Executive Summary",
-  aboutThisAdvice: "About This Advice",
-  scopeOfAdvice: "Scope of Advice",
-  personalFinancialPosition: "Personal and Financial Position",
-  riskProfile: "Risk Profile",
-  strategyRecommendations: "Strategy Recommendations",
-  productRecommendations: "Product Recommendations",
-  investmentPortfolioRecommendations: "Investment Portfolio Recommendations",
-  portfolioAllocation: "Portfolio Allocation",
-  replacementAnalysis: "Replacement Analysis",
-  insuranceNeedsAnalysis: "Insurance Needs Analysis",
-  recommendedInsurancePolicies: "Recommended Insurance Policies",
-  insuranceProductReplacement: "Insurance Product Replacement",
-  projections: "Projections",
-  feesAndDisclosures: "Fees and Disclosures",
-  actionsRequired: "Actions Required by You",
-  authorityToProceed: "Authority to Proceed",
-  serviceAgreement: "Service Agreement",
-  consentToDeductFees: "Consent to Deduct Fees",
-  appendix: "Appendix",
-};
-
-const templates = Object.values(DOCUMENT_TEMPLATES);
-
-function getStatusClass(status: (typeof templates)[number]["status"]) {
-  if (status === "Active") {
-    return `${styles.statusPill} ${styles.statusPillAdmin}`;
-  }
-
-  return styles.statusPill;
-}
+const TEMPLATE_GUIDE_SECTIONS: Array<{ label: string; fields: FinleyTemplateFieldDefinition[] }> = [
+  { label: "Global", fields: getFinleyGlobalTemplateFields() },
+  { label: "Engagement Letter", fields: getFinleyDocumentSpecificTemplateFields("engagement-letter") },
+  { label: "Ongoing + Annual Agreements", fields: getFinleyDocumentSpecificTemplateFields("ongoing-agreement") },
+];
 
 export default function AdminTemplatesPage() {
   return (
@@ -46,52 +19,71 @@ export default function AdminTemplatesPage() {
       <div className={styles.contentCardHeader}>
         <div>
           <h2 className={styles.cardTitle}>Templates</h2>
-          <p className={styles.cardText}>
-            Templates are now managed as reusable Finley document structures. Standalone documents and larger advice
-            documents can share the same sections, wording, tables, agreement blocks, and DOCX export logic.
-          </p>
         </div>
 
-        <span className={styles.badge}>{templates.length} templates</span>
+        <span className={styles.badge}>{FINLEY_MANAGED_TEMPLATES.length} templates</span>
       </div>
 
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>Template</th>
-              <th>Engine</th>
-              <th>Scope</th>
-              <th>Reusable sections</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {templates.map((template) => (
-              <tr key={template.key}>
-                <td>
-                  <strong>{template.label}</strong>
-                  <p className={styles.tableSubtext}>{template.description}</p>
-                </td>
-                <td>{template.engine}</td>
-                <td>{template.scope}</td>
-                <td>
-                  <div className={styles.templateSectionList}>
-                    {template.sections.map((section) => (
-                      <span className={styles.templateSectionPill} key={`${template.key}-${section}`}>
-                        {sectionLabels[section]}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td>
-                  <span className={getStatusClass(template.status)}>{template.status}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <DefaultTemplateManager />
+
+      <div className={styles.templateGuideGrid}>
+        <div className={styles.templateGuideCard}>
+          <h3>Authoring rules</h3>
+          <ul className={styles.templateRuleList}>
+            <li>Use only placeholders listed in the Finley catalogue.</li>
+            <li>All placeholders are optional; include only the fields you want in the document.</li>
+            <li>Place generated blocks, tables, and signature blocks on their own paragraph.</li>
+            <li>Finley applies the active document style profile for practice branding.</li>
+            <li>Licensee override management will live in a separate licensee template management area.</li>
+          </ul>
+        </div>
+        <div className={styles.templateGuideCard}>
+          <h3>V1 rollout</h3>
+          <p>
+            Engagement Letter, Ongoing Agreement, and Annual Agreement are upload-enabled now. Record of Advice is shown
+            here so it can move onto the same template path next.
+          </p>
+        </div>
       </div>
+
+      <section className={styles.contentCard}>
+        <div className={styles.contentCardHeader}>
+          <div>
+            <h2 className={styles.cardTitle}>Finley Template Guide</h2>
+            <p className={styles.cardText}>
+              Finley templates use a controlled subset of Docmosis-style placeholders. The template controls wording and
+              structure; the active document style profile controls practice branding.
+            </p>
+          </div>
+          <span className={styles.badge}>Placeholder catalogue</span>
+        </div>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>Scope</th>
+                <th>Field</th>
+                <th>Use</th>
+                <th>Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              {TEMPLATE_GUIDE_SECTIONS.flatMap((section) =>
+                section.fields.map((field) => (
+                  <tr key={`${section.label}-${field.field}`}>
+                    <td>{section.label}</td>
+                    <td>
+                      <strong>{field.kind === "html" ? `<<html:${field.field}>>` : `<<${field.field}>>`}</strong>
+                    </td>
+                    <td>{field.label}</td>
+                    <td>{field.kind}</td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </section>
   );
 }

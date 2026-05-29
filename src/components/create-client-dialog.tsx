@@ -199,6 +199,7 @@ export function CreateClientDialog({
           .filter((user) => user.id && user.name)
           .map((user) => ({
             id: user.id ?? "",
+            entityId: user.entityId?.trim() ?? "",
             name: user.name?.trim() ?? "",
             email: user.email?.trim() ?? "",
             practiceName: user.practiceName?.trim() ?? "",
@@ -218,10 +219,10 @@ export function CreateClientDialog({
                 adviserRecords.find((adviserRecord) => normalizeText(adviserRecord.name) === normalizeText(userAdviser.name)) ??
                 null;
 
-              return matchedRecord
+                  return matchedRecord
                 ? {
                     id: matchedRecord.id,
-                    entityId: userAdviser.entityId,
+                    entityId: userAdviser.entityId || matchedRecord.entityId,
                     name: matchedRecord.name,
                     email: matchedRecord.email,
                     practiceName: matchedRecord.practiceName || userAdviser.practiceName,
@@ -239,7 +240,7 @@ export function CreateClientDialog({
           )
           .map((user) => ({
             id: user.id,
-            entityId: "",
+            entityId: user.entityId,
             name: user.name,
             email: user.email,
             practiceName: user.practiceName,

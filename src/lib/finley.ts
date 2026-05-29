@@ -22,6 +22,7 @@ import { createFileNote as createFileNoteAction } from "@/lib/services/file-note
 import {
   updateClientDetails as updateClientDetailsAction,
   updatePartnerDetails as updatePartnerDetailsAction,
+  upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
 import {
   saveAssetCollection,
@@ -46,6 +47,7 @@ import {
   type FinleyChatRequest,
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
+import { answerClientProfileLookup } from "@/lib/finley-profile-lookup";
 
 type LiveContext = {
   profile: ClientProfile | null;
@@ -75,6 +77,7 @@ type StoredPlan = {
     | "update_asset_record"
     | "update_income_record"
     | "update_expense_record"
+    | "update_employment_record"
     | "update_liability_record"
     | "update_superannuation_record"
     | "update_retirement_income_record"
@@ -133,6 +136,7 @@ const PENSION_TYPE_OPTIONS = ["Account Based Pension", "Allocated Pension", "Ann
 const INSURANCE_COVER_OPTIONS = ["Life", "TPD", "Trauma", "Income Protection", "Health", "Other"] as const;
 const INSURANCE_STATUS_OPTIONS = ["Active", "Pending", "Cancelled", "Claimed"] as const;
 const FREQUENCY_OPTIONS = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"] as const;
+const EMPLOYMENT_STATUS_OPTIONS = ["Full-time", "Part-time", "Casual", "Contract", "Self-employed", "Retired", "Unemployed"] as const;
 const ENTITY_TYPE_OPTIONS = ["SMSF", "Trust", "Company", "Partnership"] as const;
 const DEPENDANT_TYPE_OPTIONS = ["Child", "Grandchild", "Parent", "Sibling", "Other"] as const;
 const CLIENT_UPDATE_TARGET_OPTIONS = ["client", "partner"] as const;
@@ -913,6 +917,21 @@ function resolvePersonForRead(profile: ClientProfile | null, target: "client" | 
 }
 
 function buildProfileReadAnswer(message: string, context: LiveContext) {
+  const genericAnswer = answerClientProfileLookup({
+    message,
+    profile: context.profile,
+    resolvedClientName: context.resolvedClientName,
+  });
+
+  if (genericAnswer.matched) {
+    return {
+      ...genericAnswer,
+      displayCard: genericAnswer.displayCard ?? null,
+      missingInformation: [],
+      warnings: genericAnswer.warnings ?? [],
+    };
+  }
+
   const lower = message.toLowerCase();
   const target = /\bpartner\b/.test(lower) ? "partner" : "client";
   const person = resolvePersonForRead(context.profile, target);
@@ -1036,6 +1055,21 @@ function buildProfileReadAnswer(message: string, context: LiveContext) {
 }
 
 function buildCollectionReadAnswer(message: string, context: LiveContext) {
+  const genericAnswer = answerClientProfileLookup({
+    message,
+    profile: context.profile,
+    resolvedClientName: context.resolvedClientName,
+  });
+
+  if (genericAnswer.matched) {
+    return {
+      ...genericAnswer,
+      displayCard: genericAnswer.displayCard ?? null,
+      missingInformation: [],
+      warnings: genericAnswer.warnings ?? [],
+    };
+  }
+
   const lower = message.toLowerCase();
   const clientName = context.resolvedClientName ?? "the selected client";
 
@@ -1210,7 +1244,7 @@ function buildCollectionReadAnswer(message: string, context: LiveContext) {
             formatCurrencyDisplay(item.salary),
             getEmploymentFrequency(item),
           ],
-          editAction: null,
+          editAction: item.id ? { kind: "employment", recordId: item.id, label: "Edit" } : null,
         })),
         footer: null,
       } satisfies FinleyDisplayCard,
@@ -2671,6 +2705,69 @@ function buildIncomeEditorCard(record: ClientIncomeRecord): FinleyEditorCard {
   };
 }
 
+function buildEmploymentEditorCard(record: ClientEmploymentRecord): FinleyEditorCard {
+  const frequency = typeof record.frequency === "string" ? record.frequency : record.frequency?.value ?? record.frequency?.type ?? "";
+
+  return {
+    kind: "collection_form",
+    title: "Employment Record",
+    toolName: "update_employment_record",
+    fields: [
+      {
+        key: "jobTitle",
+        label: "Job Title",
+        input: "text",
+        value: record.jobTitle ?? record.job_title ?? "",
+      },
+      {
+        key: "status",
+        label: "Status",
+        input: "select",
+        value: record.status ?? "",
+        options: toCardOptions(EMPLOYMENT_STATUS_OPTIONS),
+      },
+      {
+        key: "employer",
+        label: "Employer",
+        input: "text",
+        value: record.employer ?? "",
+      },
+      {
+        key: "salary",
+        label: "Salary",
+        input: "text",
+        value: record.salary ?? "",
+      },
+      {
+        key: "frequency",
+        label: "Frequency",
+        input: "select",
+        value: frequency,
+        options: toCardOptions(FREQUENCY_OPTIONS),
+      },
+      {
+        key: "primaryEmployment",
+        label: "Primary Employment",
+        input: "select",
+        value: record.primaryEmployment === false ? "No" : "Yes",
+        options: toCardOptions(["Yes", "No"]),
+      },
+      {
+        key: "startDate",
+        label: "Start Date",
+        input: "text",
+        value: record.startDate ?? "",
+      },
+      {
+        key: "endDate",
+        label: "End Date",
+        input: "text",
+        value: record.endDate ?? "",
+      },
+    ],
+  };
+}
+
 function buildAssetEditorCard(record: ClientAssetRecord): FinleyEditorCard {
   return {
     kind: "collection_form",
@@ -2913,6 +3010,8 @@ function collectionKindLabel(kind: string) {
       return "asset";
     case "liabilities":
       return "liability";
+    case "employment":
+      return "employment";
     case "income":
       return "income";
     case "expenses":
@@ -2933,10 +3032,21 @@ function collectionKindLabel(kind: string) {
 }
 
 function buildCollectionUpdateIntentFromRecord(
-  kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants",
+  kind:
+    | "assets"
+    | "liabilities"
+    | "employment"
+    | "income"
+    | "expenses"
+    | "superannuation"
+    | "retirement-income"
+    | "insurance"
+    | "entities"
+    | "dependants",
   record:
     | ClientAssetRecord
     | ClientLiabilityRecord
+    | ClientEmploymentRecord
     | ClientIncomeRecord
     | ClientExpenseRecord
     | ClientSuperannuationRecord
@@ -2993,6 +3103,27 @@ function buildCollectionUpdateIntentFromRecord(
           requestedChange: requestedChange ?? null,
         },
         editorCard: buildIncomeEditorCard(income),
+      };
+    }
+    case "employment": {
+      const employment = record as ClientEmploymentRecord;
+      return {
+        kind,
+        toolName: "update_employment_record" as const,
+        summary: `Update an employment record for ${clientName}`,
+        description: "Update the selected employment record on the client profile.",
+        payload: { kind, record: employment },
+        inputsPreview: {
+          section: "Employment",
+          owner: employment.owner?.name ?? null,
+          jobTitle: employment.jobTitle ?? employment.job_title,
+          status: employment.status,
+          employer: employment.employer,
+          salary: employment.salary,
+          frequency: getEmploymentFrequency(employment),
+          requestedChange: requestedChange ?? null,
+        },
+        editorCard: buildEmploymentEditorCard(employment),
       };
     }
     case "expenses": {
@@ -3774,7 +3905,17 @@ export async function prepareFinleyDisplayCardEdit(input: {
   activeClientId?: string | null;
   activeClientName?: string | null;
   threadId?: string | null;
-  kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
+  kind:
+    | "assets"
+    | "liabilities"
+    | "employment"
+    | "income"
+    | "expenses"
+    | "superannuation"
+    | "retirement-income"
+    | "insurance"
+    | "entities"
+    | "dependants";
   recordId: string;
 }): Promise<FinleyChatResponse> {
   const liveContext = await loadLiveContext(input.activeClientId, input.activeClientName);
@@ -3809,6 +3950,7 @@ export async function prepareFinleyDisplayCardEdit(input: {
   const recordsByKind = {
     assets: profile.assets ?? [],
     liabilities: profile.liabilities ?? [],
+    employment: profile.employment ?? [],
     income: profile.income ?? [],
     expenses: profile.expense ?? [],
     superannuation: profile.superannuation ?? [],
@@ -4161,6 +4303,48 @@ async function executeCollectionPlan(
         [...(liveContext.profile?.assets ?? [])],
       );
       await saveAssetCollection(profileId, nextRecords, context);
+      return;
+    }
+    case "employment": {
+      const employmentUpdates = normalizedRecords as unknown as ClientEmploymentRecord[];
+      const ownerIds = Array.from(new Set(employmentUpdates.map((entry) => entry.owner?.id).filter((id): id is string => Boolean(id))));
+      if (!ownerIds.length) {
+        throw new Error("Finley could not determine the employment owner for this update.");
+      }
+
+      for (const ownerId of ownerIds) {
+        const ownerRecords = employmentUpdates.filter((entry) => entry.owner?.id === ownerId);
+        const ownerName = ownerRecords[0]?.owner?.name ?? "";
+        const existingForOwner = (liveContext.profile?.employment ?? [])
+          .filter((entry) => entry.owner?.id === ownerId)
+          .filter((entry) => !ownerRecords.some((update) => update.id && update.id === entry.id));
+        const request = [...existingForOwner, ...ownerRecords].map((entry, index) => ({
+          id: entry.id ?? undefined,
+          jobTitle: entry.jobTitle ?? entry.job_title ?? "",
+          status: entry.status ?? "",
+          employer: entry.employer ?? "",
+          salary: entry.salary ?? "",
+          frequency: getEmploymentFrequency(entry),
+          primaryEmployment:
+            typeof (entry as { primaryEmployment?: unknown }).primaryEmployment === "string"
+              ? ((entry as { primaryEmployment?: string }).primaryEmployment ?? "")
+              : entry.primaryEmployment === false
+                ? "No"
+                : index === 0
+                  ? "Yes"
+                  : "No",
+          startDate: entry.startDate ?? "",
+          endDate: entry.endDate ?? "",
+        }));
+        await upsertEmploymentRecords(
+          {
+            profileId,
+            owner: { id: ownerId, name: ownerName },
+            request,
+          },
+          context,
+        );
+      }
       return;
     }
     case "liabilities": {
@@ -4830,6 +5014,149 @@ async function buildUploadedDocumentReview(files?: FinleyChatRequest["uploadedFi
   }
 }
 
+function isUploadedDocumentReviewRequest(message: string, uploads: ReturnType<typeof normalizeUploadedFiles>) {
+  if (!uploads.length) return false;
+
+  const lower = message.toLowerCase();
+  return (
+    /\b(?:summari[sz]e|review|read|analyse|analyze|what(?:'s| is) in|tell me about)\b/.test(lower) &&
+    /\b(?:upload|uploaded|document|documents|file|files|this|these)\b/.test(lower)
+  );
+}
+
+function isNoClientClientScopedRequest(message: string) {
+  const lower = normaliseConversationalMessage(message);
+  const writeWorkflow =
+    /\b(?:update|change|set|apply|map|save|create|prepare|generate|draft|issue|record)\b/.test(lower) &&
+    /\b(?:client|profile|fact find|file note|engagement|letter|invoice|agreement|record of advice|statement of advice|soa|roa|income|asset|liability|expense|super|pension|insurance|dependant|entity|dob|date of birth|address|email|phone)\b/.test(lower);
+  const readQuestion =
+    /\b(?:what is|what's|show|tell me|get|list|summarise|summarize|who is|do they|does he|does she|does the client)\b/.test(lower);
+  const personalField =
+    /\b(?:date of birth|dob|address|email|phone|risk profile|marital status|residency|resident status|client status|client category)\b/.test(lower);
+  const collectionField =
+    /\b(?:assets?|liabilities|income|expenses?|superannuation|super|pensions?|insurance|dependants?|employment|entities)\b/.test(lower);
+  const targetMarker =
+    /\b(?:this client|the client|client's|client profile|their|theirs|his|her|hers)\b/.test(lower) ||
+    /\b\w+['’]s\s+(?:date of birth|dob|address|email|phone|risk profile|income|assets?|liabilities|expenses?|super|pension|insurance|profile)\b/.test(lower);
+
+  return (
+    writeWorkflow ||
+    /\b(?:map to profile|client profile|fact find|file note|record of advice|statement of advice)\b/.test(lower) ||
+    (readQuestion && (personalField || collectionField) && targetMarker)
+  );
+}
+
+function buildNoClientFallbackAnswer(message: string, uploads: ReturnType<typeof normalizeUploadedFiles>) {
+  if (uploads.length) {
+    const fileList = uploads
+      .map((upload) => `${upload.name}${upload.tags.length ? ` (${upload.tags.join(", ")})` : ""}`)
+      .join("; ");
+    return [
+      "**Uploaded Documents**",
+      `- I have ${uploads.length} uploaded file${uploads.length > 1 ? "s" : ""} available: ${fileList}.`,
+      "- Ask me to summarise or review the uploaded documents and I can prepare a workspace summary before you select a client.",
+      "- When you want to map facts, update a profile, or create client records, select or create the client first.",
+    ].join("\n\n");
+  }
+
+  return [
+    "**Finley Workspace**",
+    "- I can help with general adviser-practice questions before a client is selected.",
+    "- Select a client when you want profile lookups, fact-find mapping, profile updates, file notes, invoices, agreements, or client document generation.",
+    `You asked: "${message}". Ask a general advice-process question, or upload a file and I can review it in the Finley workspace.`,
+  ].join("\n\n");
+}
+
+async function buildGlobalFinleyAnswer(
+  message: string,
+  uploads: ReturnType<typeof normalizeUploadedFiles>,
+  currentUser?: UserSummary | null,
+) {
+  if (!OPENAI_API_KEY) {
+    return {
+      assistantMessage: buildNoClientFallbackAnswer(message, uploads),
+      warnings: [
+        "Finley used the local no-client fallback because OPENAI_API_KEY is not configured. Configure the chat model to enable LLM-backed general answers.",
+      ],
+    };
+  }
+
+  try {
+    const isAzure = isAzureOpenAiBaseUrl(OPENAI_BASE_URL);
+    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(isAzure ? { "api-key": OPENAI_API_KEY } : { authorization: `Bearer ${OPENAI_API_KEY}` }),
+      },
+      body: JSON.stringify({
+        model: OPENAI_DOCUMENT_REVIEW_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You are Finley, an advice practice concierge inside iC2.",
+              "No client is currently selected. You may answer general adviser-assistant questions and use uploaded document text as temporary workspace context.",
+              "Do not infer, read, or update any client profile. Do not claim that any record has been saved.",
+              "If the user asks for profile reads, profile writes, fact-find mapping, file notes, invoices, agreements, or client document generation, tell them to select or create a client first.",
+              "Return structured Markdown. Prefer short bold section headings, bullet lists, and Markdown tables where they improve scanning.",
+              "When answering from uploaded document text, group extracted facts under clear headings such as Objectives, Preferences, Constraints, Advice areas, and Next steps when relevant.",
+              "For calculation questions, show the source values used, the formula or calculation steps, a Markdown table of the result, and an Assumptions section. Label model-derived calculations as estimates unless a deterministic system calculator was used.",
+              "Ask for missing inputs instead of inventing rates, dates, residency status, offsets, thresholds, or other material assumptions.",
+              "Keep answers concise, practical, and written for an Australian financial advice practice.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              message,
+              adviser: currentUser
+                ? {
+                    name: currentUser.name ?? null,
+                    role: currentUser.userRole ?? null,
+                    practice: currentUser.practice?.name ?? null,
+                    licensee: currentUser.licensee?.name ?? null,
+                  }
+                : null,
+              uploadedFiles: uploads.map((upload) => ({
+                name: upload.name,
+                tags: upload.tags,
+                extractedText: upload.extractedText.slice(0, 6000),
+              })),
+            }),
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`No-client chat request failed with status ${response.status}.`);
+    }
+
+    const body = (await response.json().catch(() => null)) as
+      | {
+          choices?: Array<{
+            message?: {
+              content?: string | null;
+            } | null;
+          }>;
+        }
+      | null;
+    const assistantMessage = body?.choices?.[0]?.message?.content?.trim();
+    if (!assistantMessage) {
+      throw new Error("No-client chat response did not include message content.");
+    }
+
+    return { assistantMessage, warnings: [] };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Unable to run no-client chat.";
+    return {
+      assistantMessage: buildNoClientFallbackAnswer(message, uploads),
+      warnings: [`Finley could not reach the configured chat model (${reason}), so it used the local no-client fallback.`],
+    };
+  }
+}
+
 function buildFileNoteTextFromUploadedFiles(message: string, files?: FinleyChatRequest["uploadedFiles"]) {
   const uploads = normalizeUploadedFiles(files);
   if (!uploads.length) return normalizeFileNoteText(message);
@@ -4911,16 +5238,59 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
   }
 
   if (!liveContext.resolvedClientId) {
+    const uploads = normalizeUploadedFiles(request.uploadedFiles);
+
+    if (isUploadedDocumentReviewRequest(message, uploads)) {
+      const documentReview = await buildUploadedDocumentReview(request.uploadedFiles, null);
+
+      return {
+        ...base,
+        status: "completed",
+        responseMode: "inform",
+        assistantMessage: "I've summarised the uploaded document and prepared a review card in the workspace.",
+        plan: null,
+        results: [],
+        missingInformation: [],
+        warnings: documentReview?.warning ? [documentReview.warning] : [],
+        errors: [],
+        displayCard: documentReview ? buildUploadedDocumentReviewCard(documentReview) : null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
+    if (isNoClientClientScopedRequest(message)) {
+      return {
+        ...base,
+        status: "needs_clarification",
+        responseMode: "clarification",
+        assistantMessage:
+          "I can help with that, but I need a client selected before I can access or update a profile, map fact-find data, create records, or generate client documents. Select a client from the left rail or create a new one, then send the request again.",
+        plan: null,
+        results: [],
+        missingInformation: [{ field: "activeClientId", question: "Which client should I work on?" }],
+        warnings: [],
+        errors: [],
+        displayCard: null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
+    const globalAnswer = await buildGlobalFinleyAnswer(message, uploads, liveContext.currentUser);
+
     return {
       ...base,
-      status: "needs_clarification",
-      responseMode: "clarification",
-      assistantMessage: "Select a client first so Finley can scope the request to the correct record.",
+      status: "completed",
+      responseMode: "inform",
+      assistantMessage: globalAnswer.assistantMessage,
       plan: null,
       results: [],
-      missingInformation: [{ field: "activeClientId", question: "Which client should I work on?" }],
-      warnings: [],
+      missingInformation: [],
+      warnings: globalAnswer.warnings,
       errors: [],
+      displayCard: null,
+      editorCard: null,
       suggestedActions: [],
     };
   }
@@ -4970,9 +5340,9 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         plan: null,
         results: [],
         missingInformation: readAnswer.missingInformation,
-        warnings: readAnswer.warnings,
+        warnings: readAnswer.warnings ?? [],
         errors: [],
-        displayCard: null,
+        displayCard: "displayCard" in readAnswer ? readAnswer.displayCard ?? null : null,
         editorCard: null,
         suggestedActions: [],
       };
@@ -4989,7 +5359,7 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         plan: null,
         results: [],
         missingInformation: collectionReadAnswer.missingInformation,
-        warnings: collectionReadAnswer.warnings,
+        warnings: collectionReadAnswer.warnings ?? [],
         errors: [],
         displayCard: collectionReadAnswer.displayCard ?? null,
         editorCard: null,

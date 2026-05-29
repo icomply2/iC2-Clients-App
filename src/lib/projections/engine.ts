@@ -1,8 +1,14 @@
-import { getAssetGrowthRate, projectAssetValue, sumAssessableAssets, sumFinancialAssets } from "./assets-engine";
-import { calculateAgePension } from "./centrelink-engine";
-import { calculateLiabilityRepayment, projectLiabilityBalance } from "./liabilities-engine";
+import { getAssetGrowthRate, isCashAssetType, isInvestmentAssetType, projectAssetValue, sumAssessableAssets, sumFinancialAssets } from "./assets-engine";
+import { calculateHouseholdAgePension } from "./centrelink-engine";
+import {
+  calculateLiabilityInterest,
+  calculateLiabilityPrincipalRepayment,
+  calculateLiabilityRepayment,
+  projectLiabilityBalance,
+} from "./liabilities-engine";
 import { projectRetirementAccount } from "./retirement-engine";
 import { calculatePersonalTax } from "./tax-engine";
+import { isCashflowExpenseCategory, isCashflowIncomeCategory } from "./types";
 import type { ProjectionAssumptions, ProjectionResult, ProjectionScenario, ProjectionYearResult } from "./types";
 
 const JOINT_OWNER_ID = "joint";
@@ -87,10 +93,14 @@ function sumTaxProjectionYears(taxYears: ProjectionYearResult["taxByPersonId"]):
       taxableAgePension: total.taxableAgePension + taxYear.taxableAgePension,
       taxableBankInterest: total.taxableBankInterest + taxYear.taxableBankInterest,
       taxableOtherIncome: total.taxableOtherIncome + taxYear.taxableOtherIncome,
+      taxableCapitalGains: total.taxableCapitalGains + taxYear.taxableCapitalGains,
+      deductibleInterest: total.deductibleInterest + taxYear.deductibleInterest,
       taxFreeAccountBasedPension: total.taxFreeAccountBasedPension + taxYear.taxFreeAccountBasedPension,
       taxableIncome: total.taxableIncome + taxYear.taxableIncome,
       grossTax: total.grossTax + taxYear.grossTax,
       medicareLevy: total.medicareLevy + taxYear.medicareLevy,
+      lowIncomeTaxOffset: total.lowIncomeTaxOffset + taxYear.lowIncomeTaxOffset,
+      seniorsAndPensionersTaxOffset: total.seniorsAndPensionersTaxOffset + taxYear.seniorsAndPensionersTaxOffset,
       taxOffsets: total.taxOffsets + taxYear.taxOffsets,
       taxPayable: total.taxPayable + taxYear.taxPayable,
     }),
@@ -98,10 +108,14 @@ function sumTaxProjectionYears(taxYears: ProjectionYearResult["taxByPersonId"]):
       taxableAgePension: 0,
       taxableBankInterest: 0,
       taxableOtherIncome: 0,
+      taxableCapitalGains: 0,
+      deductibleInterest: 0,
       taxFreeAccountBasedPension: 0,
       taxableIncome: 0,
       grossTax: 0,
       medicareLevy: 0,
+      lowIncomeTaxOffset: 0,
+      seniorsAndPensionersTaxOffset: 0,
       taxOffsets: 0,
       taxPayable: 0,
     },
@@ -109,7 +123,20 @@ function sumTaxProjectionYears(taxYears: ProjectionYearResult["taxByPersonId"]):
 }
 
 function getCashAssetId(scenario: ProjectionScenario) {
-  return scenario.assets.find((asset) => asset.type === "cash")?.assetId ?? null;
+  return scenario.assets.find((asset) => isCashAssetType(asset.type))?.assetId ?? null;
+}
+
+function getCashAssetIdForOwner(scenario: ProjectionScenario, ownerPersonId: string, preferredAssetId?: string | null) {
+  const preferredAsset = scenario.assets.find((asset) => asset.assetId === preferredAssetId && isCashAssetType(asset.type));
+  if (preferredAsset) {
+    return preferredAsset.assetId;
+  }
+
+  return (
+    scenario.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === ownerPersonId)?.assetId ??
+    scenario.assets.find((asset) => isCashAssetType(asset.type) && asset.ownerPersonId === JOINT_OWNER_ID)?.assetId ??
+    getCashAssetId(scenario)
+  );
 }
 
 function getDebtFallbackLiabilityId(scenario: ProjectionScenario) {
@@ -145,7 +172,12 @@ function allocateAmountByOwner(
 
 function getEmploymentIncomeByPersonId(scenario: ProjectionScenario, yearIndex: number, assumptions: ProjectionAssumptions) {
   return scenario.cashflowItems
-    .filter((item) => item.category === "other-income" && item.taxable && /employment|salary|wage/i.test(item.label))
+    .filter(
+      (item) =>
+        isCashflowIncomeCategory(item.category) &&
+        item.taxable &&
+        (item.category === "employment-income" || item.category === "salary-income" || /employment|salary|wage/i.test(item.label)),
+    )
     .reduce<Record<string, number>>((incomeByPersonId, item) => {
       const annualAmount = getCashflowItemValue(item, scenario, yearIndex, assumptions);
 
@@ -209,34 +241,166 @@ function getRolloverPensionAccountId(accountId: string) {
   return `${accountId}-rollover-pension`;
 }
 
-function getRolloverMonthIndex(account: ProjectionScenario["retirementAccounts"][number]) {
-  return account.accountType === "super-accumulation" ? dateToMonthIndex(account.rolloverToPensionDate) : null;
-}
+function getDatedActiveFraction(input: {
+  startDate?: string | null;
+  endDate?: string | null;
+  scenario: ProjectionScenario;
+  yearIndex: number;
+}) {
+  const { periodStart, periodEnd } = getProjectionPeriodMonthRange(input.scenario, input.yearIndex);
+  const itemStart = dateToMonthIndex(input.startDate) ?? periodStart;
+  const itemEnd = dateToMonthIndex(input.endDate) ?? periodEnd;
+  const activeStart = Math.max(periodStart, itemStart);
+  const activeEnd = Math.min(periodEnd, itemEnd);
 
-function isRolloverEffectiveForProjectionYear(
-  account: ProjectionScenario["retirementAccounts"][number],
-  scenario: ProjectionScenario,
-  yearIndex: number,
-) {
-  const rolloverMonthIndex = getRolloverMonthIndex(account);
-  if (rolloverMonthIndex === null) {
-    return false;
+  if (activeEnd < activeStart) {
+    return 0;
   }
 
-  return rolloverMonthIndex <= getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd;
+  return (activeEnd - activeStart + 1) / 12;
 }
 
-function createRolloverPensionAccount(account: ProjectionScenario["retirementAccounts"][number]) {
+function getSuperContributionStrategies(scenario: ProjectionScenario) {
+  const configuredStrategies = scenario.superContributionStrategies ?? [];
+
+  if (configuredStrategies.length) {
+    return configuredStrategies;
+  }
+
+  return scenario.retirementAccounts
+    .filter((account) => account.accountType === "super-accumulation" && (account.annualContribution ?? 0) > 0)
+    .map((account) => ({
+      strategyId: `${account.accountId}-legacy-additional-contribution`,
+      ownerPersonId: account.ownerPersonId,
+      targetAccountId: account.accountId,
+      label: "Additional contributions",
+      annualAmount: account.annualContribution ?? 0,
+      contributionType: account.annualContributionType ?? "concessional",
+      startDate: null,
+      endDate: null,
+      indexedToCpi: false,
+      enabled: true,
+    }));
+}
+
+function getSuperRolloverEvents(scenario: ProjectionScenario) {
+  const configuredEvents = scenario.superRolloverEvents ?? [];
+
+  if (configuredEvents.length) {
+    return configuredEvents;
+  }
+
+  return scenario.retirementAccounts
+    .filter((account) => account.accountType === "super-accumulation" && account.rolloverToPensionDate)
+    .map((account) => ({
+      eventId: `${account.accountId}-legacy-rollover`,
+      label: "Rollover to pension",
+      sourceAccountId: account.accountId,
+      destinationAccountId: null,
+      destinationPensionName: account.rolloverPensionName?.trim() || `${account.productName} pension`,
+      rolloverDate: account.rolloverToPensionDate ?? null,
+      amountMode: "full-balance" as const,
+      fixedAmount: 0,
+      annualDrawdown: account.rolloverAnnualDrawdown ?? 0,
+      drawdownIndexedToCpi: account.rolloverDrawdownIndexedToCpi ?? false,
+      enabled: true,
+    }));
+}
+
+function getRolloverDestinationAccountId(event: ReturnType<typeof getSuperRolloverEvents>[number]) {
+  return event.destinationAccountId?.trim() || getRolloverPensionAccountId(event.sourceAccountId);
+}
+
+function createRolloverPensionAccount(
+  event: ReturnType<typeof getSuperRolloverEvents>[number],
+  sourceAccount: ProjectionScenario["retirementAccounts"][number],
+) {
   return {
-    ...account,
-    accountId: getRolloverPensionAccountId(account.accountId),
+    ...sourceAccount,
+    accountId: getRolloverDestinationAccountId(event),
     accountType: "account-based-pension" as const,
-    productName: account.rolloverPensionName?.trim() || `${account.productName} pension`,
+    productName: event.destinationPensionName?.trim() || `${sourceAccount.productName} pension`,
+    openingBalance: 0,
+    annualInsurancePremium: 0,
     annualContribution: 0,
     annualContributionType: "concessional" as const,
-    annualDrawdown: account.rolloverAnnualDrawdown ?? 0,
-    drawdownIndexedToCpi: account.rolloverDrawdownIndexedToCpi ?? false,
+    rolloverToPensionDate: null,
+    rolloverPensionName: null,
+    rolloverAnnualDrawdown: 0,
+    rolloverDrawdownIndexedToCpi: false,
+    annualDrawdown: event.annualDrawdown ?? 0,
+    drawdownIndexedToCpi: event.drawdownIndexedToCpi ?? false,
     taxableToClient: false,
+  };
+}
+
+function getAssetCgtTreatment(asset: ProjectionScenario["assets"][number]): NonNullable<ProjectionScenario["assets"][number]["cgtTreatment"]> {
+  if (asset.cgtTreatment) {
+    return asset.cgtTreatment;
+  }
+
+  if (asset.type === "primary-residence") {
+    return "main-residence-exempt";
+  }
+
+  if (isCashAssetType(asset.type)) {
+    return "not-applicable";
+  }
+
+  if (asset.type === "home-contents" || asset.type === "motor-vehicle" || asset.type === "personal-asset") {
+    return "personal-use-exempt";
+  }
+
+  return "taxable";
+}
+
+function isCgtDiscountEligible(acquisitionDate: string | null | undefined, saleDate: string | null | undefined) {
+  const acquisitionMonthIndex = dateToMonthIndex(acquisitionDate);
+  const saleMonthIndex = dateToMonthIndex(saleDate);
+
+  return acquisitionMonthIndex !== null && saleMonthIndex !== null && saleMonthIndex - acquisitionMonthIndex >= 12;
+}
+
+function emptyPersonValues(scenario: ProjectionScenario) {
+  return Object.fromEntries(scenario.people.map((person) => [person.personId, 0]));
+}
+
+function calculateTaxableCapitalGains(input: {
+  scenario: ProjectionScenario;
+  grossNonDiscountableGainsByPersonId: Record<string, number>;
+  grossDiscountableGainsByPersonId: Record<string, number>;
+  capitalLossesByPersonId: Record<string, number>;
+  carriedForwardCapitalLossesByPersonId: Record<string, number>;
+}) {
+  const taxableCapitalGainsByPersonId = emptyPersonValues(input.scenario);
+  const nextCarriedForwardCapitalLossesByPersonId = emptyPersonValues(input.scenario);
+  const carriedForwardLossAppliedByPersonId = emptyPersonValues(input.scenario);
+  const discountAppliedByPersonId = emptyPersonValues(input.scenario);
+
+  input.scenario.people.forEach((person) => {
+    const personId = person.personId;
+    const nonDiscountableGains = input.grossNonDiscountableGainsByPersonId[personId] ?? 0;
+    const discountableGains = input.grossDiscountableGainsByPersonId[personId] ?? 0;
+    const availableLosses =
+      (input.carriedForwardCapitalLossesByPersonId[personId] ?? 0) + (input.capitalLossesByPersonId[personId] ?? 0);
+    const lossesAgainstNonDiscountable = Math.min(nonDiscountableGains, availableLosses);
+    const lossesAfterNonDiscountable = availableLosses - lossesAgainstNonDiscountable;
+    const lossesAgainstDiscountable = Math.min(discountableGains, lossesAfterNonDiscountable);
+    const remainingNonDiscountableGains = nonDiscountableGains - lossesAgainstNonDiscountable;
+    const remainingDiscountableGains = discountableGains - lossesAgainstDiscountable;
+    const discount = remainingDiscountableGains * 0.5;
+
+    taxableCapitalGainsByPersonId[personId] = remainingNonDiscountableGains + remainingDiscountableGains - discount;
+    nextCarriedForwardCapitalLossesByPersonId[personId] = Math.max(lossesAfterNonDiscountable - lossesAgainstDiscountable, 0);
+    carriedForwardLossAppliedByPersonId[personId] = lossesAgainstNonDiscountable + lossesAgainstDiscountable;
+    discountAppliedByPersonId[personId] = discount;
+  });
+
+  return {
+    taxableCapitalGainsByPersonId,
+    nextCarriedForwardCapitalLossesByPersonId,
+    carriedForwardLossAppliedByPersonId,
+    discountAppliedByPersonId,
   };
 }
 
@@ -252,26 +416,51 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
   const cashAssetId = getCashAssetId(scenario);
   const debtFallbackLiabilityId = getDebtFallbackLiabilityId(scenario);
   let previousAssetValues = Object.fromEntries(scenario.assets.map((asset) => [asset.assetId, asset.openingValue]));
+  let previousAssetCostBases = Object.fromEntries(
+    scenario.assets.map((asset) => [asset.assetId, asset.costBase ?? asset.openingValue]),
+  );
   let previousLiabilityBalances = Object.fromEntries(
     scenario.liabilities.map((liability) => [liability.liabilityId, liability.openingBalance]),
   );
+  let carriedForwardCapitalLossesByPersonId = emptyPersonValues(scenario);
+  const superContributionStrategies = getSuperContributionStrategies(scenario);
+  const superRolloverEvents = getSuperRolloverEvents(scenario);
+  const assetSaleEvents = scenario.assetSaleEvents ?? [];
+  const assetPurchaseEvents = scenario.assetPurchaseEvents ?? [];
+  const liabilityDrawdownEvents = scenario.liabilityDrawdownEvents ?? [];
+  const liabilityPaymentEvents = scenario.liabilityPaymentEvents ?? [];
+  const pensionWithdrawalEvents = scenario.pensionWithdrawalEvents ?? [];
+  const rolloverPensionAccounts = superRolloverEvents
+    .filter((event) => event.enabled && event.rolloverDate)
+    .map((event) => {
+      const sourceAccount = scenario.retirementAccounts.find((account) => account.accountId === event.sourceAccountId);
+      const destinationAccountId = getRolloverDestinationAccountId(event);
+      const existingDestination = scenario.retirementAccounts.find((account) => account.accountId === destinationAccountId);
+
+      if (!sourceAccount || existingDestination || event.destinationAccountId?.trim()) {
+        return null;
+      }
+
+      return createRolloverPensionAccount(event, sourceAccount);
+    })
+    .filter((account): account is NonNullable<typeof account> => Boolean(account));
+  const retirementProjectionAccounts = [...scenario.retirementAccounts, ...rolloverPensionAccounts];
   let previousRetirementBalances = Object.fromEntries(
-    scenario.retirementAccounts.map((account) => [account.accountId, account.openingBalance]),
+    retirementProjectionAccounts.map((account) => [account.accountId, account.openingBalance]),
   );
-  const rolloverPensionAccounts = scenario.retirementAccounts
-    .filter((account) => account.accountType === "super-accumulation" && getRolloverMonthIndex(account) !== null)
-    .map(createRolloverPensionAccount);
+  const processedRolloverEventIds = new Set<string>();
   const retirementAccountCentrelinkValues = [
-    ...scenario.retirementAccounts.map((account) => ({
-      accountId: account.accountId,
-      centrelink: account.centrelink,
-    })),
-    ...rolloverPensionAccounts.map((account) => ({
+    ...retirementProjectionAccounts.map((account) => ({
       accountId: account.accountId,
       centrelink: account.centrelink,
     })),
   ];
   const years: ProjectionYearResult[] = [];
+  const processedAssetSaleEventIds = new Set<string>();
+  const processedAssetPurchaseEventIds = new Set<string>();
+  const processedLiabilityDrawdownEventIds = new Set<string>();
+  const processedLiabilityPaymentEventIds = new Set<string>();
+  const processedPensionWithdrawalEventIds = new Set<string>();
 
   for (let yearIndex = 0; yearIndex < yearCount; yearIndex += 1) {
     const year = scenario.startYear + yearIndex;
@@ -296,143 +485,399 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
               projectLiabilityBalance(liability, previousLiabilityBalances[liability.liabilityId] ?? liability.openingBalance),
             ]),
           );
+    const openingAssetValues = { ...previousAssetValues };
+    const assetCostBases = { ...previousAssetCostBases };
+    const openingLiabilityBalances = { ...previousLiabilityBalances };
+    const assetSaleEventValues: Record<string, number> = {};
+    const assetPurchaseEventValues: Record<string, number> = {};
+    const assetSaleEventCgtDetails: ProjectionYearResult["assetSaleEventCgtDetails"] = {};
+    const grossNonDiscountableGainsByPersonId = emptyPersonValues(scenario);
+    const grossDiscountableGainsByPersonId = emptyPersonValues(scenario);
+    const capitalLossesByPersonId = emptyPersonValues(scenario);
+    const liabilityPaymentEventValues: Record<string, number> = {};
+    const liabilityDrawdownEventValues: Record<string, number> = {};
+
+    assetSaleEvents
+      .filter((event) => event.enabled && event.saleDate && !processedAssetSaleEventIds.has(event.eventId))
+      .forEach((event) => {
+        const saleMonthIndex = dateToMonthIndex(event.saleDate);
+        if (saleMonthIndex === null || saleMonthIndex > getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd) {
+          return;
+        }
+
+        const sourceAsset = scenario.assets.find((asset) => asset.assetId === event.assetId);
+        if (!sourceAsset) {
+          return;
+        }
+
+        const targetCashAssetId = getCashAssetIdForOwner(scenario, sourceAsset.ownerPersonId, event.targetAssetId);
+        if (!targetCashAssetId) {
+          return;
+        }
+
+        const availableValue = Math.max(assetValues[sourceAsset.assetId] ?? sourceAsset.openingValue, 0);
+        const saleAmount =
+          event.amountMode === "fixed-amount" ? Math.min(Math.max(event.fixedAmount ?? 0, 0), availableValue) : availableValue;
+        const currentCostBase = assetCostBases[sourceAsset.assetId] ?? sourceAsset.costBase ?? sourceAsset.openingValue;
+        const costBaseUsed = availableValue > 0 ? Math.min(currentCostBase, currentCostBase * (saleAmount / availableValue)) : 0;
+        const cgtTreatment = getAssetCgtTreatment(sourceAsset);
+        const grossCapitalGain = saleAmount - costBaseUsed;
+        const discountEligible = cgtTreatment === "taxable" && isCgtDiscountEligible(sourceAsset.acquisitionDate, event.saleDate);
+
+        assetValues[sourceAsset.assetId] = Math.max(availableValue - saleAmount, 0);
+        assetValues[targetCashAssetId] = (assetValues[targetCashAssetId] ?? 0) + saleAmount;
+        assetCostBases[sourceAsset.assetId] = Math.max(currentCostBase - costBaseUsed, 0);
+        assetCostBases[targetCashAssetId] = (assetCostBases[targetCashAssetId] ?? 0) + saleAmount;
+        openingAssetValues[sourceAsset.assetId] = Math.max((openingAssetValues[sourceAsset.assetId] ?? availableValue) - saleAmount, 0);
+        openingAssetValues[targetCashAssetId] = (openingAssetValues[targetCashAssetId] ?? 0) + saleAmount;
+        assetSaleEventValues[event.eventId] = saleAmount;
+        assetSaleEventCgtDetails[event.eventId] = {
+          proceeds: saleAmount,
+          costBaseUsed,
+          grossCapitalGain,
+          taxableCapitalGain: 0,
+          discountApplied: 0,
+          carriedForwardLossApplied: 0,
+          cgtTreatment,
+        };
+        if (cgtTreatment === "taxable") {
+          if (grossCapitalGain >= 0) {
+            allocateAmountByOwner(
+              scenario,
+              discountEligible ? grossDiscountableGainsByPersonId : grossNonDiscountableGainsByPersonId,
+              sourceAsset.ownerPersonId,
+              grossCapitalGain,
+            );
+          } else {
+            allocateAmountByOwner(scenario, capitalLossesByPersonId, sourceAsset.ownerPersonId, Math.abs(grossCapitalGain));
+          }
+        }
+        processedAssetSaleEventIds.add(event.eventId);
+      });
+
+    liabilityDrawdownEvents
+      .filter((event) => event.enabled && event.drawdownDate && !processedLiabilityDrawdownEventIds.has(event.eventId))
+      .forEach((event) => {
+        const drawdownMonthIndex = dateToMonthIndex(event.drawdownDate);
+        if (drawdownMonthIndex === null || drawdownMonthIndex > getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd) {
+          return;
+        }
+
+        const liability = scenario.liabilities.find((entry) => entry.liabilityId === event.liabilityId);
+        if (!liability) {
+          return;
+        }
+
+        const targetCashAssetId = getCashAssetIdForOwner(scenario, liability.ownerPersonId, event.targetAssetId);
+        if (!targetCashAssetId) {
+          return;
+        }
+
+        const drawdownAmount = Math.max(event.amount, 0);
+        liabilityBalances[liability.liabilityId] = (liabilityBalances[liability.liabilityId] ?? 0) + drawdownAmount;
+        openingLiabilityBalances[liability.liabilityId] = (openingLiabilityBalances[liability.liabilityId] ?? 0) + drawdownAmount;
+        assetValues[targetCashAssetId] = (assetValues[targetCashAssetId] ?? 0) + drawdownAmount;
+        openingAssetValues[targetCashAssetId] = (openingAssetValues[targetCashAssetId] ?? 0) + drawdownAmount;
+        assetCostBases[targetCashAssetId] = (assetCostBases[targetCashAssetId] ?? 0) + drawdownAmount;
+        liabilityDrawdownEventValues[event.eventId] = drawdownAmount;
+        processedLiabilityDrawdownEventIds.add(event.eventId);
+      });
+
+    assetPurchaseEvents
+      .filter((event) => event.enabled && event.purchaseDate && !processedAssetPurchaseEventIds.has(event.eventId))
+      .forEach((event) => {
+        const purchaseMonthIndex = dateToMonthIndex(event.purchaseDate);
+        if (purchaseMonthIndex === null || purchaseMonthIndex > getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd) {
+          return;
+        }
+
+        const targetAsset = scenario.assets.find((asset) => asset.assetId === event.assetId);
+        if (!targetAsset) {
+          return;
+        }
+
+        const sourceCashAssetId = getCashAssetIdForOwner(scenario, targetAsset.ownerPersonId, event.sourceAssetId);
+        if (!sourceCashAssetId) {
+          return;
+        }
+
+        const availableCash = Math.max(assetValues[sourceCashAssetId] ?? 0, 0);
+        const purchaseAmount = Math.min(Math.max(event.amount, 0), availableCash);
+        assetValues[sourceCashAssetId] = Math.max(availableCash - purchaseAmount, 0);
+        assetValues[targetAsset.assetId] = (assetValues[targetAsset.assetId] ?? 0) + purchaseAmount;
+        openingAssetValues[sourceCashAssetId] = Math.max((openingAssetValues[sourceCashAssetId] ?? availableCash) - purchaseAmount, 0);
+        openingAssetValues[targetAsset.assetId] = (openingAssetValues[targetAsset.assetId] ?? 0) + purchaseAmount;
+        assetCostBases[sourceCashAssetId] = Math.max((assetCostBases[sourceCashAssetId] ?? 0) - purchaseAmount, 0);
+        assetCostBases[targetAsset.assetId] = (assetCostBases[targetAsset.assetId] ?? 0) + purchaseAmount;
+        assetPurchaseEventValues[event.eventId] = purchaseAmount;
+        processedAssetPurchaseEventIds.add(event.eventId);
+      });
+
+    const taxableIncomeByPersonId = getEmploymentIncomeByPersonId(scenario, yearIndex, assumptions);
+    const employerSuperByPersonId = calculateEmployerSuperByPersonId(taxableIncomeByPersonId, assumptions);
+    const rolloverInByAccountId: Record<string, number> = {};
+    const rolloverOutByAccountId: Record<string, number> = {};
+    const rolloverDetailsByAccountId: Record<
+      string,
+      ProjectionYearResult["retirementAccountDetails"][string]["rolloverEventDetails"]
+    > = {};
+    const pensionWithdrawalDetailsByAccountId: Record<
+      string,
+      ProjectionYearResult["retirementAccountDetails"][string]["pensionWithdrawalDetails"]
+    > = {};
+    const rolloverAdjustedOpeningBalances = { ...previousRetirementBalances };
+
+    superRolloverEvents
+      .filter((event) => event.enabled && event.rolloverDate && !processedRolloverEventIds.has(event.eventId))
+      .forEach((event) => {
+        const rolloverMonthIndex = dateToMonthIndex(event.rolloverDate);
+        if (rolloverMonthIndex === null || rolloverMonthIndex > getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd) {
+          return;
+        }
+
+        const sourceAccount = retirementProjectionAccounts.find((account) => account.accountId === event.sourceAccountId);
+        const destinationAccountId = getRolloverDestinationAccountId(event);
+        const destinationAccount = retirementProjectionAccounts.find((account) => account.accountId === destinationAccountId);
+
+        if (!sourceAccount || !destinationAccount || sourceAccount.ownerPersonId !== destinationAccount.ownerPersonId) {
+          return;
+        }
+
+        const sourceOpeningBalance = rolloverAdjustedOpeningBalances[sourceAccount.accountId] ?? sourceAccount.openingBalance;
+        const rolloverAmount =
+          event.amountMode === "fixed-amount"
+            ? Math.min(Math.max(event.fixedAmount ?? 0, 0), sourceOpeningBalance)
+            : sourceOpeningBalance;
+
+        if (rolloverAmount <= 0) {
+          processedRolloverEventIds.add(event.eventId);
+          return;
+        }
+
+        rolloverAdjustedOpeningBalances[sourceAccount.accountId] = Math.max(sourceOpeningBalance - rolloverAmount, 0);
+        rolloverAdjustedOpeningBalances[destinationAccountId] =
+          (rolloverAdjustedOpeningBalances[destinationAccountId] ?? destinationAccount.openingBalance) + rolloverAmount;
+        rolloverOutByAccountId[sourceAccount.accountId] =
+          (rolloverOutByAccountId[sourceAccount.accountId] ?? 0) + rolloverAmount;
+        rolloverInByAccountId[destinationAccountId] = (rolloverInByAccountId[destinationAccountId] ?? 0) + rolloverAmount;
+
+        const sourceLabel = `Rollover to ${destinationAccount.productName}`;
+        const destinationLabel = `Rollover from ${sourceAccount.productName}`;
+        rolloverDetailsByAccountId[sourceAccount.accountId] = [
+          ...(rolloverDetailsByAccountId[sourceAccount.accountId] ?? []),
+          {
+            eventId: event.eventId,
+            label: sourceLabel,
+            rolloverIn: 0,
+            rolloverOut: rolloverAmount,
+          },
+        ];
+        rolloverDetailsByAccountId[destinationAccountId] = [
+          ...(rolloverDetailsByAccountId[destinationAccountId] ?? []),
+          {
+            eventId: event.eventId,
+            label: destinationLabel,
+            rolloverIn: rolloverAmount,
+            rolloverOut: 0,
+          },
+        ];
+        processedRolloverEventIds.add(event.eventId);
+      });
+
+    pensionWithdrawalEvents
+      .filter((event) => event.enabled && event.withdrawalDate && !processedPensionWithdrawalEventIds.has(event.eventId))
+      .forEach((event) => {
+        const withdrawalMonthIndex = dateToMonthIndex(event.withdrawalDate);
+        if (withdrawalMonthIndex === null || withdrawalMonthIndex > getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd) {
+          return;
+        }
+
+        const account = retirementProjectionAccounts.find(
+          (entry) => entry.accountId === event.accountId && entry.accountType === "account-based-pension",
+        );
+        if (!account) {
+          return;
+        }
+
+        const targetCashAssetId = getCashAssetIdForOwner(scenario, account.ownerPersonId, event.targetAssetId);
+        if (!targetCashAssetId) {
+          return;
+        }
+
+        const openingBalance = Math.max(rolloverAdjustedOpeningBalances[account.accountId] ?? account.openingBalance, 0);
+        const withdrawalAmount =
+          event.amountMode === "fixed-amount" ? Math.min(Math.max(event.fixedAmount ?? 0, 0), openingBalance) : openingBalance;
+
+        rolloverAdjustedOpeningBalances[account.accountId] = Math.max(openingBalance - withdrawalAmount, 0);
+        assetValues[targetCashAssetId] = (assetValues[targetCashAssetId] ?? 0) + withdrawalAmount;
+        openingAssetValues[targetCashAssetId] = (openingAssetValues[targetCashAssetId] ?? 0) + withdrawalAmount;
+        pensionWithdrawalDetailsByAccountId[account.accountId] = [
+          ...(pensionWithdrawalDetailsByAccountId[account.accountId] ?? []),
+          {
+            eventId: event.eventId,
+            label: event.label,
+            amount: withdrawalAmount,
+            targetAssetId: targetCashAssetId,
+          },
+        ];
+        processedPensionWithdrawalEventIds.add(event.eventId);
+      });
+
+    liabilityPaymentEvents
+      .filter((event) => event.enabled && event.paymentDate && !processedLiabilityPaymentEventIds.has(event.eventId))
+      .forEach((event) => {
+        const paymentMonthIndex = dateToMonthIndex(event.paymentDate);
+        if (paymentMonthIndex === null || paymentMonthIndex > getProjectionPeriodMonthRange(scenario, yearIndex).periodEnd) {
+          return;
+        }
+
+        const liability = scenario.liabilities.find((entry) => entry.liabilityId === event.liabilityId);
+        if (!liability) {
+          return;
+        }
+
+        const sourceCashAssetId = getCashAssetIdForOwner(scenario, liability.ownerPersonId, event.sourceAssetId);
+        if (!sourceCashAssetId) {
+          return;
+        }
+
+        const availableCash = Math.max(assetValues[sourceCashAssetId] ?? 0, 0);
+        const balance = Math.max(liabilityBalances[liability.liabilityId] ?? liability.openingBalance, 0);
+        const requestedPayment =
+          event.amountMode === "fixed-amount" ? Math.min(Math.max(event.fixedAmount ?? 0, 0), balance) : balance;
+        const paymentAmount = Math.min(requestedPayment, availableCash);
+
+        assetValues[sourceCashAssetId] = Math.max(availableCash - paymentAmount, 0);
+        liabilityBalances[liability.liabilityId] = Math.max(balance - paymentAmount, 0);
+        openingAssetValues[sourceCashAssetId] = Math.max((openingAssetValues[sourceCashAssetId] ?? availableCash) - paymentAmount, 0);
+        openingLiabilityBalances[liability.liabilityId] = Math.max(
+          (openingLiabilityBalances[liability.liabilityId] ?? balance) - paymentAmount,
+          0,
+        );
+        liabilityPaymentEventValues[event.eventId] = paymentAmount;
+        processedLiabilityPaymentEventIds.add(event.eventId);
+      });
+
+    const cgtResult = calculateTaxableCapitalGains({
+      scenario,
+      grossNonDiscountableGainsByPersonId,
+      grossDiscountableGainsByPersonId,
+      capitalLossesByPersonId,
+      carriedForwardCapitalLossesByPersonId,
+    });
+    const taxableCapitalGainsByPersonId = cgtResult.taxableCapitalGainsByPersonId;
+    const totalPositiveTaxableGrossGains = Object.values(assetSaleEventCgtDetails).reduce(
+      (total, detail) => total + (detail.cgtTreatment === "taxable" && detail.grossCapitalGain > 0 ? detail.grossCapitalGain : 0),
+      0,
+    );
+    const totalTaxableCapitalGains = sumValues(taxableCapitalGainsByPersonId);
+    const totalDiscountApplied = sumValues(cgtResult.discountAppliedByPersonId);
+    const totalLossesApplied = sumValues(cgtResult.carriedForwardLossAppliedByPersonId);
+
+    Object.entries(assetSaleEventCgtDetails).forEach(([eventId, detail]) => {
+      if (detail.cgtTreatment !== "taxable" || detail.grossCapitalGain <= 0 || totalPositiveTaxableGrossGains <= 0) {
+        return;
+      }
+
+      const eventShare = detail.grossCapitalGain / totalPositiveTaxableGrossGains;
+      assetSaleEventCgtDetails[eventId] = {
+        ...detail,
+        taxableCapitalGain: totalTaxableCapitalGains * eventShare,
+        discountApplied: totalDiscountApplied * eventShare,
+        carriedForwardLossApplied: totalLossesApplied * eventShare,
+      };
+    });
+
     const cashAsset = scenario.assets.find((asset) => asset.assetId === cashAssetId);
-    const cashOpening = previousAssetValues[cashAssetId ?? ""] ?? 0;
+    const cashOpening = openingAssetValues[cashAssetId ?? ""] ?? 0;
     const bankInterest = cashAsset ? cashOpening * getAssetGrowthRate(cashAsset, assumptions) : 0;
     const assessableAssets = sumAssessableAssets({
       assets: scenario.assets,
-      assetValues: previousAssetValues,
-      retirementAccountBalances: previousRetirementBalances,
+      assetValues: openingAssetValues,
+      retirementAccountBalances: rolloverAdjustedOpeningBalances,
       retirementAccountCentrelinkValues,
     });
     const financialAssets = sumFinancialAssets({
       assets: scenario.assets,
-      assetValues: previousAssetValues,
-      retirementAccountBalances: previousRetirementBalances,
+      assetValues: openingAssetValues,
+      retirementAccountBalances: rolloverAdjustedOpeningBalances,
       retirementAccountCentrelinkValues,
     });
-    const taxableIncomeByPersonId = getEmploymentIncomeByPersonId(scenario, yearIndex, assumptions);
-    const employerSuperByPersonId = calculateEmployerSuperByPersonId(taxableIncomeByPersonId, assumptions);
-    const retirementAccountProjections = scenario.retirementAccounts.flatMap((account) => {
+
+    const retirementAccountProjections = retirementProjectionAccounts.map((account) => {
       const ownerAge = ageByPersonId[account.ownerPersonId] ?? primaryPerson.startAge + yearIndex;
-      const rolloverEffective = isRolloverEffectiveForProjectionYear(account, scenario, yearIndex);
-      const rolloverPensionAccount =
-        account.accountType === "super-accumulation" && getRolloverMonthIndex(account) !== null
-          ? createRolloverPensionAccount(account)
-          : null;
-
-      if (account.accountType === "super-accumulation" && rolloverEffective && rolloverPensionAccount) {
-        const superOpeningBalance = previousRetirementBalances[account.accountId] ?? account.openingBalance;
-        const pensionOpeningBalance = previousRetirementBalances[rolloverPensionAccount.accountId] ?? 0;
-        const pensionProjection = projectRetirementAccount({
-          account: rolloverPensionAccount,
-          previousBalance: pensionOpeningBalance + superOpeningBalance,
-          grossEmployerContribution: 0,
-          additionalContribution: 0,
-          additionalContributionTax: 0,
-          contributionTax: 0,
-          netEmployerContribution: 0,
-          age: ownerAge,
-          yearIndex,
-          assumptions,
-        });
-
-        return [
-          {
-            account,
-            projection: {
-              openingBalance: superOpeningBalance,
-              rolloverIn: 0,
-              rolloverOut: superOpeningBalance,
-              grossEmployerContribution: 0,
-              additionalContribution: 0,
-              contributionTax: 0,
-              netEmployerContribution: 0,
-              drawdown: 0,
-              minimumDrawdown: 0,
-              investmentIncome: 0,
-              investmentGrowth: 0,
-              investmentTax: 0,
-              fees: 0,
-              taxPayable: 0,
-              closingBalance: 0,
-            },
-          },
-          {
-            account: rolloverPensionAccount,
-            projection: {
-              ...pensionProjection,
-              openingBalance: pensionOpeningBalance,
-              rolloverIn: superOpeningBalance,
-              rolloverOut: 0,
-            },
-          },
-        ];
-      }
-
       const targetAccountId = getContributionTargetAccountId(scenario, account.ownerPersonId);
       const receivesEmployerContribution = account.accountType === "super-accumulation" && account.accountId === targetAccountId;
       const grossEmployerContribution = receivesEmployerContribution
         ? employerSuperByPersonId[account.ownerPersonId]?.grossContribution ?? 0
         : 0;
-      const contributionTax = receivesEmployerContribution
+      const employerContributionTax = receivesEmployerContribution
         ? employerSuperByPersonId[account.ownerPersonId]?.contributionTax ?? 0
         : 0;
-      const additionalContribution = account.accountType === "super-accumulation" ? account.annualContribution ?? 0 : 0;
-      const additionalContributionTax =
-        account.accountType === "super-accumulation" && account.annualContributionType !== "non-concessional"
-          ? additionalContribution * assumptions.legislative.superannuation.contributionsTaxRate
-          : 0;
+      const strategyDetails =
+        account.accountType === "super-accumulation"
+          ? superContributionStrategies
+              .filter((strategy) => strategy.enabled && strategy.targetAccountId === account.accountId)
+              .map((strategy) => {
+                const activeFraction = getDatedActiveFraction({
+                  startDate: strategy.startDate,
+                  endDate: strategy.endDate,
+                  scenario,
+                  yearIndex,
+                });
+                const grossContribution =
+                  activeFraction > 0
+                    ? inflate(strategy.annualAmount, assumptions.economic.cpiRate, strategy.indexedToCpi ? yearIndex : 0) * activeFraction
+                    : 0;
+                const contributionTax =
+                  strategy.contributionType === "concessional"
+                    ? grossContribution * assumptions.legislative.superannuation.contributionsTaxRate
+                    : 0;
+
+                return {
+                  strategyId: strategy.strategyId,
+                  label: strategy.label,
+                  grossContribution,
+                  contributionTax,
+                  netContribution: Math.max(grossContribution - contributionTax, 0),
+                };
+              })
+              .filter((strategy) => strategy.grossContribution > 0)
+          : [];
+      const additionalContribution = strategyDetails.reduce((total, strategy) => total + strategy.grossContribution, 0);
+      const additionalContributionTax = strategyDetails.reduce((total, strategy) => total + strategy.contributionTax, 0);
       const netEmployerContribution =
         receivesEmployerContribution
           ? employerSuperByPersonId[account.ownerPersonId]?.netContribution ?? 0
           : 0;
 
-      const accountProjection = {
+      return {
         account,
         projection: {
           ...projectRetirementAccount({
             account,
-            previousBalance: previousRetirementBalances[account.accountId] ?? account.openingBalance,
+            previousBalance: rolloverAdjustedOpeningBalances[account.accountId] ?? account.openingBalance,
             grossEmployerContribution,
             additionalContribution,
             additionalContributionTax,
-            contributionTax: contributionTax + additionalContributionTax,
+            contributionTax: employerContributionTax + additionalContributionTax,
             netEmployerContribution,
             age: ownerAge,
             yearIndex,
             assumptions,
           }),
-          rolloverIn: 0,
-          rolloverOut: 0,
+          openingBalance: previousRetirementBalances[account.accountId] ?? account.openingBalance,
+          rolloverIn: rolloverInByAccountId[account.accountId] ?? 0,
+          rolloverOut: rolloverOutByAccountId[account.accountId] ?? 0,
+          contributionStrategyDetails: strategyDetails,
+          rolloverEventDetails: rolloverDetailsByAccountId[account.accountId] ?? [],
+          lumpSumWithdrawal: (pensionWithdrawalDetailsByAccountId[account.accountId] ?? []).reduce(
+            (total, detail) => total + detail.amount,
+            0,
+          ),
+          pensionWithdrawalDetails: pensionWithdrawalDetailsByAccountId[account.accountId] ?? [],
         },
       };
-
-      return rolloverPensionAccount
-        ? [
-            accountProjection,
-            {
-              account: rolloverPensionAccount,
-              projection: {
-                openingBalance: previousRetirementBalances[rolloverPensionAccount.accountId] ?? 0,
-                rolloverIn: 0,
-                rolloverOut: 0,
-                grossEmployerContribution: 0,
-                additionalContribution: 0,
-                contributionTax: 0,
-                netEmployerContribution: 0,
-                drawdown: 0,
-                minimumDrawdown: 0,
-                investmentIncome: 0,
-                investmentGrowth: 0,
-                investmentTax: 0,
-                fees: 0,
-                taxPayable: 0,
-                closingBalance: previousRetirementBalances[rolloverPensionAccount.accountId] ?? 0,
-              },
-            },
-          ]
-        : [accountProjection];
     });
     const retirementAccountBalances = Object.fromEntries(
       retirementAccountProjections.map(({ account, projection }) => [account.accountId, projection.closingBalance]),
@@ -447,6 +892,10 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
           rolloverOut: projection.rolloverOut,
           grossEmployerContribution: projection.grossEmployerContribution,
           additionalContribution: projection.additionalContribution,
+          contributionStrategyDetails: projection.contributionStrategyDetails,
+          rolloverEventDetails: projection.rolloverEventDetails,
+          lumpSumWithdrawal: projection.lumpSumWithdrawal,
+          pensionWithdrawalDetails: projection.pensionWithdrawalDetails,
           contributionTax: projection.contributionTax,
           netEmployerContribution: projection.netEmployerContribution,
           drawdown: projection.drawdown,
@@ -454,6 +903,7 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
           investmentGrowth: projection.investmentGrowth,
           investmentTax: projection.investmentTax,
           fees: projection.fees,
+          insurancePremium: projection.insurancePremium,
           taxPayable: projection.taxPayable,
           closingBalance: projection.closingBalance,
         },
@@ -475,6 +925,11 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
 
       return values;
     }, {});
+    const personalSuperContributions = retirementAccountProjections.reduce(
+      (total, { account, projection }) =>
+        account.accountType === "super-accumulation" ? total + projection.additionalContribution : total,
+      0,
+    );
     const cashflowItemValues = Object.fromEntries(
       scenario.cashflowItems.map((item) => [
         item.itemId,
@@ -496,19 +951,37 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
         liability.liabilityId,
         calculateLiabilityRepayment(
           liability,
-          previousLiabilityBalances[liability.liabilityId] ?? liability.openingBalance,
+          openingLiabilityBalances[liability.liabilityId] ?? liability.openingBalance,
         ),
       ]),
     );
+    const liabilityInterestValues = Object.fromEntries(
+      scenario.liabilities.map((liability) => [
+        liability.liabilityId,
+        calculateLiabilityInterest(liability, openingLiabilityBalances[liability.liabilityId] ?? liability.openingBalance),
+      ]),
+    );
+    const liabilityPrincipalRepaymentValues = Object.fromEntries(
+      scenario.liabilities.map((liability) => [
+        liability.liabilityId,
+        calculateLiabilityPrincipalRepayment(
+          liability,
+          openingLiabilityBalances[liability.liabilityId] ?? liability.openingBalance,
+        ),
+      ]),
+    );
+    const deductibleInterestByPersonId = scenario.liabilities
+      .filter((liability) => liability.interestDeductible)
+      .reduce<Record<string, number>>((values, liability) => {
+        allocateAmountByOwner(scenario, values, liability.ownerPersonId, liabilityInterestValues[liability.liabilityId] ?? 0);
+        return values;
+      }, emptyPersonValues(scenario));
     const liabilityRepaymentItemIds = new Set(scenario.liabilities.map((liability) => `${liability.liabilityId}-repayment`));
     const otherIncome = scenario.cashflowItems
-      .filter((item) => item.category === "other-income")
-      .reduce((total, item) => total + (cashflowItemValues[item.itemId] ?? 0), 0);
-    const taxableOtherIncome = scenario.cashflowItems
-      .filter((item) => item.category === "other-income" && item.taxable)
+      .filter((item) => isCashflowIncomeCategory(item.category))
       .reduce((total, item) => total + (cashflowItemValues[item.itemId] ?? 0), 0);
     const taxableOtherIncomeByPersonId = scenario.cashflowItems
-      .filter((item) => item.category === "other-income" && item.taxable)
+      .filter((item) => isCashflowIncomeCategory(item.category) && item.taxable)
       .reduce<Record<string, number>>((values, item) => {
         allocateAmountByOwner(scenario, values, item.ownerPersonId, cashflowItemValues[item.itemId] ?? 0);
         return values;
@@ -517,16 +990,22 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
     const expenses = scenario.cashflowItems
       .filter(
         (item) =>
-          (item.category === "living-expense" || item.category === "other-expense") &&
-          !liabilityRepaymentItemIds.has(item.itemId),
+          isCashflowExpenseCategory(item.category) && !liabilityRepaymentItemIds.has(item.itemId),
       )
-      .reduce((total, item) => total + (cashflowItemValues[item.itemId] ?? 0), 0) + sumValues(liabilityRepaymentValues);
-    const agePension = calculateAgePension({
-      person: primaryPerson,
-      age: ageByPersonId[primaryPerson.personId] ?? primaryPerson.startAge + yearIndex,
+      .reduce((total, item) => total + (cashflowItemValues[item.itemId] ?? 0), 0) +
+      sumValues(liabilityRepaymentValues) +
+      personalSuperContributions;
+    const otherAssessableIncomeByPersonId = scenario.people.reduce<Record<string, number>>((values, person) => {
+      values[person.personId] =
+        (taxableOtherIncomeByPersonId[person.personId] ?? 0) + (assetIncomeByPersonId[person.personId] ?? 0);
+      return values;
+    }, {});
+    const { agePension, agePensionByPersonId } = calculateHouseholdAgePension({
+      people: scenario.people,
+      ageByPersonId,
       assessableAssets,
       financialAssets,
-      otherAssessableIncome: taxableOtherIncome + assetIncome,
+      otherAssessableIncomeByPersonId,
       assumptions: assumptions.legislative,
     });
     const employerSuperContributions = Object.values(employerSuperByPersonId).reduce(
@@ -547,10 +1026,14 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
       scenario.people.map((person) => [
         person.personId,
         calculatePersonalTax({
-          taxableAgePension: 0,
+          taxableAgePension: agePensionByPersonId[person.personId]?.annualPayment ?? 0,
           taxableBankInterest: bankInterestByPersonId[person.personId] ?? 0,
           taxableOtherIncome: (taxableOtherIncomeByPersonId[person.personId] ?? 0) + (assetIncomeByPersonId[person.personId] ?? 0),
+          taxableCapitalGains: taxableCapitalGainsByPersonId[person.personId] ?? 0,
+          deductibleInterest: deductibleInterestByPersonId[person.personId] ?? 0,
           taxFreeAccountBasedPension: accountBasedPensionByPersonId[person.personId] ?? 0,
+          seniorsAndPensionersTaxOffsetEligible: agePensionByPersonId[person.personId]?.ageEligible ?? false,
+          relationshipStatus: person.relationshipStatus,
           assumptions: assumptions.legislative,
         }),
       ]),
@@ -615,7 +1098,7 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
       remainingShortfall -= shortfallFromCash;
       cashReserve = cashOpening - shortfallFromCash;
 
-      for (const account of scenario.retirementAccounts.filter((entry) => entry.accountType === "account-based-pension")) {
+      for (const account of retirementProjectionAccounts.filter((entry) => entry.accountType === "account-based-pension")) {
         if (remainingShortfall <= 0) {
           break;
         }
@@ -638,7 +1121,7 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
         remainingShortfall -= extraDrawdown;
       }
 
-      for (const asset of scenario.assets.filter((entry) => entry.type === "investment")) {
+      for (const asset of scenario.assets.filter((entry) => isInvestmentAssetType(entry.type))) {
         if (remainingShortfall <= 0) {
           break;
         }
@@ -679,8 +1162,19 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
       year,
       ageByPersonId,
       cashflowItemValues,
+      assetSaleEventValues,
+      assetPurchaseEventValues,
       assetIncomeValues,
+      assetCostBases,
+      assetSaleEventCgtDetails,
+      liabilityPaymentEventValues,
+      liabilityDrawdownEventValues,
       liabilityRepaymentValues,
+      liabilityInterestValues,
+      liabilityPrincipalRepaymentValues,
+      deductibleInterestByPersonId,
+      taxableCapitalGainsByPersonId,
+      carriedForwardCapitalLossesByPersonId: cgtResult.nextCarriedForwardCapitalLossesByPersonId,
       accountBasedPension,
       employerSuperContributions,
       concessionalContributionsTax,
@@ -692,6 +1186,7 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
         Object.entries(employerSuperByPersonId).map(([personId, contribution]) => [personId, contribution.contributionTax]),
       ),
       agePension,
+      agePensionByPersonId,
       bankInterest,
       totalIncome,
       expenses,
@@ -711,8 +1206,10 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
     });
 
     previousAssetValues = nextAssetValues;
+    previousAssetCostBases = assetCostBases;
     previousLiabilityBalances = adjustedLiabilityBalances;
     previousRetirementBalances = adjustedRetirementAccountBalances;
+    carriedForwardCapitalLossesByPersonId = cgtResult.nextCarriedForwardCapitalLossesByPersonId;
   }
 
   return {
@@ -737,6 +1234,12 @@ export function runProjection(scenario: ProjectionScenario, assumptions: Project
         severity: "info",
         message:
           "Annual surplus or shortfall is allocated in order: bank savings/cash reserve, extra account-based pension drawdown, non-super investment sales, then debt drawdown or unresolved shortfall.",
+      },
+      {
+        code: "PRACTICAL_CGT_MODEL",
+        severity: "warning",
+        message:
+          "CGT uses cost base, acquisition date, configured exemption treatment, capital losses, and the 50% discount only; confirm detailed CGT concessions and special cases separately.",
       },
     ],
   };

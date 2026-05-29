@@ -6,7 +6,7 @@ import {
 } from "@/lib/finley-output-edit-service";
 
 function isOutputKind(value: unknown): value is FinleyOutputEditKind {
-  return value === "engagement_letter" || value === "ongoing_agreement" || value === "annual_agreement";
+  return value === "engagement_letter" || value === "ongoing_agreement" || value === "annual_agreement" || value === "record_of_advice";
 }
 
 export async function POST(request: NextRequest) {
@@ -41,6 +41,7 @@ export async function POST(request: NextRequest) {
         handoffReason: "",
         updatedEngagementLetter: null,
         updatedAgreement: null,
+        updatedRecordOfAdvice: null,
         source: "configuration",
         model: null,
         warning: error instanceof Error ? error.message : "Unknown active output edit error.",

@@ -1,7 +1,28 @@
 import type { ProjectionLiability } from "./types";
 
+export function calculateLiabilityInterest(liability: ProjectionLiability, previousBalance: number) {
+  if (previousBalance <= 0 || liability.annualInterestRate <= 0) {
+    return 0;
+  }
+
+  const balanceBeforeInterest =
+    liability.repaymentTiming === "start-of-year" && liability.repaymentType !== "interest-only"
+      ? Math.max(previousBalance - liability.annualRepayment, 0)
+      : previousBalance;
+
+  return balanceBeforeInterest * liability.annualInterestRate;
+}
+
 export function calculateLiabilityRepayment(liability: ProjectionLiability, previousBalance: number) {
-  if (previousBalance <= 0 || liability.annualRepayment <= 0) {
+  if (previousBalance <= 0) {
+    return 0;
+  }
+
+  if (liability.repaymentType === "interest-only") {
+    return calculateLiabilityInterest(liability, previousBalance);
+  }
+
+  if (liability.annualRepayment <= 0) {
     return 0;
   }
 
@@ -12,9 +33,24 @@ export function calculateLiabilityRepayment(liability: ProjectionLiability, prev
   return Math.min(previousBalance * (1 + liability.annualInterestRate), liability.annualRepayment);
 }
 
+export function calculateLiabilityPrincipalRepayment(liability: ProjectionLiability, previousBalance: number) {
+  const repayment = calculateLiabilityRepayment(liability, previousBalance);
+  const interest = calculateLiabilityInterest(liability, previousBalance);
+
+  if (liability.repaymentType === "interest-only") {
+    return 0;
+  }
+
+  return Math.max(repayment - interest, 0);
+}
+
 export function projectLiabilityBalance(liability: ProjectionLiability, previousBalance: number) {
   if (previousBalance <= 0) {
     return 0;
+  }
+
+  if (liability.repaymentType === "interest-only") {
+    return previousBalance;
   }
 
   const balanceAfterStartRepayment =

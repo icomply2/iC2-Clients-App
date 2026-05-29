@@ -24,13 +24,18 @@ import type {
   AdviceCaseV1,
   AdviceModuleV1,
   InsurancePolicyCoverComponentV1,
+  InsuranceNeedsAnalysisLineItemKeyV1,
   InsurancePolicyOwnershipGroupV1,
   InsurancePolicyRecommendationV1,
   InsurancePolicyReplacementV1,
+  PortfolioAllocationRowV1,
   PortfolioHoldingV1,
+  ProductFeeItemV1,
+  ProductRecommendationV1,
   ProductRexReportV1,
   RiskProfileV1,
   ServiceAgreementFeeItemV1,
+  StrategicRecommendationV1,
 } from "@/lib/soa-types";
 import { parseProductRexReport } from "@/lib/productrex-report-parser";
 import { getPortfolioAccountViews } from "@/lib/soa-portfolio-accounts";
@@ -43,7 +48,12 @@ import {
   writeSoaProjectionPackage,
 } from "@/lib/projections/soa-projection-package";
 import type { IntakeAssessmentV1, ProductDraftResponseV1, StrategyDraftResponseV1 } from "@/lib/soa-output-contracts";
-import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
+import { normalizeRecommendationLanguage, sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
+import {
+  PRODUCT_REX_FEE_TYPE_OPTIONS,
+  getProductFeeTypeSelectValue,
+  inferProductFeeTypeFromLabel,
+} from "@/lib/soa-fee-types";
 import type { SoaIntakeResponse } from "@/lib/soa-intake-service";
 import { generateIntakeAssessment, refineIntakeAssessment } from "@/lib/soa-intake-engine";
 import {
@@ -53,6 +63,15 @@ import {
 } from "@/lib/soa-state-machine";
 import { getSoaScenario, upsertSoaScenario, type SoaScenario, type SoaScenarioDraftValue } from "@/lib/soa-scenarios";
 import { buildSoaDocx } from "@/lib/soa-docx-export";
+import {
+  INSURANCE_NEEDS_PROVISION_ITEMS,
+  INSURANCE_NEEDS_REQUIREMENT_ITEMS,
+  getInsuranceNeedsTotalsForPolicyType,
+  normalizeInsuranceNeedsLineItems,
+  type InsuranceNeedsCoverColumnKey,
+} from "@/lib/soa-insurance-needs";
+import { parseRecommendationMarkdown } from "@/lib/recommendation-markdown";
+import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "../finley-avatar.png";
 import finleyStyles from "../page.module.css";
 import styles from "./soa.module.css";
@@ -94,6 +113,7 @@ type UploadedInput = {
   name: string;
   mimeType?: string | null;
   extractedText?: string | null;
+  file?: File | null;
   productRexReport?: ProductRexReportV1 | null;
 };
 
@@ -129,6 +149,7 @@ type Message = {
   role: "assistant" | "user";
   content: string;
   intakeAssessment?: IntakeAssessmentV1 | null;
+  recommendationProposalId?: string | null;
 };
 
 type SoaSectionEditClientResponse = {
@@ -145,6 +166,31 @@ type SoaSectionEditClientResponse = {
     text: string;
     priority: "high" | "medium" | "low" | "unknown" | null;
   }> | null;
+  strategyRecommendations?: {
+    mode: "replace-all";
+    recommendations: StrategicRecommendationV1[];
+  } | null;
+  productRecommendations?: {
+    mode: "replace-all";
+    recommendations: ProductRecommendationV1[];
+  } | null;
+  proposalSummary?: string[];
+  requiresClarification?: boolean;
+};
+
+type RecommendationEditProposal = {
+  proposalId: string;
+  sectionId: "strategy-recommendations" | "product-recommendations";
+  summaryLines: string[];
+  strategyRecommendations?: StrategicRecommendationV1[] | null;
+  productRecommendations?: ProductRecommendationV1[] | null;
+  requiresClarification: boolean;
+};
+
+type SectionChatUpdateResult = {
+  summary: string;
+  proposalId?: string | null;
+  requiresPreview?: boolean;
 };
 
 type SectionConfirmationMap = Partial<Record<SectionId, boolean>>;
@@ -152,6 +198,47 @@ type StrategyRecommendationTab = "linked-objectives" | "recommendation" | "reaso
 type ProductRecommendationTab = "linked-objectives" | "recommendation" | "reasons" | "consequences" | "alternatives";
 type UpfrontFeeType = "preparation" | "implementation";
 type CommissionDraftField = "upfrontPercentage" | "upfrontAmount" | "ongoingPercentage" | "ongoingAmount";
+
+function RecommendationMarkdownPreview({ text }: { text?: string | null }) {
+  const blocks = parseRecommendationMarkdown(text);
+
+  if (!blocks.length) {
+    return <div className={styles.recommendationProposalPreviewText}>No recommendation text proposed.</div>;
+  }
+
+  return (
+    <div className={styles.recommendationMarkdown}>
+      {blocks.map((block, blockIndex) => {
+        if (block.type === "paragraph") {
+          return <p key={`paragraph-${blockIndex}`}>{sanitizeClientFacingResearchLanguage(block.text)}</p>;
+        }
+
+        return (
+          <div key={`table-${blockIndex}`} className={styles.recommendationMarkdownTableWrap}>
+            <table className={styles.recommendationMarkdownTable}>
+              <thead>
+                <tr>
+                  {block.headers.map((header, headerIndex) => (
+                    <th key={`${header}-${headerIndex}`}>{header}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {block.rows.map((row, rowIndex) => (
+                  <tr key={`row-${rowIndex}`}>
+                    {row.map((cell, cellIndex) => (
+                      <td key={`cell-${rowIndex}-${cellIndex}`}>{sanitizeClientFacingResearchLanguage(cell)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const SOA_PRINT_STORAGE_KEY = "finley-soa-print-preview-v1";
 const SOA_RENDER_STYLE_STORAGE_KEY = DOCUMENT_STYLE_PROFILE_STORAGE_KEY;
@@ -350,6 +437,34 @@ function resolveRecommendationAudienceSelectValue(value: string, people: AdviceC
     : people.map((person) => person.personId);
 }
 
+function looksLikeInsuranceRecommendationText(text: string | null | undefined) {
+  return /\b(insurance|life\s*(?:\/|and)?\s*tpd|tpd|trauma|income protection|ip cover|life cover|cover adequacy|cover gap|sum insured|insured|premium|underwriting|waiting period|benefit period|policy|default cover|in-super cover|insurance needs|needs analysis)\b/i.test(
+    text ?? "",
+  );
+}
+
+function isInsuranceProductRecommendation(recommendation: AdviceCaseV1["recommendations"]["product"][number]) {
+  if (recommendation.productType === "insurance") return true;
+
+  const text = [
+    recommendation.recommendationText,
+    recommendation.currentProductName,
+    recommendation.currentProvider,
+    recommendation.recommendedProductName,
+    recommendation.recommendedProvider,
+    recommendation.suitabilityRationale,
+    ...recommendation.clientBenefits.map((benefit) => benefit.text),
+    ...recommendation.consequences.map((consequence) => consequence.text),
+    ...recommendation.alternativesConsidered.flatMap((alternative) => [
+      alternative.productName,
+      alternative.provider,
+      alternative.reasonDiscounted,
+    ]),
+  ].filter(Boolean).join(" ");
+
+  return looksLikeInsuranceRecommendationText(text);
+}
+
 function normalizeAdviceCaseRecommendationLanguage(caseValue: AdviceCaseV1, clientName?: string | null): AdviceCaseV1 {
   const allPersonIds = caseValue.clientGroup.clients.map((client) => client.personId);
 
@@ -362,11 +477,13 @@ function normalizeAdviceCaseRecommendationLanguage(caseValue: AdviceCaseV1, clie
         ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
         recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
       })),
-      product: caseValue.recommendations.product.map((recommendation) => ({
-        ...recommendation,
-        ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
-        recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
-      })),
+      product: caseValue.recommendations.product
+        .filter((recommendation) => !isInsuranceProductRecommendation(recommendation))
+        .map((recommendation) => ({
+          ...recommendation,
+          ownerPersonIds: recommendation.ownerPersonIds?.length ? recommendation.ownerPersonIds : allPersonIds,
+          recommendationText: normalizeRecommendationLanguage(recommendation.recommendationText, clientName),
+        })),
     },
   };
 }
@@ -471,7 +588,7 @@ const INSURANCE_NEEDS_COVER_COLUMNS: Array<{ value: "life" | "tpd" | "trauma" | 
   { value: "life", label: "Life" },
   { value: "tpd", label: "TPD" },
   { value: "trauma", label: "Trauma" },
-  { value: "income-protection", label: "IP (p.a.)" },
+  { value: "income-protection", label: "IP (monthly)" },
 ];
 
 const INSURANCE_PREMIUM_TYPE_OPTIONS: Array<{ value: NonNullable<InsurancePolicyCoverComponentV1["premiumType"]>; label: string }> = [
@@ -481,6 +598,12 @@ const INSURANCE_PREMIUM_TYPE_OPTIONS: Array<{ value: NonNullable<InsurancePolicy
   { value: "hybrid", label: "Hybrid" },
   { value: "unknown", label: "Unknown" },
 ];
+
+function getInsuranceNeedsAmountKey(
+  coverType: (typeof INSURANCE_NEEDS_COVER_COLUMNS)[number]["value"],
+): InsuranceNeedsCoverColumnKey {
+  return coverType === "income-protection" ? "incomeProtection" : coverType;
+}
 
 const INSURANCE_PREMIUM_FREQUENCY_OPTIONS: Array<{ value: NonNullable<InsurancePolicyOwnershipGroupV1["premiumFrequency"]>; label: string; annualMultiplier: number }> = [
   { value: "weekly", label: "Weekly", annualMultiplier: 52 },
@@ -581,6 +704,17 @@ function isFactFindUpload(upload: Pick<UploadedInput, "name" | "extractedText">)
         text.includes("assets and liabilities") ||
         text.includes("superannuation")))
   );
+}
+
+function serializableUploads(uploads: UploadedInput[]) {
+  return uploads.map((upload) => ({
+    id: upload.id,
+    kind: upload.kind,
+    name: upload.name,
+    mimeType: upload.mimeType ?? null,
+    extractedText: upload.extractedText ?? null,
+    productRexReport: upload.productRexReport ?? null,
+  }));
 }
 
 function persistSoaPrintPreview(payload: unknown) {
@@ -773,7 +907,9 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     recommendedProvider: report.recommendedPlatform ?? null,
     ownerPersonIds: ownerPeople.map((person) => person.personId),
     linkedObjectiveIds: current.objectives.map((objective) => objective.objectiveId),
-    recommendationText: report.replacementReasons[0] ?? `Replace ${report.currentPlatform ?? "the current platform"} with ${report.recommendedPlatform ?? "the recommended platform"}.`,
+    recommendationText: sanitizeClientFacingResearchLanguage(
+      report.replacementReasons[0] ?? `Replace ${report.currentPlatform ?? "the current platform"} with ${report.recommendedPlatform ?? "the recommended platform"}.`,
+    ),
     targetAmount: null,
     transferAmount: null,
     monthlyFundingAmount: null,
@@ -786,11 +922,11 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     amountConfidence: "estimated" as const,
     clientBenefits: report.replacementReasons.map((reason) => ({
       benefitId: makeId("benefit"),
-      text: reason,
+      text: sanitizeClientFacingResearchLanguage(reason),
       linkedObjectiveIds: null,
     })),
     consequences: [],
-    suitabilityRationale: report.replacementReasons.join(" "),
+    suitabilityRationale: sanitizeClientFacingResearchLanguage(report.replacementReasons.join(" ")),
     currentProductName: report.currentPlatform ?? null,
     currentProvider: report.currentPlatform ?? null,
     comparison,
@@ -800,7 +936,7 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
             alternativeId: makeId("product-alternative"),
             productName: report.alternativePlatform,
             provider: report.alternativePlatform,
-            reasonDiscounted: "Alternative ProductRex platform option.",
+            reasonDiscounted: "Alternative platform option.",
           },
         ]
       : [],
@@ -813,11 +949,11 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
     currentProvider: report.currentPlatform ?? null,
     recommendedProductName: report.recommendedPlatform ?? null,
     recommendedProvider: report.recommendedPlatform ?? null,
-    replacementReasonText: report.replacementReasons.join("\n"),
+    replacementReasonText: report.replacementReasons.map(sanitizeClientFacingResearchLanguage).join("\n"),
     linkedObjectiveIds: current.objectives.map((objective) => objective.objectiveId),
     clientBenefits: report.replacementReasons.map((reason) => ({
       benefitId: makeId("benefit"),
-      text: reason,
+      text: sanitizeClientFacingResearchLanguage(reason),
       linkedObjectiveIds: null,
     })),
     consequences: [],
@@ -826,13 +962,13 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
           {
             alternativeId: makeId("alternative"),
             optionText: report.alternativePlatform,
-            reasonNotRecommended: "Alternative ProductRex platform option.",
+            reasonNotRecommended: "Alternative platform option.",
           },
         ]
       : [],
     feeComparisonNarrative: comparison.costComparisonNarrative ?? null,
     replacementRisks: [],
-    rationale: report.replacementReasons.join(" "),
+    rationale: sanitizeClientFacingResearchLanguage(report.replacementReasons.join(" ")),
   };
 
   const productAlreadyExists = current.recommendations.product.some(
@@ -911,7 +1047,16 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
 
   const productFees = report.platformComparisonRows
     .filter((row) =>
-      ["Investment Fee", "Sliding Admin Fee", "Admin Fee (Flat)", "Expense Recovery Fee (Flat)", "Expense Recovery Fee (Floating)"].includes(row.label),
+      [
+        "Investment Fee",
+        "Sliding Admin Fee",
+        "Admin Fee (Flat)",
+        "Admin Fee (Floating)",
+        "Expense Recovery Fee (Flat)",
+        "Expense Recovery Fee (Floating)",
+        "ORR Levy",
+        "Buy/Sell Fees",
+      ].includes(row.label),
     )
     .map((row) => {
       const parsed = parseFeeCell(row.recommendedValue);
@@ -923,12 +1068,7 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
         productRexReportId: report.reportId,
         amount: parsed.amount,
         percentage: parsed.percentage,
-        feeType:
-          row.label === "Investment Fee"
-            ? ("investment" as const)
-            : row.label.toLowerCase().includes("admin")
-              ? ("admin" as const)
-              : ("platform" as const),
+        feeType: inferProductFeeTypeFromLabel(row.label),
       };
     });
 
@@ -943,7 +1083,7 @@ function mergeProductRexIntoCase(current: AdviceCaseV1, report: NonNullable<Advi
             !productFees.some(
               (nextFee) =>
                 nextFee.productName === existingFee.productName &&
-                nextFee.feeType === existingFee.feeType &&
+                nextFee.feeType === getProductFeeTypeSelectValue(existingFee) &&
                 nextFee.amount === existingFee.amount &&
                 nextFee.percentage === existingFee.percentage,
             ),
@@ -1252,6 +1392,14 @@ function getPortfolioHoldingAmounts(holding: PortfolioHoldingV1) {
   return { currentAmount, changeAmount, proposedAmount };
 }
 
+function formatTableCurrencyInput(value?: number | null) {
+  return value === null || value === undefined || Number.isNaN(value) ? "" : formatCurrency(value);
+}
+
+function formatTablePercentInput(value?: number | null) {
+  return value === null || value === undefined || Number.isNaN(value) ? "" : formatPercent(value);
+}
+
 function groupHoldingsByPlatform(rows: PortfolioHoldingV1[]) {
   const groups = new Map<string, PortfolioHoldingV1[]>();
 
@@ -1458,10 +1606,14 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const [activeFollowUpQuestion, setActiveFollowUpQuestion] = useState<string | null>(null);
   const [answeredFollowUpQuestions, setAnsweredFollowUpQuestions] = useState<string[]>([]);
   const [answeredFollowUpResponses, setAnsweredFollowUpResponses] = useState<Record<string, string>>({});
+  const [followUpAnswerDrafts, setFollowUpAnswerDrafts] = useState<Record<string, string>>({});
+  const [hasUnsyncedFollowUpAnswers, setHasUnsyncedFollowUpAnswers] = useState(false);
+  const [isUpdatingSoaBrief, setIsUpdatingSoaBrief] = useState(false);
   const [openAnsweredQuestion, setOpenAnsweredQuestion] = useState<string | null>(null);
   const [answeredQuestionDraft, setAnsweredQuestionDraft] = useState("");
   const [strategyRecommendationTabs, setStrategyRecommendationTabs] = useState<Record<string, StrategyRecommendationTab>>({});
   const [productRecommendationTabs, setProductRecommendationTabs] = useState<Record<string, ProductRecommendationTab>>({});
+  const [pendingRecommendationProposal, setPendingRecommendationProposal] = useState<RecommendationEditProposal | null>(null);
   const [collapsedStrategyRecommendations, setCollapsedStrategyRecommendations] = useState<Record<string, boolean>>({});
   const [collapsedProductRecommendations, setCollapsedProductRecommendations] = useState<Record<string, boolean>>({});
   const [activeInsurancePersonId, setActiveInsurancePersonId] = useState<string | null>(null);
@@ -1476,6 +1628,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const [commissionDrafts, setCommissionDrafts] = useState<Record<string, string>>({});
   const [activeServiceFeeInput, setActiveServiceFeeInput] = useState<string | null>(null);
   const [serviceFeeDrafts, setServiceFeeDrafts] = useState<Record<string, string>>({});
+  const [isPortfolioAllocationEditing, setIsPortfolioAllocationEditing] = useState(false);
   const [scenarioReady, setScenarioReady] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
   const [soaRenderStyle, setSoaRenderStyle] = useState<SoaRenderStyle>(DEFAULT_SOA_RENDER_STYLE);
@@ -1508,6 +1661,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setActiveFollowUpQuestion(null);
     setAnsweredFollowUpQuestions([]);
     setAnsweredFollowUpResponses({});
+    setFollowUpAnswerDrafts({});
+    setHasUnsyncedFollowUpAnswers(false);
+    setIsUpdatingSoaBrief(false);
     setOpenAnsweredQuestion(null);
     setAnsweredQuestionDraft("");
     setStrategyRecommendationTabs({});
@@ -1521,8 +1677,15 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setUpfrontFeeDrafts({ preparation: "", implementation: "" });
     setActiveCommissionInput(null);
     setCommissionDrafts({});
+    setIsPortfolioAllocationEditing(false);
     setActiveSectionId("soa-introduction");
   }
+
+  useEffect(() => {
+    if (activeSectionId !== "portfolio-allocation") {
+      setIsPortfolioAllocationEditing(false);
+    }
+  }, [activeSectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1571,6 +1734,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setActiveFollowUpQuestion(null);
     setAnsweredFollowUpQuestions(draft.answeredFollowUpQuestions);
     setAnsweredFollowUpResponses(draft.answeredFollowUpResponses);
+    setFollowUpAnswerDrafts(draft.followUpAnswerDrafts ?? {});
+    setHasUnsyncedFollowUpAnswers(draft.hasUnsyncedFollowUpAnswers ?? false);
+    setIsUpdatingSoaBrief(false);
     setOpenAnsweredQuestion(null);
     setAnsweredQuestionDraft("");
     setStrategyRecommendationTabs({});
@@ -1886,7 +2052,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         activeSectionId,
         adviceCase: normalizedAdviceCase,
         messages,
-        uploads,
+        uploads: serializableUploads(uploads),
         workflowStarted,
         workflowChatStartIndex,
         selectedProductRexUploadId,
@@ -1894,6 +2060,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         confirmedSections: confirmedSections as Record<string, boolean>,
         answeredFollowUpQuestions,
         answeredFollowUpResponses,
+        followUpAnswerDrafts,
+        hasUnsyncedFollowUpAnswers,
         activeInsurancePersonId,
         activeRiskPersonId,
         riskProfilesByPerson,
@@ -1911,6 +2079,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     adviceCase,
     answeredFollowUpQuestions,
     answeredFollowUpResponses,
+    followUpAnswerDrafts,
+    hasUnsyncedFollowUpAnswers,
     confirmedSections,
     intakeAssessment,
     messages,
@@ -1939,6 +2109,47 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       productRexUploads.find((upload) => upload.id === selectedProductRexUploadId) ??
       (productRexUploads.length === 1 ? productRexUploads[0] : null),
     [productRexUploads, selectedProductRexUploadId],
+  );
+  const uploadedFilesModalFiles = useMemo<UploadedFilesModalFile[]>(
+    () =>
+      uploads.map((upload) => {
+        const actions: UploadedFilesModalFile["actions"] = [];
+        if (upload.productRexReport) {
+          actions.push({
+            label: "Use for workflow",
+            onClick: () => applySelectedProductRexUpload(upload.id),
+          });
+        }
+        if (isFactFindUpload(upload)) {
+          actions.push({
+            label:
+              isExtractingFactFindImport && factFindImportSourceFile === upload.name
+                ? "Inspecting..."
+                : "Map to profile",
+            onClick: () => inspectFactFindUpload(upload),
+            disabled: isExtractingFactFindImport,
+          });
+        }
+        actions.push({
+          label: "Remove",
+          onClick: () => removeUpload(upload.id),
+          disabled: isExtractingFactFindImport && factFindImportSourceFile === upload.name,
+          variant: "danger" as const,
+        });
+
+        return {
+          id: upload.id,
+          name: upload.name,
+          badges: [
+            ...(upload.productRexReport ? [{ label: "ProductRex detected", tone: "product" as const }] : []),
+            ...(isInsuranceQuoteUpload(upload) ? [{ label: "Insurance quote detected", tone: "insurance" as const }] : []),
+            ...(isFactFindUpload(upload) ? [{ label: "Fact Find detected", tone: "fact-find" as const }] : []),
+            ...(selectedProductRexUpload?.id === upload.id ? [{ label: "In use", tone: "active" as const }] : []),
+          ],
+          actions,
+        };
+      }),
+    [factFindImportSourceFile, isExtractingFactFindImport, selectedProductRexUpload?.id, uploads],
   );
   const hasMeaningfulUserMessage = useMemo(
     () => messages.some((message) => message.role === "user" && isMeaningfulAdviserMessage(message.content)),
@@ -2110,16 +2321,25 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     function refreshProjectionPackage() {
       const packageValue = activeClientId && activeSoaId ? readSoaProjectionPackage(activeClientId, activeSoaId) : null;
       const scenarioOptions = activeClientId && activeSoaId ? readSoaProjectionScenarioOptions(activeClientId, activeSoaId) : [];
-      setLinkedProjectionPackage(packageValue);
+      const refreshedPackageValue =
+        packageValue && scenarioOptions.length
+          ? scenarioOptions.find((option) => option.selectedScenarioId === packageValue.selectedScenarioId) ?? packageValue
+          : packageValue;
+
+      if (refreshedPackageValue && refreshedPackageValue !== packageValue) {
+        writeSoaProjectionPackage(refreshedPackageValue);
+      }
+
+      setLinkedProjectionPackage(refreshedPackageValue);
       setProjectionScenarioOptions(scenarioOptions);
 
-      if (!packageValue) {
+      if (!refreshedPackageValue) {
         return;
       }
 
       setAdviceCase((current) => ({
         ...current,
-        financialProjections: [packageValue.financialProjection],
+        financialProjections: [refreshedPackageValue.financialProjection],
         metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
       }));
       setConfirmedSections((current) => ({ ...current, projections: false }));
@@ -2310,6 +2530,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           name: file.name,
           mimeType: file.type || null,
           extractedText,
+          file,
           productRexReport,
         };
       }),
@@ -2341,10 +2562,32 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         content: `Added ${nextUploads.length} ${uploadKind.replace(/-/g, " ")} file${nextUploads.length > 1 ? "s" : ""} to the Finley context for ${activeClient?.name ?? "this client"}. You can now use the chat box to add extra background before we start drafting sections.`,
       },
     ]);
+    setIsUploadsModalOpen(true);
+  }
+
+  function removeUpload(uploadId: string) {
+    setUploads((current) => {
+      const uploadToRemove = current.find((upload) => upload.id === uploadId);
+      const nextUploads = current.filter((upload) => upload.id !== uploadId);
+
+      if (selectedProductRexUploadId === uploadId) {
+        const nextProductRexUpload = nextUploads.find((upload) => upload.productRexReport);
+        setSelectedProductRexUploadId(nextProductRexUpload?.id ?? null);
+      }
+
+      if (uploadToRemove && factFindImportSourceFile === uploadToRemove.name) {
+        setFactFindImportSourceFile(null);
+        setFactFindImportCandidate(null);
+        setFactFindImportError(null);
+        setIsFactFindImportModalOpen(false);
+      }
+
+      return nextUploads;
+    });
   }
 
   async function inspectFactFindUpload(upload: UploadedInput) {
-    if (!upload.extractedText) {
+    if (!upload.file && !upload.extractedText) {
       setFactFindImportError("Finley could not read text from this fact find. Try uploading the original DOCX or text-based file rather than a scanned PDF.");
       setFactFindImportCandidate(null);
       setIsFactFindImportModalOpen(true);
@@ -2357,14 +2600,26 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setFactFindImportSourceFile(upload.name);
 
     try {
+      const requestBody = upload.file
+        ? (() => {
+            const formData = new FormData();
+            formData.append("file", upload.file);
+            formData.append("clientName", activeClient?.name ?? "");
+            return formData;
+          })()
+        : null;
       const response = await fetch("/api/finley/fact-find/extract-import", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          fileName: upload.name,
-          extractedText: upload.extractedText,
-          clientName: activeClient?.name ?? null,
-        }),
+        ...(requestBody
+          ? { body: requestBody }
+          : {
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                fileName: upload.name,
+                extractedText: upload.extractedText,
+                clientName: activeClient?.name ?? null,
+              }),
+            }),
       });
       const body = (await response.json().catch(() => null)) as FactFindImportResponse | null;
 
@@ -2448,6 +2703,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
 
     setWorkflowChatStartIndex(messages.length + 1);
     setWorkflowStarted(true);
+    if (hasUnsyncedFollowUpAnswers) {
+      setImpactNotice("You have saved follow-up answers that have not been applied to the SOA brief yet. You can continue, or use Update SOA brief first.");
+    }
   }
 
   async function requestIntakeAssessment(
@@ -2597,6 +2855,46 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       };
     }
 
+    if (sectionId === "strategy-recommendations") {
+      return {
+        schema: {
+          strategyRecommendations:
+            "Complete strategic recommendation cards. Return replace-all proposals only after preserving unchanged cards and ids.",
+          ownerPersonIds: "Must use the existing client personId values.",
+          boundary: "Keep product, platform, provider and account actions out of Strategy Recommendations.",
+        },
+        clients: adviceCase.clientGroup.clients.map((client) => ({
+          personId: client.personId,
+          fullName: client.fullName,
+          role: client.role,
+        })),
+        objectives: adviceCase.objectives,
+        activeTabs: strategyRecommendationTabs,
+        projectionAssumptions: linkedProjectionPackage?.financialProjection.assumptions ?? adviceCase.financialProjections?.[0]?.assumptions ?? null,
+        strategyRecommendations: adviceCase.recommendations.strategic,
+      };
+    }
+
+    if (sectionId === "product-recommendations") {
+      return {
+        schema: {
+          productRecommendations:
+            "Complete product recommendation cards. Return replace-all proposals only after preserving unchanged cards and ids.",
+          ownerPersonIds: "Must use the existing client personId values.",
+          boundary: "Keep insurance advice out of Product Recommendations.",
+        },
+        clients: adviceCase.clientGroup.clients.map((client) => ({
+          personId: client.personId,
+          fullName: client.fullName,
+          role: client.role,
+        })),
+        objectives: adviceCase.objectives,
+        activeTabs: productRecommendationTabs,
+        projectionAssumptions: linkedProjectionPackage?.financialProjection.assumptions ?? adviceCase.financialProjections?.[0]?.assumptions ?? null,
+        productRecommendations: adviceCase.recommendations.product,
+      };
+    }
+
     return {
       sectionId,
       adviceCase,
@@ -2628,10 +2926,65 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     return (await response.json()) as SoaSectionEditClientResponse;
   }
 
-  async function sendMessage() {
-    if (!composerValue.trim()) return;
-    const text = composerValue.trim();
-    const nextMessages: Message[] = [{ id: makeId("user"), role: "user", content: text }];
+  function updateFollowUpAnswerDraft(question: string, value: string) {
+    setFollowUpAnswerDrafts((current) => ({ ...current, [question]: value }));
+  }
+
+  function saveFollowUpAnswer(question: string) {
+    const answer = (followUpAnswerDrafts[question] ?? answeredFollowUpResponses[question] ?? "").trim();
+    if (!answer) {
+      setImpactNotice("Enter an answer before saving this follow-up question.");
+      return;
+    }
+
+    setAnsweredFollowUpQuestions((current) => (current.includes(question) ? current : [...current, question]));
+    setAnsweredFollowUpResponses((current) => ({ ...current, [question]: answer }));
+    setFollowUpAnswerDrafts((current) => ({ ...current, [question]: answer }));
+    setHasUnsyncedFollowUpAnswers(true);
+    setActiveFollowUpQuestion(null);
+    setImpactNotice("Saved answer locally. Use Update SOA brief when you are ready to refresh the SOA structure.");
+  }
+
+  function buildSavedFollowUpAnswersMessage() {
+    const entries = Object.entries(answeredFollowUpResponses)
+      .map(([question, answer]) => ({ question, answer: answer.trim() }))
+      .filter((entry) => entry.answer);
+
+    return [
+      "Update the SOA brief using these saved answers to the follow-up questions. Do not ask the same answered questions again unless the answer creates a new material uncertainty.",
+      ...entries.map((entry) => `Question: ${entry.question}\nAnswer: ${entry.answer}`),
+    ].join("\n\n");
+  }
+
+  async function refreshSoaBriefFromSavedAnswers() {
+    const hasAnswers = Object.values(answeredFollowUpResponses).some((answer) => answer.trim());
+    if (!hasAnswers) {
+      setImpactNotice("Answer at least one follow-up question before updating the SOA brief.");
+      return;
+    }
+
+    setIsUpdatingSoaBrief(true);
+    try {
+      await sendMessage(buildSavedFollowUpAnswersMessage(), {
+        showUserMessage: false,
+        markFollowUpAnswersSynced: true,
+      });
+    } finally {
+      setIsUpdatingSoaBrief(false);
+    }
+  }
+
+  async function sendMessage(
+    overrideText?: string,
+    options?: {
+      showUserMessage?: boolean;
+      markFollowUpAnswersSynced?: boolean;
+    },
+  ) {
+    const text = (overrideText ?? composerValue).trim();
+    if (!text) return;
+    const showUserMessage = options?.showUserMessage ?? true;
+    const nextMessages: Message[] = showUserMessage ? [{ id: makeId("user"), role: "user", content: text }] : [];
     const nextAnsweredQuestions = activeFollowUpQuestion
       ? answeredFollowUpQuestions.includes(activeFollowUpQuestion)
         ? answeredFollowUpQuestions
@@ -2725,7 +3078,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
               );
               const strategicRecommendations =
                 strategyDraftResult?.recommendations.length
-                  ? strategyDraftResult.recommendations.map((draft) => {
+                  ? strategyDraftResult.recommendations.filter((draft) => !looksLikeInsuranceRecommendationText(draft.recommendationText)).map((draft) => {
                       const linkedObjectiveIds = draft.linkedObjectiveTexts
                         .map((objectiveText) => objectiveIdByText.get(normalizeText(objectiveText)) ?? null)
                         .filter((objectiveId): objectiveId is string => Boolean(objectiveId));
@@ -2764,7 +3117,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       rationale: draft.rationale ?? null,
                       };
                     })
-                  : nextAssessment.candidateStrategyRecommendations.map((recommendationText) => ({
+                  : nextAssessment.candidateStrategyRecommendations.filter((recommendationText) => !looksLikeInsuranceRecommendationText(recommendationText)).map((recommendationText) => ({
                       recommendationId: makeId("strategy"),
                       type: "other",
                       ownerPersonIds: current.clientGroup.clients.map((client) => client.personId),
@@ -2787,7 +3140,21 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                     }));
               const productRecommendations =
                 productDraftResult?.recommendations.length
-                  ? productDraftResult.recommendations.map((draft) => {
+                  ? productDraftResult.recommendations.filter((draft) => draft.productType !== "insurance" && !looksLikeInsuranceRecommendationText([
+                      draft.recommendationText,
+                      draft.currentProductName,
+                      draft.currentProvider,
+                      draft.recommendedProductName,
+                      draft.recommendedProvider,
+                      draft.suitabilityRationale,
+                      ...draft.clientBenefits,
+                      ...draft.consequences,
+                      ...draft.alternativesConsidered.flatMap((alternative) => [
+                        alternative.productName,
+                        alternative.provider,
+                        alternative.reasonDiscounted,
+                      ]),
+                    ].filter(Boolean).join(" "))).map((draft) => {
                       const linkedObjectiveIds = draft.linkedObjectiveTexts
                         .map((objectiveText) => objectiveIdByText.get(normalizeText(objectiveText)) ?? null)
                         .filter((objectiveId): objectiveId is string => Boolean(objectiveId));
@@ -2833,8 +3200,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         })),
                       };
                     })
-                  : nextAssessment.candidateProductReviewNotes.length > 0
-                    ? nextAssessment.candidateProductReviewNotes.map((note) => ({
+                  : nextAssessment.candidateProductReviewNotes.filter((note) => !looksLikeInsuranceRecommendationText(note)).length > 0
+                    ? nextAssessment.candidateProductReviewNotes.filter((note) => !looksLikeInsuranceRecommendationText(note)).map((note) => ({
                         recommendationId: makeId("product"),
                         action: "retain" as const,
                         productType: "other" as const,
@@ -2861,7 +3228,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         comparison: null,
                         alternativesConsidered: [],
                       }))
-                    : current.recommendations.product;
+                    : current.recommendations.product.filter((recommendation) => !isInsuranceProductRecommendation(recommendation));
               const ownerPersonIdByName = new Map(
                 current.clientGroup.clients.map((client) => [normalizeText(client.fullName), client.personId]),
               );
@@ -2958,8 +3325,22 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
               }));
               const insuranceNeedsAnalyses = (nextAssessment.candidateInsuranceNeedsAnalyses ?? []).map((analysis) => {
                 const ownerPersonId = resolvePersonIdByName(analysis.ownerName);
-                return {
-                  analysisId: makeId("insurance-analysis"),
+                const analysisId = makeId("insurance-analysis");
+                const mapLineItem = (
+                  item: NonNullable<typeof analysis.requirements>[number] | NonNullable<typeof analysis.provisions>[number],
+                  category: "requirement" | "provision",
+                ) => ({
+                  itemId: `${analysisId}-${item.key ?? makeId(category)}`,
+                  key: item.key ?? null,
+                  category,
+                  title: item.title,
+                  life: item.life ?? null,
+                  tpd: item.tpd ?? null,
+                  trauma: item.trauma ?? null,
+                  incomeProtection: item.incomeProtection ?? null,
+                });
+                const mappedAnalysis = {
+                  analysisId,
                   ownerPersonIds: ownerPersonId ? [ownerPersonId] : current.clientGroup.clients.map((client) => client.personId),
                   policyType: analysis.policyType ?? ("other" as const),
                   methodology: normalizeInsuranceNeedsMethodology(analysis.methodology),
@@ -2987,7 +3368,23 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                     suggestedPolicyOwnership: analysis.suggestedPolicyOwnership ?? "unknown",
                     suggestedStructureNotes: analysis.sourceNote ?? null,
                   },
+                  requirements: (analysis.requirements ?? []).map((item) => mapLineItem(item, "requirement")),
+                  provisions: (analysis.provisions ?? []).map((item) => mapLineItem(item, "provision")),
                   rationale: analysis.rationale ?? null,
+                };
+                const syncedTotals = getInsuranceNeedsTotalsForPolicyType(mappedAnalysis);
+
+                return {
+                  ...mappedAnalysis,
+                  inputs: {
+                    ...mappedAnalysis.inputs,
+                    existingCoverAmount: syncedTotals.existingCoverAmount,
+                  },
+                  outputs: {
+                    ...mappedAnalysis.outputs,
+                    targetCoverAmount: syncedTotals.targetCoverAmount,
+                    coverGapAmount: syncedTotals.coverGapAmount,
+                  },
                 };
               });
               const insurancePolicyReplacements = (nextAssessment.candidateInsurancePolicyReplacements ?? []).map((replacement) => {
@@ -3154,6 +3551,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
               const outstandingQuestions = getOutstandingFollowUpQuestions(nextAssessment, nextAnsweredQuestions);
               const confirmationCount = nextAssessment.evidenceBackedConfirmations?.length ?? 0;
 
+              if (options?.markFollowUpAnswersSynced) {
+                return `I’ve updated the SOA brief for ${activeClient?.name ?? "this client"} using the saved follow-up answers.`;
+              }
+
               if (outstandingQuestions.length) {
                 return `I’ve updated the SOA brief for ${activeClient?.name ?? "this client"} and refined the remaining questions based on your latest answer.`;
               }
@@ -3167,18 +3568,26 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
             intakeAssessment: nextAssessment,
           });
       } else {
-        const sectionUpdateSummary = workflowStarted ? await applyActiveSectionChatUpdate(text) : null;
+        const sectionUpdate = workflowStarted ? await applyActiveSectionChatUpdate(text) : null;
         nextMessages.push({
           id: makeId("assistant"),
           role: "assistant",
-          content: sectionUpdateSummary
-            ? `${sectionUpdateSummary} Review the card and save the section when you’re happy with it.`
+          content: sectionUpdate
+            ? sectionUpdate.requiresPreview
+              ? sectionUpdate.summary
+              : `${sectionUpdate.summary} Review the card and save the section when you’re happy with it.`
             : `Working in ${SECTION_CONFIGS.find((section) => section.id === activeSectionId)?.label}. I captured that note, but I could not safely map it into a structured field yet. Try saying “add…”, “remove…”, or “replace with…” and include the exact wording you want in the card.`,
+          recommendationProposalId: sectionUpdate?.proposalId ?? null,
         });
       }
 
       setMessages((current) => [...current, ...nextMessages]);
-      setComposerValue("");
+      if (options?.markFollowUpAnswersSynced) {
+        setHasUnsyncedFollowUpAnswers(false);
+      }
+      if (!overrideText) {
+        setComposerValue("");
+      }
     } finally {
       setIsSendingMessage(false);
     }
@@ -3205,6 +3614,51 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
 
   function confirmSection(sectionId: SectionId) {
     setConfirmedSections((current) => ({ ...current, [sectionId]: true }));
+  }
+
+  function applyRecommendationEditProposal(proposalId: string) {
+    const proposal = pendingRecommendationProposal;
+    if (!proposal || proposal.proposalId !== proposalId || proposal.requiresClarification) {
+      return;
+    }
+
+    setAdviceCase((current) => {
+      if (proposal.sectionId === "strategy-recommendations" && proposal.strategyRecommendations) {
+        return {
+          ...current,
+          recommendations: {
+            ...current.recommendations,
+            strategic: proposal.strategyRecommendations,
+          },
+          metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+        };
+      }
+
+      if (proposal.sectionId === "product-recommendations" && proposal.productRecommendations) {
+        return {
+          ...current,
+          recommendations: {
+            ...current.recommendations,
+            product: proposal.productRecommendations,
+          },
+          metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+        };
+      }
+
+      return current;
+    });
+    setConfirmedSections((current) => ({ ...current, [proposal.sectionId]: false }));
+    setPendingRecommendationProposal(null);
+    setImpactNotice("Applied the recommendation proposal. Review the card and save the section when you’re happy with it.");
+  }
+
+  function discardRecommendationEditProposal(proposalId: string) {
+    if (pendingRecommendationProposal?.proposalId !== proposalId) {
+      return;
+    }
+
+    setPendingRecommendationProposal(null);
+    setImpactNotice("Discarded the recommendation proposal. No recommendation cards were changed.");
   }
 
   function goToPreviousSection() {
@@ -3237,11 +3691,87 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     );
   }
 
-  async function applyActiveSectionChatUpdate(text: string) {
+  function updatePortfolioAccountRows(
+    accountId: string,
+    update: {
+      holdings?: (holdings: PortfolioHoldingV1[]) => PortfolioHoldingV1[];
+      allocationComparison?: (rows: PortfolioAllocationRowV1[]) => PortfolioAllocationRowV1[];
+    },
+  ) {
+    setAdviceCase((current) => {
+      const portfolio = current.recommendations.portfolio;
+      if (!portfolio) return current;
+
+      const nextPortfolio =
+        accountId === "legacy-portfolio" || !portfolio.accounts?.length
+          ? {
+              ...portfolio,
+              holdings: update.holdings ? update.holdings(portfolio.holdings ?? []) : portfolio.holdings,
+              allocationComparison: update.allocationComparison
+                ? update.allocationComparison(portfolio.allocationComparison ?? [])
+                : portfolio.allocationComparison,
+            }
+          : {
+              ...portfolio,
+              accounts: portfolio.accounts.map((account) =>
+                account.accountId === accountId
+                  ? {
+                      ...account,
+                      holdings: update.holdings ? update.holdings(account.holdings ?? []) : account.holdings,
+                      allocationComparison: update.allocationComparison
+                        ? update.allocationComparison(account.allocationComparison ?? [])
+                        : account.allocationComparison,
+                    }
+                  : account,
+              ),
+            };
+
+      return {
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          portfolio: nextPortfolio,
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      };
+    });
+    setConfirmedSections((current) => ({ ...current, "portfolio-allocation": false }));
+  }
+
+  function updatePortfolioHolding(accountId: string, holdingId: string, patch: Partial<PortfolioHoldingV1>) {
+    updatePortfolioAccountRows(accountId, {
+      holdings: (holdings) => holdings.map((holding) => (holding.holdingId === holdingId ? { ...holding, ...patch } : holding)),
+    });
+  }
+
+  function updatePortfolioAllocationRow(accountId: string, rowId: string, patch: Partial<PortfolioAllocationRowV1>) {
+    updatePortfolioAccountRows(accountId, {
+      allocationComparison: (rows) => rows.map((row) => (row.rowId === rowId ? { ...row, ...patch } : row)),
+    });
+  }
+
+  function updateProductFeeItem(feeId: string, patch: Partial<ProductFeeItemV1>) {
+    setAdviceCase((current) => ({
+      ...current,
+      fees: {
+        ...current.fees,
+        productFees: current.fees.productFees.map((fee) => (fee.feeId === feeId ? { ...fee, ...patch } : fee)),
+      },
+      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+    }));
+    setConfirmedSections((current) => ({ ...current, disclosure: false }));
+  }
+
+  async function applyActiveSectionChatUpdate(text: string): Promise<SectionChatUpdateResult | null> {
     const mode = getSectionChatEditMode(text);
     const lines = extractChatInstructionLines(text);
     const sectionLabel = SECTION_CONFIGS.find((section) => section.id === activeSectionId)?.label ?? "this section";
     const nextTimestamp = new Date().toISOString();
+    const result = (summaryText: string, options?: { proposalId?: string | null; requiresPreview?: boolean }): SectionChatUpdateResult => ({
+      summary: summaryText,
+      proposalId: options?.proposalId ?? null,
+      requiresPreview: options?.requiresPreview ?? false,
+    });
 
     if (activeSectionId === "risk-profile") {
       const nextProfile = findRiskProfileInText(text);
@@ -3251,7 +3781,36 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
 
       updateRiskProfile(activeRiskPersonId, nextProfile);
       setConfirmedSections((current) => ({ ...current, "risk-profile": false }));
-      return `Set ${sectionLabel} to ${toTitleCase(nextProfile)}.`;
+      return result(`Set ${sectionLabel} to ${toTitleCase(nextProfile)}.`);
+    }
+
+    if (activeSectionId === "strategy-recommendations" || activeSectionId === "product-recommendations") {
+      try {
+        const edit = await requestSectionEdit(text);
+        const proposalId = makeId("recommendation-proposal");
+        const summaryLines = edit.proposalSummary?.length ? edit.proposalSummary : [edit.summary].filter(Boolean);
+        const proposal: RecommendationEditProposal = {
+          proposalId,
+          sectionId: activeSectionId,
+          summaryLines,
+          strategyRecommendations: edit.strategyRecommendations?.recommendations ?? null,
+          productRecommendations: edit.productRecommendations?.recommendations ?? null,
+          requiresClarification: edit.requiresClarification ?? false,
+        };
+
+        setPendingRecommendationProposal(proposal);
+
+        if (edit.warning) {
+          setImpactNotice(edit.warning);
+        }
+
+        return result(edit.summary || "Prepared a recommendation proposal for review.", {
+          proposalId,
+          requiresPreview: true,
+        });
+      } catch {
+        return result("Finley could not reach the schema-aware recommendation editor. No card changes were made.");
+      }
     }
 
     if (!lines.length) {
@@ -3270,7 +3829,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         return current;
       }
 
-      if (activeSectionId === "strategy-recommendations") {
+      if ((activeSectionId as SectionId) === "strategy-recommendations") {
         const targetRecommendation = current.recommendations.strategic[0];
         if (!targetRecommendation) {
           summary = "Add a strategy recommendation first, then I can update it from chat.";
@@ -3339,7 +3898,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         };
       }
 
-      if (activeSectionId === "product-recommendations") {
+      if ((activeSectionId as SectionId) === "product-recommendations") {
         const targetRecommendation = current.recommendations.product[0];
         if (!targetRecommendation) {
           summary = "Add a product recommendation first, then I can update it from chat.";
@@ -3475,7 +4034,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     }
 
     if (summary) {
-      return summary;
+      return result(summary);
     }
 
     if (activeSectionId === "scope-of-advice") {
@@ -3485,7 +4044,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           if (edit.warning) {
             setImpactNotice(edit.warning);
           }
-          return edit.summary || null;
+          return edit.summary ? result(edit.summary) : null;
         }
 
         setAdviceCase((current) => ({
@@ -3504,9 +4063,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           setImpactNotice(edit.warning);
         }
 
-        return edit.summary || "Updated Scope of Advice.";
+        return result(edit.summary || "Updated Scope of Advice.");
       } catch {
-        return "Finley could not reach the schema-aware section editor. No card changes were made.";
+        return result("Finley could not reach the schema-aware section editor. No card changes were made.");
       }
     }
 
@@ -3517,7 +4076,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           if (edit.warning) {
             setImpactNotice(edit.warning);
           }
-          return edit.summary || null;
+          return edit.summary ? result(edit.summary) : null;
         }
 
         setAdviceCase((current) => {
@@ -3545,9 +4104,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           setImpactNotice(edit.warning);
         }
 
-        return edit.summary || "Updated objectives.";
+        return result(edit.summary || "Updated objectives.");
       } catch {
-        return "Finley could not reach the schema-aware section editor. No card changes were made.";
+        return result("Finley could not reach the schema-aware section editor. No card changes were made.");
       }
     }
 
@@ -3769,40 +4328,6 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setConfirmedSections((current) => ({ ...current, "insurance-policies": false }));
   }
 
-  function updateInsuranceNeedsAnalysis(
-    analysisId: string,
-    patch: Partial<NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number]>,
-  ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) =>
-          entry.analysisId === analysisId ? { ...entry, ...patch } : entry,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
-    setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
-  }
-
-  function updateInsuranceNeedsAnalysisInput(
-    analysisId: string,
-    patch: Partial<NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number]["inputs"]>,
-  ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) =>
-          entry.analysisId === analysisId ? { ...entry, inputs: { ...entry.inputs, ...patch } } : entry,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
-    setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
-  }
-
   function updateInsuranceNeedsAnalysisOutput(
     analysisId: string,
     patch: Partial<NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number]["outputs"]>,
@@ -3820,12 +4345,83 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
   }
 
+  function syncInsuranceNeedsAnalysisTotals(
+    analysis: NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number],
+  ): NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number] {
+    const totals = getInsuranceNeedsTotalsForPolicyType(analysis);
+
+    return {
+      ...analysis,
+      inputs: {
+        ...analysis.inputs,
+        existingCoverAmount: totals.existingCoverAmount,
+      },
+      outputs: {
+        ...analysis.outputs,
+        targetCoverAmount: totals.targetCoverAmount,
+        coverGapAmount: totals.coverGapAmount,
+      },
+    };
+  }
+
+  function updateInsuranceNeedsLineItemAmount(
+    analysisId: string,
+    category: "requirement" | "provision",
+    itemId: string,
+    amountKey: InsuranceNeedsCoverColumnKey,
+    amount: number | null,
+  ) {
+    setAdviceCase((current) => ({
+      ...current,
+      recommendations: {
+        ...current.recommendations,
+        insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) => {
+          if (entry.analysisId !== analysisId) {
+            return entry;
+          }
+
+          const lineItems = normalizeInsuranceNeedsLineItems(entry);
+          const nextEntry = {
+            ...entry,
+            requirements:
+              category === "requirement"
+                ? lineItems.requirements.map((item) => (item.itemId === itemId ? { ...item, [amountKey]: amount } : item))
+                : lineItems.requirements,
+            provisions:
+              category === "provision"
+                ? lineItems.provisions.map((item) => (item.itemId === itemId ? { ...item, [amountKey]: amount } : item))
+                : lineItems.provisions,
+          };
+
+          return syncInsuranceNeedsAnalysisTotals(nextEntry);
+        }),
+      },
+      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+    }));
+    setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
+  }
+
   function createInsuranceNeedsAnalysis(
     ownerPersonId: string,
     policyType: NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number]["policyType"] = "life",
   ): NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number] {
+    const analysisId = makeId("insurance-analysis");
+    const createLineItem = (
+      item: { key: InsuranceNeedsAnalysisLineItemKeyV1; title: string },
+      category: "requirement" | "provision",
+    ) => ({
+      itemId: `${analysisId}-${item.key}`,
+      key: item.key,
+      category,
+      title: item.title,
+      life: null,
+      tpd: null,
+      trauma: null,
+      incomeProtection: null,
+    });
+
     return {
-      analysisId: makeId("insurance-analysis"),
+      analysisId,
       ownerPersonIds: [ownerPersonId],
       policyType,
       methodology: policyType === "income-protection" ? "income-replacement" : "capital-needs",
@@ -3853,6 +4449,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
         suggestedPolicyOwnership: "unknown",
         suggestedStructureNotes: null,
       },
+      requirements: INSURANCE_NEEDS_REQUIREMENT_ITEMS.map((item) => createLineItem(item, "requirement")),
+      provisions: INSURANCE_NEEDS_PROVISION_ITEMS.map((item) => createLineItem(item, "provision")),
       rationale: null,
     };
   }
@@ -3912,6 +4510,75 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
     }));
     setConfirmedSections((current) => ({ ...current, "service-agreement": false }));
+  }
+
+  function renderEditableProductFeeTable(fees: ProductFeeItemV1[], options: { showTotal?: boolean } = {}) {
+    return (
+      <div className={styles.dataTableWrap}>
+        <table className={styles.dataTable}>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Fee type</th>
+              <th>Fee %</th>
+              <th>Fee $</th>
+            </tr>
+          </thead>
+          <tbody>
+            {fees.map((fee) => (
+              <tr key={fee.feeId}>
+                <td>
+                  <input
+                    className={styles.tableInput}
+                    value={fee.productName ?? ""}
+                    onChange={(event) => updateProductFeeItem(fee.feeId, { productName: event.target.value })}
+                  />
+                </td>
+                <td>
+                  <select
+                    className={styles.tableSelect}
+                    value={getProductFeeTypeSelectValue(fee)}
+                    onChange={(event) =>
+                      updateProductFeeItem(fee.feeId, {
+                        feeType: event.target.value as ProductFeeItemV1["feeType"],
+                      })
+                    }
+                  >
+                    {PRODUCT_REX_FEE_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  <input
+                    className={styles.tableInput}
+                    inputMode="decimal"
+                    value={formatTablePercentInput(fee.percentage)}
+                    onChange={(event) => updateProductFeeItem(fee.feeId, { percentage: parsePercentInput(event.target.value) })}
+                  />
+                </td>
+                <td>
+                  <input
+                    className={styles.tableInput}
+                    inputMode="decimal"
+                    value={formatTableCurrencyInput(fee.amount)}
+                    onChange={(event) => updateProductFeeItem(fee.feeId, { amount: parseCurrencyInput(event.target.value) })}
+                  />
+                </td>
+              </tr>
+            ))}
+            {options.showTotal ? (
+              <tr className={styles.dataTableTotalRow}>
+                <td colSpan={3}>Total</td>
+                <td>{formatCurrency(fees.some((fee) => fee.amount != null) ? fees.reduce((sum, fee) => sum + (fee.amount ?? 0), 0) : null)}</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    );
   }
 
   const factFindImportCounts = factFindImportCandidate ? getFactFindImportCounts(factFindImportCandidate) : null;
@@ -5215,6 +5882,25 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         activePersonAnalyses.find((analysis) => analysis.policyType === column.value) ?? null,
                       ]),
                     );
+                    const insuranceNeedsTotals = activePersonAnalyses.reduce(
+                      (totals, analysis) => {
+                        const normalized = normalizeInsuranceNeedsLineItems(analysis);
+
+                        for (const column of INSURANCE_NEEDS_COVER_COLUMNS) {
+                          const amountKey = getInsuranceNeedsAmountKey(column.value);
+                          totals.required[amountKey] += normalized.requiredTotals[amountKey];
+                          totals.provisions[amountKey] += normalized.provisionTotals[amountKey];
+                          totals.gap[amountKey] += normalized.coverGapTotals[amountKey];
+                        }
+
+                        return totals;
+                      },
+                      {
+                        required: { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
+                        provisions: { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
+                        gap: { life: 0, tpd: 0, trauma: 0, incomeProtection: 0 },
+                      },
+                    );
                     const addCoverAnalysis = (policyType: (typeof INSURANCE_NEEDS_COVER_COLUMNS)[number]["value"]) => {
                       if (!ownerPersonId) return;
                       setAdviceCase((current) => ({
@@ -5253,78 +5939,101 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                 </tr>
                               </thead>
                               <tbody>
-                                <tr>
-                                  <td>Cover required</td>
+                                <tr className={styles.platformSubheadingRow}>
+                                  <td colSpan={5}>Requirements</td>
+                                </tr>
+                                {INSURANCE_NEEDS_REQUIREMENT_ITEMS.map((item) => (
+                                  <tr key={`requirement-${item.key}`}>
+                                    <td>{item.title}</td>
+                                    {INSURANCE_NEEDS_COVER_COLUMNS.map((column) => {
+                                      const analysis = analysisByCover.get(column.value);
+                                      const lineItem = analysis
+                                        ? normalizeInsuranceNeedsLineItems(analysis).requirements.find((entry) => entry.key === item.key)
+                                        : null;
+                                      const amountKey = getInsuranceNeedsAmountKey(column.value);
+                                      return (
+                                        <td key={`${item.key}-${column.value}`}>
+                                          {analysis && lineItem ? (
+                                            <input
+                                              className={styles.tableInput}
+                                              value={lineItem[amountKey] == null ? "" : formatCurrency(lineItem[amountKey])}
+                                              placeholder="$0"
+                                              onChange={(event) =>
+                                                updateInsuranceNeedsLineItemAmount(
+                                                  analysis.analysisId,
+                                                  "requirement",
+                                                  lineItem.itemId,
+                                                  amountKey,
+                                                  parseCurrencyInput(event.target.value),
+                                                )
+                                              }
+                                            />
+                                          ) : (
+                                            <button type="button" className={styles.inlineAddButton} onClick={() => addCoverAnalysis(column.value)}>
+                                              Add
+                                            </button>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                ))}
+                                <tr className={styles.totalRow}>
+                                  <td>Total cover required</td>
                                   {INSURANCE_NEEDS_COVER_COLUMNS.map((column) => {
-                                    const analysis = analysisByCover.get(column.value);
-                                    return (
-                                      <td key={`target-${column.value}`}>
-                                        {analysis ? (
-                                          <input
-                                            className={styles.tableInput}
-                                            value={analysis.outputs.targetCoverAmount == null ? "" : formatCurrency(analysis.outputs.targetCoverAmount)}
-                                            placeholder="$0"
-                                            onChange={(event) =>
-                                              updateInsuranceNeedsAnalysisOutput(analysis.analysisId, {
-                                                targetCoverAmount: parseCurrencyInput(event.target.value),
-                                              })
-                                            }
-                                          />
-                                        ) : (
-                                          <button type="button" className={styles.inlineAddButton} onClick={() => addCoverAnalysis(column.value)}>
-                                            Add
-                                          </button>
-                                        )}
-                                      </td>
-                                    );
+                                    const amountKey = getInsuranceNeedsAmountKey(column.value);
+                                    return <td key={`required-total-${column.value}`}>{formatCurrency(insuranceNeedsTotals.required[amountKey])}</td>;
                                   })}
                                 </tr>
-                                <tr>
-                                  <td>Existing cover / provisions</td>
+                                <tr className={styles.platformSubheadingRow}>
+                                  <td colSpan={5}>Provisions</td>
+                                </tr>
+                                {INSURANCE_NEEDS_PROVISION_ITEMS.map((item) => (
+                                  <tr key={`provision-${item.key}`}>
+                                    <td>{item.title}</td>
+                                    {INSURANCE_NEEDS_COVER_COLUMNS.map((column) => {
+                                      const analysis = analysisByCover.get(column.value);
+                                      const lineItem = analysis
+                                        ? normalizeInsuranceNeedsLineItems(analysis).provisions.find((entry) => entry.key === item.key)
+                                        : null;
+                                      const amountKey = getInsuranceNeedsAmountKey(column.value);
+                                      return (
+                                        <td key={`${item.key}-${column.value}`}>
+                                          {analysis && lineItem ? (
+                                            <input
+                                              className={styles.tableInput}
+                                              value={lineItem[amountKey] == null ? "" : formatCurrency(lineItem[amountKey])}
+                                              placeholder="$0"
+                                              onChange={(event) =>
+                                                updateInsuranceNeedsLineItemAmount(
+                                                  analysis.analysisId,
+                                                  "provision",
+                                                  lineItem.itemId,
+                                                  amountKey,
+                                                  parseCurrencyInput(event.target.value),
+                                                )
+                                              }
+                                            />
+                                          ) : (
+                                            "—"
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                ))}
+                                <tr className={styles.totalRow}>
+                                  <td>Total provisions</td>
                                   {INSURANCE_NEEDS_COVER_COLUMNS.map((column) => {
-                                    const analysis = analysisByCover.get(column.value);
-                                    return (
-                                      <td key={`existing-${column.value}`}>
-                                        {analysis ? (
-                                          <input
-                                            className={styles.tableInput}
-                                            value={analysis.inputs.existingCoverAmount == null ? "" : formatCurrency(analysis.inputs.existingCoverAmount)}
-                                            placeholder="$0"
-                                            onChange={(event) =>
-                                              updateInsuranceNeedsAnalysisInput(analysis.analysisId, {
-                                                existingCoverAmount: parseCurrencyInput(event.target.value),
-                                              })
-                                            }
-                                          />
-                                        ) : (
-                                          "—"
-                                        )}
-                                      </td>
-                                    );
+                                    const amountKey = getInsuranceNeedsAmountKey(column.value);
+                                    return <td key={`provision-total-${column.value}`}>{formatCurrency(insuranceNeedsTotals.provisions[amountKey])}</td>;
                                   })}
                                 </tr>
-                                <tr>
-                                  <td>Cover gap</td>
+                                <tr className={styles.totalRow}>
+                                  <td>Total cover gap</td>
                                   {INSURANCE_NEEDS_COVER_COLUMNS.map((column) => {
-                                    const analysis = analysisByCover.get(column.value);
-                                    return (
-                                      <td key={`gap-${column.value}`}>
-                                        {analysis ? (
-                                          <input
-                                            className={styles.tableInput}
-                                            value={analysis.outputs.coverGapAmount == null ? "" : formatCurrency(analysis.outputs.coverGapAmount)}
-                                            placeholder="$0"
-                                            onChange={(event) =>
-                                              updateInsuranceNeedsAnalysisOutput(analysis.analysisId, {
-                                                coverGapAmount: parseCurrencyInput(event.target.value),
-                                              })
-                                            }
-                                          />
-                                        ) : (
-                                          "—"
-                                        )}
-                                      </td>
-                                    );
+                                    const amountKey = getInsuranceNeedsAmountKey(column.value);
+                                    return <td key={`gap-total-${column.value}`}>{formatCurrency(insuranceNeedsTotals.gap[amountKey])}</td>;
                                   })}
                                 </tr>
                                 <tr>
@@ -5344,9 +6053,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                             }
                                           >
                                             <option value="super">Super</option>
-                                            <option value="retail">Retail</option>
-                                            <option value="either">Either</option>
-                                            <option value="unknown">Unknown</option>
+                                            <option value="retail">Personal</option>
                                           </select>
                                         ) : (
                                           "—"
@@ -5360,99 +6067,6 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                           </div>
                         </div>
 
-                        {activePersonAnalyses.map((analysis, index) => (
-                          <div key={analysis.analysisId} className={styles.workflowDraftCard}>
-                            <div className={styles.workflowDraftHeader}>
-                              <div className={styles.workflowDraftLabel}>
-                                {INSURANCE_COVER_TYPE_OPTIONS.find((option) => option.value === analysis.policyType)?.label ?? "Insurance"} analysis
-                              </div>
-                              <button
-                                type="button"
-                                className={styles.objectiveDeleteButton}
-                                onClick={() => {
-                                  if (!window.confirm(`Delete Insurance Analysis ${index + 1}?`)) return;
-                                  setAdviceCase((current) => ({
-                                    ...current,
-                                    recommendations: {
-                                      ...current.recommendations,
-                                      insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).filter(
-                                        (entry) => entry.analysisId !== analysis.analysisId,
-                                      ),
-                                    },
-                                    metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-                                  }));
-                                  setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                            <div className={styles.sectionGridCompact}>
-                              <div className={styles.workflowDraftSubcard}>
-                                <div className={styles.workflowDraftLabel}>Methodology</div>
-                                <select
-                                  className={finleyStyles.clientSearch}
-                                  value={analysis.methodology}
-                                  onChange={(event) =>
-                                    updateInsuranceNeedsAnalysis(analysis.analysisId, {
-                                      methodology: event.target.value as typeof analysis.methodology,
-                                    })
-                                  }
-                                >
-                                  <option value="capital-needs">Capital needs</option>
-                                  <option value="income-replacement">Income replacement</option>
-                                  <option value="debt-plus-education">Debt plus education</option>
-                                  <option value="expense-based">Expense based</option>
-                                  <option value="existing-cover-gap">Existing cover gap</option>
-                                  <option value="other">Other</option>
-                                </select>
-                              </div>
-                              <div className={styles.workflowDraftSubcard}>
-                                <div className={styles.workflowDraftLabel}>Waiting / benefit period</div>
-                                <div className={styles.splitMiniInputs}>
-                                  <input
-                                    className={finleyStyles.clientSearch}
-                                    placeholder="Waiting period"
-                                    value={analysis.outputs.suggestedWaitingPeriod ?? ""}
-                                    onChange={(event) =>
-                                      updateInsuranceNeedsAnalysisOutput(analysis.analysisId, {
-                                        suggestedWaitingPeriod: event.target.value,
-                                      })
-                                    }
-                                  />
-                                  <input
-                                    className={finleyStyles.clientSearch}
-                                    placeholder="Benefit period"
-                                    value={analysis.outputs.suggestedBenefitPeriod ?? ""}
-                                    onChange={(event) =>
-                                      updateInsuranceNeedsAnalysisOutput(analysis.analysisId, {
-                                        suggestedBenefitPeriod: event.target.value,
-                                      })
-                                    }
-                                  />
-                                </div>
-                              </div>
-                            </div>
-                            <div className={styles.workflowDraftSubcard}>
-                              <div className={styles.workflowDraftLabel}>Purpose</div>
-                              <textarea
-                                className={`${finleyStyles.composerInput} ${styles.mediumTextarea}`.trim()}
-                                placeholder="Why is this insurance analysis being completed?"
-                                value={analysis.purpose ?? ""}
-                                onChange={(event) => updateInsuranceNeedsAnalysis(analysis.analysisId, { purpose: event.target.value })}
-                              />
-                            </div>
-                            <div className={styles.workflowDraftSubcard}>
-                              <div className={styles.workflowDraftLabel}>Rationale / basis</div>
-                              <textarea
-                                className={`${finleyStyles.composerInput} ${styles.largeTextareaTall}`.trim()}
-                                placeholder="Summarise the basis for the calculated and agreed cover amount."
-                                value={analysis.rationale ?? ""}
-                                onChange={(event) => updateInsuranceNeedsAnalysis(analysis.analysisId, { rationale: event.target.value })}
-                              />
-                            </div>
-                          </div>
-                        ))}
                       </div>
                     );
                   })()}
@@ -5990,6 +6604,15 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 <>
                   {portfolioAccountViews.some((account) => account.holdings.length || account.allocationComparison.length) ? (
                     <div className={styles.workflowDraftStack}>
+                      <div className={styles.sectionNavigationActions}>
+                        <button
+                          type="button"
+                          className={styles.sectionActionButton}
+                          onClick={() => setIsPortfolioAllocationEditing((current) => !current)}
+                        >
+                          {isPortfolioAllocationEditing ? "Save" : "Edit"}
+                        </button>
+                      </div>
                       {portfolioAccountViews.map((account) => (
                         <div key={account.accountId} className={styles.workflowDraftCard}>
                           <div className={styles.workflowDraftHeader}>
@@ -6011,8 +6634,6 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                       <th>Current</th>
                                       <th>Change</th>
                                       <th>Proposed</th>
-                                      <th>Fee %</th>
-                                      <th>Fee $</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -6032,19 +6653,63 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
 
                                       return [
                                         <tr key={`${account.accountId}-${platformName}-heading`} className={styles.dataTableGroupRow}>
-                                          <td colSpan={6}>{platformName}</td>
+                                          <td colSpan={4}>{platformName}</td>
                                         </tr>,
                                         ...items.map((holding) => {
                                           const { currentAmount, changeAmount, proposedAmount } = getPortfolioHoldingAmounts(holding);
 
                                           return (
                                             <tr key={holding.holdingId}>
-                                              <td>{holding.fundName}</td>
-                                              <td>{formatCurrency(currentAmount)}</td>
-                                              <td>{formatCurrency(changeAmount)}</td>
-                                              <td>{formatCurrency(proposedAmount)}</td>
-                                              <td>{formatPercent(holding.investmentFeePct)}</td>
-                                              <td>{formatCurrency(holding.investmentFeeAmount)}</td>
+                                              <td>
+                                                <input
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
+                                                  value={holding.fundName}
+                                                  onChange={(event) =>
+                                                    updatePortfolioHolding(account.accountId, holding.holdingId, { fundName: event.target.value })
+                                                  }
+                                                />
+                                              </td>
+                                              <td>
+                                                <input
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
+                                                  inputMode="decimal"
+                                                  value={formatTableCurrencyInput(currentAmount)}
+                                                  onChange={(event) =>
+                                                    updatePortfolioHolding(account.accountId, holding.holdingId, {
+                                                      currentAmount: parseCurrencyInput(event.target.value),
+                                                    })
+                                                  }
+                                                />
+                                              </td>
+                                              <td>
+                                                <input
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
+                                                  inputMode="decimal"
+                                                  value={formatTableCurrencyInput(changeAmount)}
+                                                  onChange={(event) =>
+                                                    updatePortfolioHolding(account.accountId, holding.holdingId, {
+                                                      changeAmount: parseCurrencyInput(event.target.value),
+                                                    })
+                                                  }
+                                                />
+                                              </td>
+                                              <td>
+                                                <input
+                                                  className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                                  readOnly={!isPortfolioAllocationEditing}
+                                                  inputMode="decimal"
+                                                  value={formatTableCurrencyInput(proposedAmount)}
+                                                  onChange={(event) =>
+                                                    updatePortfolioHolding(account.accountId, holding.holdingId, {
+                                                      proposedAmount: parseCurrencyInput(event.target.value),
+                                                      amount: parseCurrencyInput(event.target.value),
+                                                    })
+                                                  }
+                                                />
+                                              </td>
                                             </tr>
                                           );
                                         }),
@@ -6053,8 +6718,6 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                           <td>{formatCurrency(subtotalCurrent)}</td>
                                           <td>{formatCurrency(subtotalChange)}</td>
                                           <td>{formatCurrency(subtotalProposed)}</td>
-                                          <td>—</td>
-                                          <td>—</td>
                                         </tr>,
                                       ];
                                     })}
@@ -6089,11 +6752,68 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                                             : undefined
                                         }
                                       >
-                                        <td>{row.assetClass}</td>
-                                        <td>{formatPercent(row.currentPct)}</td>
-                                        <td>{formatPercent(row.riskProfilePct)}</td>
-                                        <td>{formatPercent(row.recommendedPct)}</td>
-                                        <td>{formatPercent(row.variancePct)}</td>
+                                        <td>
+                                          <input
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
+                                            value={row.assetClass}
+                                            onChange={(event) =>
+                                              updatePortfolioAllocationRow(account.accountId, row.rowId, { assetClass: event.target.value })
+                                            }
+                                          />
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
+                                            inputMode="decimal"
+                                            value={formatTablePercentInput(row.currentPct)}
+                                            onChange={(event) =>
+                                              updatePortfolioAllocationRow(account.accountId, row.rowId, {
+                                                currentPct: parsePercentInput(event.target.value),
+                                              })
+                                            }
+                                          />
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
+                                            inputMode="decimal"
+                                            value={formatTablePercentInput(row.riskProfilePct)}
+                                            onChange={(event) =>
+                                              updatePortfolioAllocationRow(account.accountId, row.rowId, {
+                                                riskProfilePct: parsePercentInput(event.target.value),
+                                              })
+                                            }
+                                          />
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
+                                            inputMode="decimal"
+                                            value={formatTablePercentInput(row.recommendedPct)}
+                                            onChange={(event) =>
+                                              updatePortfolioAllocationRow(account.accountId, row.rowId, {
+                                                recommendedPct: parsePercentInput(event.target.value),
+                                              })
+                                            }
+                                          />
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={`${styles.tableInput} ${isPortfolioAllocationEditing ? "" : styles.tableInputReadOnly}`.trim()}
+                                            readOnly={!isPortfolioAllocationEditing}
+                                            inputMode="decimal"
+                                            value={formatTablePercentInput(row.variancePct)}
+                                            onChange={(event) =>
+                                              updatePortfolioAllocationRow(account.accountId, row.rowId, {
+                                                variancePct: parsePercentInput(event.target.value),
+                                              })
+                                            }
+                                          />
+                                        </td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -6101,6 +6821,16 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               </div>
                             </div>
                           ) : null}
+
+                          {(() => {
+                            const productFeeGroup = productFeeGroups.find((group) => group.key === account.accountId);
+                            return productFeeGroup?.fees.length ? (
+                              <div className={styles.workflowDraftSubcard}>
+                                <div className={styles.workflowDraftLabel}>Product fee comparison</div>
+                                {renderEditableProductFeeTable(productFeeGroup.fees, { showTotal: true })}
+                              </div>
+                            ) : null;
+                          })()}
                         </div>
                       ))}
                     </div>
@@ -6404,32 +7134,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                         {productFeeGroups.map((group) => (
                           <div key={group.key} className={styles.workflowDraftSubcard}>
                             <div className={styles.workflowDraftPreview}>{group.label}</div>
-                            <div className={styles.dataTableWrap}>
-                              <table className={styles.dataTable}>
-                                <thead>
-                                  <tr>
-                                    <th>Product</th>
-                                    <th>Fee type</th>
-                                    <th>Fee %</th>
-                                    <th>Fee $</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {group.fees.map((fee) => (
-                                    <tr key={fee.feeId}>
-                                      <td>{fee.productName ?? "—"}</td>
-                                      <td>{fee.feeType}</td>
-                                      <td>{formatPercent(fee.percentage)}</td>
-                                      <td>{formatCurrency(fee.amount)}</td>
-                                    </tr>
-                                  ))}
-                                  <tr className={styles.dataTableTotalRow}>
-                                    <td colSpan={3}>Total</td>
-                                    <td>{formatCurrency(group.fees.some((fee) => fee.amount != null) ? group.fees.reduce((sum, fee) => sum + (fee.amount ?? 0), 0) : null)}</td>
-                                  </tr>
-                                </tbody>
-                              </table>
-                            </div>
+                            {renderEditableProductFeeTable(group.fees, { showTotal: true })}
                           </div>
                         ))}
                         {productFeeGroups.length > 1 ? (
@@ -7057,50 +7762,63 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                               </ul>
                             </div>
                           ) : null}
-                          {outstandingQuestions.length ? (
+                          {outstandingQuestions.length || resolvedQuestions.length ? (
                             <div className={styles.intakeSummaryBlock}>
-                              <div className={styles.intakeSummaryLabel}>Follow-up questions</div>
-                              <ul className={styles.intakeList}>
-                                {outstandingQuestions.map((question, questionIndex) => (
-                                  <li key={`${questionIndex}-${question}`}>
-                                    <button
-                                      type="button"
-                                      className={styles.intakeQuestionButton}
-                                      onClick={() => {
-                                        setComposerValue(question);
-                                        setActiveFollowUpQuestion(question);
-                                      }}
-                                    >
-                                      <span>{question}</span>
-                                      <span className={styles.intakeQuestionUnanswered}>Unanswered</span>
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-                          {resolvedQuestions.length ? (
-                            <div className={styles.intakeSummaryBlock}>
-                              <div className={styles.intakeSummaryLabel}>Answered questions</div>
-                              <ul className={styles.intakeList}>
-                                {resolvedQuestions.map((question, questionIndex) => (
-                                  <li key={`${questionIndex}-${question}`}>
-                                    <span className={styles.intakeAnsweredRow}>
-                                      <span>{question}</span>
+                              <div className={styles.intakeFollowUpHeader}>
+                                <div>
+                                  <div className={styles.intakeSummaryLabel}>Follow-up questions</div>
+                                  <div className={styles.intakeSummaryHint}>
+                                    Answer these inline. Finley will not update the full SOA brief until you choose to refresh it.
+                                  </div>
+                                </div>
+                                {hasUnsyncedFollowUpAnswers ? (
+                                  <button
+                                    type="button"
+                                    className={styles.intakeUpdateBriefButton}
+                                    onClick={() => void refreshSoaBriefFromSavedAnswers()}
+                                    disabled={isUpdatingSoaBrief || isSendingMessage}
+                                  >
+                                    {isUpdatingSoaBrief ? "Updating SOA brief..." : "Update SOA brief"}
+                                  </button>
+                                ) : null}
+                              </div>
+                              {hasUnsyncedFollowUpAnswers ? (
+                                <div className={styles.intakeUnsyncedNotice}>
+                                  Saved answers are waiting to be applied to the SOA brief.
+                                </div>
+                              ) : null}
+                              <div className={styles.intakeQuestionList}>
+                                {[...outstandingQuestions, ...resolvedQuestions].map((question, questionIndex) => {
+                                  const savedAnswer = answeredFollowUpResponses[question]?.trim() ?? "";
+                                  const draftAnswer = followUpAnswerDrafts[question] ?? savedAnswer;
+                                  const isAnswered = Boolean(savedAnswer);
+
+                                  return (
+                                    <div key={`${questionIndex}-${question}`} className={styles.intakeQuestionItem}>
+                                      <div className={styles.intakeQuestionPromptRow}>
+                                        <span>{question}</span>
+                                        <span className={isAnswered ? styles.intakeQuestionAnswered : styles.intakeQuestionUnanswered}>
+                                          {isAnswered ? "Answered" : "Unanswered"}
+                                        </span>
+                                      </div>
+                                      <textarea
+                                        className={`${styles.intakeQuestionTextarea} ${finleyStyles.composerInput}`.trim()}
+                                        value={draftAnswer}
+                                        onChange={(event) => updateFollowUpAnswerDraft(question, event.target.value)}
+                                        placeholder="Type the adviser answer here..."
+                                      />
                                       <button
                                         type="button"
-                                        className={styles.intakeQuestionAnsweredButton}
-                                        onClick={() => {
-                                          setOpenAnsweredQuestion(question);
-                                          setAnsweredQuestionDraft(answeredFollowUpResponses[question] ?? "");
-                                        }}
+                                        className={styles.intakeQuestionSaveButton}
+                                        onClick={() => saveFollowUpAnswer(question)}
+                                        disabled={!draftAnswer.trim()}
                                       >
-                                        Answered
+                                        {isAnswered ? "Update answer" : "Save answer"}
                                       </button>
-                                    </span>
-                                  </li>
-                                ))}
-                              </ul>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           ) : null}
                         </div>
@@ -7116,8 +7834,12 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
             <div className={styles.llmLoaderCard}>
               <span className={styles.llmLoaderDot} aria-hidden="true" />
               <div>
-                <div className={styles.llmLoaderTitle}>Finley is reviewing your message</div>
-                <div className={styles.llmLoaderText}>Preparing the next response now.</div>
+                <div className={styles.llmLoaderTitle}>
+                  {isUpdatingSoaBrief ? "Updating SOA brief..." : "Finley is reviewing your message"}
+                </div>
+                <div className={styles.llmLoaderText}>
+                  {isUpdatingSoaBrief ? "Applying saved follow-up answers to the SOA structure." : "Preparing the next response now."}
+                </div>
               </div>
             </div>
           ) : null}
@@ -7184,7 +7906,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   </button>
                 ) : null}
                 <button type="button" className={finleyStyles.refreshButton} onClick={() => setMessages([])} disabled={!messages.length || isSendingMessage}>Refresh chat</button>
-                <button type="button" className={finleyStyles.sendButton} onClick={sendMessage} disabled={!activeClient || isSendingMessage}>
+                <button type="button" className={finleyStyles.sendButton} onClick={() => void sendMessage()} disabled={!activeClient || isSendingMessage}>
                   {isSendingMessage ? "Sending..." : "Send"}
                 </button>
               </div>
@@ -7300,80 +8022,146 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
       ) : null}
 
       {isUploadsModalOpen ? (
-        <div className={finleyStyles.modalOverlay} role="presentation" onClick={() => setIsUploadsModalOpen(false)}>
+        <UploadedFilesModal
+          clientName={activeClient?.name ?? "this client"}
+          files={uploadedFilesModalFiles}
+          onClose={() => setIsUploadsModalOpen(false)}
+          onAddMore={() => {
+            setIsUploadsModalOpen(false);
+            fileInputRef.current?.click();
+          }}
+        />
+      ) : null}
+
+      {pendingRecommendationProposal ? (
+        <div className={finleyStyles.modalOverlay} role="presentation" onClick={() => discardRecommendationEditProposal(pendingRecommendationProposal.proposalId)}>
           <div
-            className={finleyStyles.modalCard}
+            className={`${finleyStyles.modalCard} ${styles.recommendationProposalModal}`.trim()}
             role="dialog"
             aria-modal="true"
-            aria-labelledby="finley-soa-uploaded-files-title"
+            aria-labelledby="finley-soa-recommendation-proposal-title"
             onClick={(event) => event.stopPropagation()}
           >
             <div className={finleyStyles.modalHeader}>
-              <h2 id="finley-soa-uploaded-files-title" className={finleyStyles.modalTitle}>
-                Uploaded Files
+              <h2 id="finley-soa-recommendation-proposal-title" className={finleyStyles.modalTitle}>
+                {pendingRecommendationProposal.requiresClarification ? "Clarification needed" : "Recommendation edit preview"}
               </h2>
             </div>
-
-            <div className={finleyStyles.modalBody}>
-              <div className={styles.sectionCardText}>
-                These are the files currently loaded into Finley for {activeClient?.name ?? "this client"}.
+            <div className={`${finleyStyles.modalBody} ${styles.recommendationProposalModalBody}`}>
+              <div className={styles.recommendationProposalCard}>
+                <div className={styles.recommendationProposalTitle}>
+                  {pendingRecommendationProposal.sectionId === "strategy-recommendations"
+                    ? "Strategy Recommendations"
+                    : "Product Recommendations"}
+                </div>
+                <ul className={styles.recommendationProposalList}>
+                  {pendingRecommendationProposal.summaryLines.map((line, lineIndex) => (
+                    <li key={`${pendingRecommendationProposal.proposalId}-modal-summary-${lineIndex}`}>{line}</li>
+                  ))}
+                </ul>
               </div>
-              <div className={finleyStyles.attachmentList}>
-                {uploads.map((upload) => (
-                  <div key={upload.id} className={finleyStyles.attachmentItem}>
-                    <div className={styles.uploadListItemMain}>
-                      <span className={finleyStyles.attachmentName}>{upload.name}</span>
-                      {upload.productRexReport ? (
-                        <span className={styles.productRexBadge}>ProductRex detected</span>
+              {(() => {
+                const strategyRecommendations = pendingRecommendationProposal.strategyRecommendations ?? [];
+                const productRecommendations = pendingRecommendationProposal.productRecommendations ?? [];
+                const strategyPreview =
+                  strategyRecommendations.find((proposal) => {
+                    const current = adviceCase.recommendations.strategic.find((entry) => entry.recommendationId === proposal.recommendationId);
+                    return !current || current.recommendationText !== proposal.recommendationText;
+                  }) ??
+                  strategyRecommendations[strategyRecommendations.length - 1] ??
+                  null;
+                const productPreview =
+                  productRecommendations.find((proposal) => {
+                    const current = adviceCase.recommendations.product.find((entry) => entry.recommendationId === proposal.recommendationId);
+                    return !current || current.recommendationText !== proposal.recommendationText;
+                  }) ??
+                  productRecommendations[productRecommendations.length - 1] ??
+                  null;
+
+                if (strategyPreview) {
+                  return (
+                    <div className={styles.workflowDraftSubcard}>
+                      <div className={styles.workflowDraftLabel}>Proposed recommendation</div>
+                      <RecommendationMarkdownPreview text={strategyPreview.recommendationText} />
+                      {strategyPreview.clientBenefits.length ? (
+                        <>
+                          <div className={styles.workflowDraftLabel}>Client benefits</div>
+                          <ul className={styles.recommendationProposalList}>
+                            {strategyPreview.clientBenefits.slice(0, 4).map((benefit) => (
+                              <li key={benefit.benefitId}>{benefit.text}</li>
+                            ))}
+                          </ul>
+                        </>
                       ) : null}
-                      {isInsuranceQuoteUpload(upload) ? (
-                        <span className={styles.insuranceQuoteBadge}>Insurance quote detected</span>
-                      ) : null}
-                      {isFactFindUpload(upload) ? (
-                        <span className={styles.factFindBadge}>Fact Find detected</span>
-                      ) : null}
-                      {selectedProductRexUpload?.id === upload.id ? (
-                        <span className={styles.productRexActiveBadge}>In use</span>
+                      {strategyPreview.consequences.length ? (
+                        <>
+                          <div className={styles.workflowDraftLabel}>Consequences / trade-offs</div>
+                          <ul className={styles.recommendationProposalList}>
+                            {strategyPreview.consequences.slice(0, 4).map((consequence) => (
+                              <li key={consequence.consequenceId}>{consequence.text}</li>
+                            ))}
+                          </ul>
+                        </>
                       ) : null}
                     </div>
-                    {upload.productRexReport ? (
-                      <button
-                        type="button"
-                        className={styles.sectionActionButton}
-                        onClick={() => applySelectedProductRexUpload(upload.id)}
-                      >
-                        Use for workflow
-                      </button>
-                    ) : null}
-                    {isFactFindUpload(upload) ? (
-                      <button
-                        type="button"
-                        className={styles.sectionActionButton}
-                        disabled={isExtractingFactFindImport}
-                        onClick={() => inspectFactFindUpload(upload)}
-                      >
-                        {isExtractingFactFindImport && factFindImportSourceFile === upload.name ? "Inspecting..." : "Map to profile"}
-                      </button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </div>
+                  );
+                }
 
+                if (productPreview) {
+                  return (
+                    <div className={styles.workflowDraftSubcard}>
+                      <div className={styles.workflowDraftLabel}>Proposed recommendation</div>
+                      <RecommendationMarkdownPreview text={productPreview.recommendationText} />
+                      <div className={styles.recommendationProposalMeta}>
+                        {[productPreview.action, productPreview.productType, productPreview.recommendedProductName, productPreview.recommendedProvider]
+                          .filter(Boolean)
+                          .join(" | ")}
+                      </div>
+                      {productPreview.clientBenefits.length ? (
+                        <>
+                          <div className={styles.workflowDraftLabel}>Client benefits</div>
+                          <ul className={styles.recommendationProposalList}>
+                            {productPreview.clientBenefits.slice(0, 4).map((benefit) => (
+                              <li key={benefit.benefitId}>{benefit.text}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                      {productPreview.consequences.length ? (
+                        <>
+                          <div className={styles.workflowDraftLabel}>Consequences / trade-offs</div>
+                          <ul className={styles.recommendationProposalList}>
+                            {productPreview.consequences.slice(0, 4).map((consequence) => (
+                              <li key={consequence.consequenceId}>{consequence.text}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
+            </div>
             <div className={finleyStyles.modalActions}>
-              <button type="button" className={finleyStyles.planCancelButton} onClick={() => setIsUploadsModalOpen(false)}>
-                Close
-              </button>
               <button
                 type="button"
-                className={finleyStyles.planApproveButton}
-                onClick={() => {
-                  setIsUploadsModalOpen(false);
-                  fileInputRef.current?.click();
-                }}
+                className={finleyStyles.planCancelButton}
+                onClick={() => discardRecommendationEditProposal(pendingRecommendationProposal.proposalId)}
               >
-                Add more files
+                {pendingRecommendationProposal.requiresClarification ? "Dismiss" : "Discard"}
               </button>
+              {!pendingRecommendationProposal.requiresClarification &&
+              (pendingRecommendationProposal.strategyRecommendations || pendingRecommendationProposal.productRecommendations) ? (
+                <button
+                  type="button"
+                  className={finleyStyles.planApproveButton}
+                  onClick={() => applyRecommendationEditProposal(pendingRecommendationProposal.proposalId)}
+                >
+                  Apply changes
+                </button>
+              ) : null}
             </div>
           </div>
         </div>

@@ -395,16 +395,32 @@
   cursor: not-allowed;
 }
 
+.engagementDocument {
+  --engagement-document-font-family: "Titillium Web", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --engagement-document-body-color: #2f4a6d;
+  --engagement-document-heading-color: #b3742a;
+  --engagement-document-table-header-bg: #faf7eb;
+  --engagement-document-table-header-text: #113864;
+
+  display: grid;
+  gap: 1.25rem;
+  width: min(100%, 48rem);
+  margin: 0 auto;
+}
+
 .engagementPage {
+  position: relative;
+  box-sizing: border-box;
   width: min(100%, 48rem);
   min-height: 68rem;
   margin: 0 auto;
-  padding: 3rem 3.25rem;
+  padding: 3rem 3.25rem 4.25rem;
   border: 1px solid #d8e2ed;
   border-radius: 0.55rem;
   background: #fff;
-  color: #20364f;
+  color: var(--engagement-document-body-color);
   box-shadow: 0 16px 38px rgba(15, 46, 87, 0.12);
+  font-family: var(--engagement-document-font-family);
   font-size: 0.92rem;
   line-height: 1.6;
 }
@@ -420,23 +436,67 @@
   margin: 1.6rem 0;
 }
 
+.engagementAcknowledgement {
+  margin-top: 0;
+}
+
+.engagementSignatureGrid {
+  display: grid;
+  gap: 1.4rem;
+  margin-top: 1rem;
+}
+
+.engagementSignatureBlock {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.engagementSignatureLine {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr);
+  align-items: end;
+  gap: 0.4rem;
+}
+
+.engagementSignatureLine span {
+  display: block;
+  min-height: 1.4rem;
+  border-bottom: 1px solid var(--engagement-document-body-color);
+}
+
+.engagementSignatureName {
+  min-height: 1.2rem;
+  padding-left: 3.2rem;
+  color: var(--engagement-document-body-color);
+  font-size: 0.86rem;
+}
+
+.engagementPageNumber {
+  position: absolute;
+  right: 2rem;
+  bottom: 1.35rem;
+  color: #6b7280;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .engagementPage h1 {
   margin: 1.5rem 0 1rem;
-  color: #b3742a;
+  color: var(--engagement-document-heading-color);
   font-size: 1.55rem;
   line-height: 1.2;
 }
 
 .engagementPage h2 {
   margin: 1.35rem 0 0.45rem;
-  color: #b3742a;
+  color: var(--engagement-document-heading-color);
   font-size: 1.05rem;
   line-height: 1.25;
 }
 
 .engagementPage h3 {
   margin: 0.95rem 0 0.35rem;
-  color: #20364f;
+  color: var(--engagement-document-heading-color);
   font-size: 0.92rem;
   line-height: 1.25;
 }
@@ -464,7 +524,7 @@
   width: 100%;
   margin: 0.55rem 0 1rem;
   border-collapse: collapse;
-  color: #20364f;
+  color: var(--engagement-document-body-color);
 }
 
 .engagementFeeTable th,
@@ -475,8 +535,8 @@
 }
 
 .engagementFeeTable th {
-  background: #f8f4e8;
-  color: #0f2e57;
+  background: var(--engagement-document-table-header-bg);
+  color: var(--engagement-document-table-header-text);
   font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -489,8 +549,244 @@
 }
 
 .engagementFeeTotal td {
-  background: #f8f4e8;
+  background: var(--engagement-document-table-header-bg);
+  color: var(--engagement-document-table-header-text);
   font-weight: 800;
+}
+
+.roaAdviceBlock {
+  margin: 0.8rem 0 1rem;
+  padding: 0.85rem;
+  border: 1px solid #dce5ef;
+  border-radius: 0.55rem;
+  background: #fffdf8;
+}
+
+.roaAdviceBlock .engagementFeeTable {
+  margin-top: 0.35rem;
+}
+
+.roaAdviceBlock .engagementFeeTable td:last-child,
+.roaAdviceBlock .engagementFeeTable th:last-child {
+  text-align: left;
+}
+
+.roaRender {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.roaDocument {
+  display: grid;
+  gap: 1.25rem;
+  width: min(100%, 48rem);
+  margin: 0 auto;
+  color: #111827;
+}
+
+.roaPage {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 55rem;
+  padding: 3.75rem 3.5rem 4.25rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.8rem;
+  background: #fff;
+  color: #111827;
+  font-family: Calibri, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.55;
+  overflow: hidden;
+}
+
+.roaLetterPage {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.roaAddressBlock {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0.8rem;
+  color: #111827;
+}
+
+.roaGreeting {
+  margin: 0.8rem 0 0;
+  color: #111827;
+}
+
+.roaPage h1 {
+  margin: 1.2rem 0 0.4rem;
+  color: #111827;
+  font-size: 2.2rem;
+  line-height: 1.12;
+}
+
+.roaPage p {
+  margin: 0 0 0.85rem;
+}
+
+.roaSectionHeading {
+  margin: 0 0 1.35rem;
+  color: #113864;
+  font-size: 1.65rem;
+  line-height: 1.14;
+}
+
+.roaSectionIntro {
+  margin: 0 0 1.35rem;
+  color: #111827;
+}
+
+.roaRecommendationBlock,
+.roaCard {
+  display: grid;
+  gap: 0.55rem;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.roaRecommendationBlock {
+  margin-top: 0.7rem;
+}
+
+.roaRecommendationBlock h3,
+.roaCard h3 {
+  margin: 0;
+  color: #113864;
+  font-size: 1.08rem;
+  line-height: 1.25;
+}
+
+.roaCard h4,
+.roaRecommendationBlock h4 {
+  margin: 0;
+  color: #111827;
+  font-size: 0.96rem;
+  font-weight: 800;
+}
+
+.roaRecommendationText {
+  color: #111827;
+}
+
+.roaDetailStack {
+  display: grid;
+  gap: 1rem;
+}
+
+.roaBulletList {
+  margin: 0 0 0.85rem 1.15rem;
+  padding: 0;
+}
+
+.roaBulletList li + li {
+  margin-top: 0.25rem;
+}
+
+.roaTable {
+  width: 100%;
+  margin: 0.35rem 0 1rem;
+  border-collapse: collapse;
+  color: #111827;
+}
+
+.roaTable th,
+.roaTable td {
+  padding: 0.66rem 0.7rem;
+  border-bottom: 1px solid #e7edf4;
+  text-align: left;
+  vertical-align: top;
+}
+
+.roaTable th {
+  background: #faf7eb;
+  color: #113864;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.roaTable td {
+  font-size: 0.91rem;
+  line-height: 1.45;
+}
+
+.roaTotalRow td,
+.roaTotalRow th {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+  border-top: 2px solid #d5dde7;
+}
+
+.roaPlatformRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+}
+
+.roaPlatformSubtotalRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+  border-top: 2px solid #d5dde7;
+}
+
+.roaProductFeeTotalRow td {
+  background: #faf7eb;
+  color: #113864;
+  font-weight: 800;
+  border-top: 2px solid #d5dde7;
+}
+
+.roaAuthorityIntro,
+.roaAuthorityText {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 1.1rem;
+}
+
+.roaAuthorityText h3 {
+  margin: 0.6rem 0 0;
+  color: #113864;
+  font-size: 1.02rem;
+}
+
+.roaEmptyState {
+  color: #486581;
+}
+
+.roaPageNumber {
+  position: absolute;
+  right: 2rem;
+  bottom: 1.35rem;
+  color: #6b7280;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.roaSignoff {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1.4rem;
+  color: #111827;
+}
+
+.roaSignoff p {
+  margin-bottom: 0.45rem;
+}
+
+.roaSignatureMark {
+  margin: 0.15rem 0 0.25rem;
+  color: #111827;
+  font-family: "Brush Script MT", "Segoe Script", cursive;
+  font-size: 1.85rem;
+  line-height: 1;
 }
 
 .engagementSignoff {
@@ -734,16 +1030,202 @@
 }
 
 .assistantBubble {
+  position: relative;
+  padding-right: 3rem;
   border: 1px solid #d9e0e8;
   background: #f3f5f8;
   color: #243b53;
   box-shadow: 0 10px 24px rgba(15, 35, 55, 0.12);
 }
 
+.copyResponseButton {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #cbd8e6;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #123763;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.copyResponseButton svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.assistantBubble:hover .copyResponseButton,
+.copyResponseButton:focus-visible {
+  opacity: 1;
+}
+
+.copyResponseButton:hover {
+  border-color: #123763;
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.copyResponseButton:focus-visible {
+  outline: 3px solid rgba(248, 203, 15, 0.45);
+  outline-offset: 2px;
+}
+
 .assistantMessageStack {
   display: grid;
   justify-items: start;
   gap: 0.55rem;
+}
+
+.markdownContent {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.markdownContent strong {
+  color: #123763;
+  font-weight: 800;
+}
+
+.markdownContent code {
+  padding: 0.08rem 0.28rem;
+  border: 1px solid #ccd8e6;
+  border-radius: 0.35rem;
+  background: #ffffff;
+  color: #123763;
+  font-family: "Courier New", monospace;
+  font-size: 0.9em;
+}
+
+.markdownParagraph {
+  margin: 0;
+}
+
+.markdownHeading,
+.markdownHeadingLarge {
+  color: #123763;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.markdownHeadingLarge {
+  font-size: 1.05rem;
+}
+
+.markdownHeading {
+  font-size: 0.98rem;
+}
+
+.markdownList {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.markdownList li + li {
+  margin-top: 0.25rem;
+}
+
+.markdownTableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #d7e1ec;
+  border-radius: 0.65rem;
+  background: #ffffff;
+}
+
+.markdownTable {
+  width: 100%;
+  min-width: 28rem;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.markdownTable th,
+.markdownTable td {
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid #e1e8f0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdownTable th {
+  background: #f7f1d8;
+  color: #123763;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.markdownTable tr:last-child td {
+  border-bottom: 0;
+}
+
+.finleyRespondingCard {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  gap: 0.85rem;
+  max-width: 24rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.95rem;
+  background: #f8fafc;
+  box-shadow: 0 10px 24px rgba(15, 35, 55, 0.1);
+}
+
+.finleyRespondingDot {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #f2c500;
+  box-shadow: 0 0 0 0 rgba(242, 197, 0, 0.5);
+  animation: finleyRespondingPulse 1.2s ease-in-out infinite;
+}
+
+.finleyRespondingTitle {
+  color: #113864;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.finleyRespondingText {
+  color: #66788a;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+@keyframes finleyRespondingPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(242, 197, 0, 0.5);
+  }
+
+  70% {
+    transform: scale(1.08);
+    box-shadow: 0 0 0 0.45rem rgba(242, 197, 0, 0);
+  }
+
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(242, 197, 0, 0);
+  }
 }
 
 .workflowPillRow {
@@ -1149,6 +1631,158 @@
   word-break: break-word;
 }
 
+.uploadedFilesModal {
+  width: min(52rem, 100%);
+  max-height: min(44rem, calc(100vh - 2.5rem));
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.uploadedFilesText {
+  color: #607086;
+  font-size: 0.94rem;
+  line-height: 1.5;
+}
+
+.uploadedFilesList {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  max-height: min(28rem, calc(100vh - 17rem));
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.uploadedFileItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #dbe4ee;
+  border-radius: 0.85rem;
+  background: #fff;
+}
+
+.uploadedFileMain {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.uploadedFileName {
+  color: #113864;
+  font-size: 0.88rem;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.uploadedFileBadgeRow,
+.uploadedFileActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.uploadedFileActions {
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.uploadedFileBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.4rem;
+  padding: 0 0.55rem;
+  border: 1px solid #d2dae5;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #52606d;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.uploadFileBadgeFactFind {
+  border-color: #86cbb0;
+  background: #eef7f3;
+  color: #16624a;
+}
+
+.uploadFileBadgeProduct {
+  border-color: #b8cff7;
+  background: #e8f1ff;
+  color: #1d4f91;
+}
+
+.uploadFileBadgeInsurance {
+  border-color: #e2b673;
+  background: #fff4e6;
+  color: #8a4f13;
+}
+
+.uploadFileBadgeActive {
+  border-color: #79c58e;
+  background: #e7f7ed;
+  color: #17673a;
+}
+
+.uploadedFileActionButton {
+  min-height: 2.35rem;
+  min-width: 8.75rem;
+  padding: 0 0.85rem;
+  border: 1px solid #d2dae5;
+  border-radius: 0.75rem;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.uploadedFileActionButton:disabled {
+  color: #7a8da3;
+  cursor: not-allowed;
+}
+
+.uploadedFileActionButtonDanger {
+  border-color: #f0b4ae;
+  color: #b42318;
+}
+
+.uploadedFileIconButton {
+  min-width: 2.35rem;
+  width: 2.35rem;
+  padding: 0;
+}
+
+.uploadedFileActionIcon {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.uploadedFileActionButtonDanger:hover:not(:disabled) {
+  border-color: #e25b51;
+  background: #fff5f4;
+}
+
+.uploadedFilesEmpty {
+  padding: 0.85rem;
+  border: 1px dashed #dbe4ee;
+  border-radius: 0.85rem;
+  color: #607086;
+  text-align: center;
+}
+
 .attachmentRemoveButton {
   min-height: 2rem;
   padding: 0 0.8rem;
@@ -1334,11 +1968,12 @@
 }
 
 .conciergeSuggestionPanel {
+  position: relative;
   display: grid;
   gap: 0.85rem;
   width: min(52rem, 100%);
   margin: 0 auto 1rem;
-  padding: 0.95rem;
+  padding: 0.95rem 3.2rem 0.95rem 0.95rem;
   border: 1px solid #dbe4ee;
   border-radius: 1rem;
   background: #f8fafc;
@@ -1349,6 +1984,31 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+
+.conciergeSuggestionClose {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid #d2dae5;
+  border-radius: 999px;
+  background: #fff;
+  color: #113864;
+  font: inherit;
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.conciergeSuggestionClose:hover {
+  border-color: #9fb3c8;
 }
 
 .conciergeSuggestionText {

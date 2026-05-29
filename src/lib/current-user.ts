@@ -31,13 +31,16 @@ export function readStringClaim(payload: Record<string, unknown>, claimNames: st
   return null;
 }
 
-export async function resolveCurrentUserFromApi(token: string) {
+function normalizeText(value?: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
 
-  const apiBaseUrl = getApiBaseUrl();
+function userMatchesClaims(user: UserSummary | null | undefined, payload: Record<string, unknown> | null) {
+  if (!user || !payload) return false;
 
-  if (!apiBaseUrl) {
-    return null;
-  }
+  const email = readStringClaim(payload, ["email", "emails", "preferred_username", "unique_name", "upn"]);
+  const name = readStringClaim(payload, ["name", "given_name"]);
+  const id = readStringClaim(payload, ["Id", "id", "sub", "nameid"]);
 
   const payload = decodeJwtPayload(token);
   const userId = payload
@@ -67,13 +70,12 @@ export async function resolveCurrentUserFromApi(token: string) {
 
   const body = (await response.json().catch(() => null)) as
     | {
-        data?: UserSummary | null;
+        data?: UserSummary[] | null;
       }
     | null;
 
-
   if (!response.ok) {
-    throw new Error("Unable to load the current user.");
+    return [] as UserSummary[];
   }
 
   return (

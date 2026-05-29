@@ -3,11 +3,17 @@
 import JSZip from "jszip";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { ClientProfile, ClientSummary, FileNoteRecord, PersonRecord } from "@/lib/api/types";
 import { mockClientSummaries } from "@/lib/client-mocks";
+import {
+  DEFAULT_DOCUMENT_STYLE_PROFILE,
+  DOCUMENT_STYLE_PROFILE_STORAGE_KEY,
+  normalizeDocumentStyleProfile,
+  type DocumentStyleProfile,
+} from "@/lib/documents/document-style-profile";
 import {
   FINLEY_FILE_NOTE_SUBTYPE_OPTIONS,
   type FinleyDisplayCard,
@@ -17,8 +23,21 @@ import {
   type FinleyChatResponse,
 } from "@/lib/finley-shared";
 import { cacheFileNoteAttachments } from "@/lib/file-note-attachment-cache";
-import { DEFAULT_SERVICE_AGREEMENT_SERVICES, groupServiceAgreementServices } from "@/lib/documents/document-sections";
+import type { RoaDraftValue } from "@/lib/roa-draft-service";
+import {
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS,
+  ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  DEFAULT_SERVICE_AGREEMENT_SERVICES,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS,
+  ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  groupServiceAgreementServices,
+} from "@/lib/documents/document-sections";
 import { getFactFindImportCounts, type FactFindImportCandidate } from "@/lib/fact-find-import";
+import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "./finley-avatar.png";
 import styles from "./page.module.css";
 
@@ -27,6 +46,28 @@ type FinleyConsoleProps = {
 };
 
 const isMockAuthEnabled = process.env.NEXT_PUBLIC_ENABLE_MOCK_AUTH === "true";
+const clientDataColumnLimit = 3;
+
+function buildDisplayCardTableView(card: FinleyDisplayCard, options?: { preserveAllColumns?: boolean }) {
+  const hasActions = card.rows.some((row) => row.editAction);
+  const visibleColumnCount = options?.preserveAllColumns
+    ? card.columns.length
+    : Math.min(card.columns.length, clientDataColumnLimit);
+  const visibleColumns = card.columns.slice(0, visibleColumnCount);
+  const gridTemplateColumns = hasActions
+    ? `${visibleColumns.map(() => "minmax(0, 1fr)").join(" ")} minmax(5rem, 5.75rem)`
+    : `repeat(${Math.max(visibleColumns.length, 1)}, minmax(0, 1fr))`;
+
+  return {
+    columns: visibleColumns,
+    hasActions,
+    gridTemplateColumns,
+    rows: card.rows.map((row) => ({
+      ...row,
+      cells: row.cells.slice(0, visibleColumnCount),
+    })),
+  };
+}
 
 type Message = {
   id: string;
@@ -53,8 +94,32 @@ type EngagementLetterDraftCardState = {
   description: string;
   badge?: string;
   clientName: string;
+  clientAddressLines?: string[];
+  primaryClientName?: string | null;
+  partnerName?: string | null;
   adviserName?: string | null;
   value: EngagementLetterDraftValue;
+};
+
+type RoaDraftCardState = {
+  title: string;
+  description: string;
+  badge?: string;
+  clientName: string;
+  adviserName?: string | null;
+  letterDetails?: RoaLetterDetails | null;
+  value: RoaDraftValue;
+};
+
+type RoaLetterDetails = {
+  addressee: string;
+  addressLines: string[];
+  adviserName: string;
+  adviserSignatureName: string;
+  adviserPracticeName: string;
+  adviserLicenseeName: string;
+  adviserAbn: string;
+  adviserAfsl: string;
 };
 
 type EngagementLetterDraftValue = {
@@ -102,6 +167,7 @@ type ActiveOutputEditResponse = {
     fees?: Array<Partial<Omit<AgreementFeeRow, "id">> & { id?: string | null }> | null;
     consentNotes?: string | null;
   } | null;
+  updatedRecordOfAdvice?: RoaDraftValue | null;
   warning?: string | null;
 };
 
@@ -146,6 +212,7 @@ type CurrentUserScope = {
     id?: string | null;
     name?: string | null;
   } | null;
+  documentStyleProfile?: Partial<DocumentStyleProfile> | null;
 };
 
 type ConciergeDocumentTag =
@@ -166,6 +233,7 @@ type ConciergeUpload = {
   name: string;
   mimeType?: string | null;
   extractedText?: string | null;
+  file?: File | null;
   tags: ConciergeDocumentTag[];
 };
 
@@ -213,31 +281,52 @@ type FactFindApplyResponse = {
 function EngagementLetterRender({
   draft,
   clientName,
+  clientAddressLines,
+  clientSignatureName,
+  partnerName,
   adviserName,
   practiceName,
   licenseeName,
   onExport,
   isExporting,
   exportError,
+  documentStyleProfile,
 }: {
   draft: EngagementLetterDraftValue;
   clientName: string;
+  clientAddressLines?: string[];
+  clientSignatureName?: string | null;
+  partnerName?: string | null;
   adviserName?: string | null;
   practiceName?: string | null;
   licenseeName?: string | null;
   onExport: () => void | Promise<void>;
   isExporting: boolean;
   exportError?: string | null;
+  documentStyleProfile?: Partial<DocumentStyleProfile> | null;
 }) {
   const advicePreparationFee = parseCurrencyAmount(draft.advicePreparationFee);
   const implementationFee = parseCurrencyAmount(draft.implementationFee);
   const totalFee = advicePreparationFee + implementationFee;
+  const activeDocumentStyle = normalizeDocumentStyleProfile(documentStyleProfile);
+  const documentStyleVars = {
+    "--engagement-document-font-family": activeDocumentStyle.fontFamily,
+    "--engagement-document-body-color": activeDocumentStyle.bodyTextColor,
+    "--engagement-document-heading-color": activeDocumentStyle.headingColor,
+    "--engagement-document-table-header-bg": activeDocumentStyle.tableHeaderColor,
+    "--engagement-document-table-header-text": getDocumentTableHeaderTextColor(activeDocumentStyle.tableHeaderColor),
+  } as CSSProperties;
   const clientSalutationName = salutationName(clientName);
+  const reasonsHtml = stripHtml(draft.reasonsHtml)
+    ? draft.reasonsHtml
+    : buildDefaultEngagementReasonsHtml(adviserName);
   const servicesHtml = stripHtml(draft.servicesHtml)
     ? draft.servicesHtml
-    : buildDefaultEngagementServicesHtml(clientName);
+    : buildDefaultEngagementServicesHtml();
   const practice = practiceName?.trim() || "<<practice>>";
+  const signaturePeople = engagementSignaturePeople(clientSignatureName?.trim() || clientName, partnerName);
   const visibleExportError = exportError && !/docmosis/i.test(exportError) ? exportError : null;
+  const addressLines = clientAddressLines?.map((line) => line.trim()).filter(Boolean) ?? [];
 
   return (
     <div className={styles.engagementRender}>
@@ -258,124 +347,701 @@ function EngagementLetterRender({
 
       {visibleExportError ? <div className={styles.planWarning}>{visibleExportError}</div> : null}
 
-      <div className={styles.engagementPage}>
-        <div className={styles.engagementDate}>{formatToday()}</div>
-        <div className={styles.engagementAddressBlock}>
-          <strong>{clientName}</strong>
-          <span>&lt;&lt;address&gt;&gt;</span>
-          <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
-        </div>
+      <div className={styles.engagementDocument} style={documentStyleVars}>
+        <section className={styles.engagementPage}>
+          <div className={styles.engagementDate}>{formatToday()}</div>
+          <div className={styles.engagementAddressBlock}>
+            <strong>{clientName}</strong>
+            {addressLines.length ? (
+              addressLines.map((line) => <span key={line}>{line}</span>)
+            ) : (
+              <>
+                <span>&lt;&lt;address&gt;&gt;</span>
+                <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
+              </>
+            )}
+          </div>
 
-        <p>Dear {clientSalutationName},</p>
+          <p>Dear {clientSalutationName},</p>
 
-        <h1>Engagement Letter</h1>
+          <h1>Engagement Letter</h1>
 
-        <h2>Terms of Engagement</h2>
-        <p>
-          Further to our meeting and discussions, this document sets out to:
-        </p>
-        <ul className={styles.engagementList}>
-          <li>Detail your service expectations and outcomes, specify the service deliverables.</li>
-          <li>Provide a fee estimate.</li>
-          <li>Explain our trading terms and method of billing, and inform you of your next steps.</li>
-          <li>Provide general education information on the various financial concepts identified during our meeting.</li>
-        </ul>
-        <p>
-          An important part of our business philosophy is clear communication. We believe that it is essential that both
-          the client and the advisor have a clear understanding of their respective expectations and obligations in
-          relation to the provision of our services.
-        </p>
-        <p>
-          The world of finance, taxation and business advice has become more complex in recent years. Increasingly we
-          find ourselves advising on and providing a far broader range of services than ever before. This document
-          summarises the key elements of our future relationship so that we may ensure that your objectives are met and
-          that potential misunderstandings are avoided.
-        </p>
+          <h2>Terms of Engagement</h2>
+          <p>
+            Further to our meeting and discussions, this document sets out to:
+          </p>
+          <ul className={styles.engagementList}>
+            <li>Detail your service expectations and outcomes, specify the service deliverables.</li>
+            <li>Provide a fee estimate.</li>
+            <li>Explain our trading terms and method of billing, and inform you of your next steps.</li>
+            <li>Provide general education information on the various financial concepts identified during our meeting.</li>
+          </ul>
+          <p>
+            An important part of our business philosophy is clear communication. We believe that it is essential that both
+            the client and the advisor have a clear understanding of their respective expectations and obligations in
+            relation to the provision of our services.
+          </p>
+          <p>
+            The world of finance, taxation and business advice has become more complex in recent years. Increasingly we
+            find ourselves advising on and providing a far broader range of services than ever before. This document
+            summarises the key elements of our future relationship so that we may ensure that your objectives are met and
+            that potential misunderstandings are avoided.
+          </p>
 
-        <h2>Fee Estimate</h2>
-        <table className={styles.engagementFeeTable}>
+          <h2>Fee Estimate</h2>
+          <table className={styles.engagementFeeTable}>
+            <thead>
+              <tr>
+                <th>Fee type</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Advice preparation fee</td>
+                <td>{formatCurrencyAmount(advicePreparationFee)}</td>
+              </tr>
+              <tr>
+                <td>Implementation fee</td>
+                <td>{formatCurrencyAmount(implementationFee)}</td>
+              </tr>
+              <tr className={styles.engagementFeeTotal}>
+                <td>Total</td>
+                <td>{formatCurrencyAmount(totalFee)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className={styles.engagementPageNumber}>Engagement Letter</div>
+        </section>
+
+        <section className={styles.engagementPage}>
+          <h2>Initial Advice Service</h2>
+          <p>
+            In order to achieve the outcomes and expectations for your particular circumstances, the services that we will
+            deliver are summarised below.
+          </p>
+
+          <h3>Reasons for seeking advice</h3>
+          <div className={styles.engagementRichText} dangerouslySetInnerHTML={{ __html: reasonsHtml }} />
+
+          <h3>Tasks to be completed by us:</h3>
+          <div className={styles.engagementRichText} dangerouslySetInnerHTML={{ __html: servicesHtml }} />
+
+          <p>
+            Where the implementation of your financial plan incurs additional costs, these will be disclosed to you in your
+            Statement of Advice. Where your decision leads to a clawback of commission, we reserve the right to charge a
+            fee to recoup our costs.
+          </p>
+          <p>
+            Should we discover that the advice you require is more complex than we had originally thought, we may need to
+            increase this fee. In this event, we will consult with you first before you incur any additional cost.
+          </p>
+
+          <h2>Ongoing Advice Service</h2>
+          <p>
+            We may find as a result of our conversations with you that you would value ongoing advice. If this is the case,
+            we will provide you with an Ongoing Adviser Service Agreement for your consideration at the time of advice
+            presentation.
+          </p>
+          <p>
+            If you feel this service will be valuable to you, we would be happy to provide you with a fee estimate prior to
+            you engaging with our initial advice service.
+          </p>
+
+          <h2>Next Steps</h2>
+          <p>
+            Upon your completion of this engagement letter, we will contact you to begin the data collection process that
+            will allow us to completely understand your current situation, lifestyle objectives and goals.
+          </p>
+
+          <h2>Agreement</h2>
+          <p>
+            We ask that you sign this letter to confirm your understanding of these arrangements and to confirm our
+            engagement as your advisors. Could you please return a copy of this engagement letter to {practice}.
+            Alternatively, if you wish to further clarify any of the matters contained in this agreement, please contact
+            your adviser.
+          </p>
+          <p>
+            By agreeing to this document, either by printing and signing, electronic signature or written confirmation, you
+            are confirming your understanding of our business arrangements, and agreeing to pay the fee disclosed on the
+            first page of this document.
+          </p>
+          <p>This offer of engagement is valid for 30 days from its issue.</p>
+          <p>
+            We take this opportunity to once again thank you for our appointment. We look forward to a mutually beneficial
+            business partnership.
+          </p>
+
+          <div className={styles.engagementSignoff}>
+            <p>Yours sincerely,</p>
+            <strong>{adviserName?.trim() || "<<adviser.name>>"}</strong>
+            <span>{practice}</span>
+            {licenseeName?.trim() ? <span>{licenseeName.trim()}</span> : null}
+          </div>
+          <div className={styles.engagementPageNumber}>Initial Advice Service</div>
+        </section>
+
+        <section className={styles.engagementPage}>
+          <div className={styles.engagementAcknowledgement}>
+            <h2>Your Acknowledgement - Engagement Letter</h2>
+            <p>You understand the engagement between you and {practice} will start on the date this agreement is signed.</p>
+            <p>You accept the services, fees and terms as outlined in this letter.</p>
+            <div
+              className={styles.engagementSignatureGrid}
+              style={{
+                gridTemplateColumns:
+                  signaturePeople.length > 1 ? "repeat(2, minmax(0, 1fr))" : "minmax(14rem, 22rem)",
+              }}
+            >
+              {signaturePeople.map((name) => (
+                <div key={name} className={styles.engagementSignatureBlock}>
+                  <div className={styles.engagementSignatureLine}>
+                    <strong>Signed:</strong>
+                    <span />
+                  </div>
+                  <div className={styles.engagementSignatureName}>{name}</div>
+                  <div className={styles.engagementSignatureLine}>
+                    <strong>Date:</strong>
+                    <span />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className={styles.engagementPageNumber}>Acknowledgement</div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function roaParagraphs(value: string) {
+  return value
+    .split(/\n{2,}|\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+}
+
+function RoaParagraphBlock({ value }: { value: string }) {
+  const paragraphs = roaParagraphs(value);
+  if (!paragraphs.length) {
+    return <p>To be confirmed.</p>;
+  }
+
+  return (
+    <>
+      {paragraphs.map((paragraph, index) => (
+        <p key={`${index}-${paragraph.slice(0, 18)}`}>{paragraph}</p>
+      ))}
+    </>
+  );
+}
+
+function RoaBulletList({ items }: { items: string[] }) {
+  const cleanItems = items.map((item) => item.trim()).filter(Boolean);
+
+  if (!cleanItems.length) return null;
+
+  return (
+    <ul className={styles.roaBulletList}>
+      {cleanItems.map((item, index) => (
+        <li key={`${index}-${item.slice(0, 18)}`}>{item}</li>
+      ))}
+    </ul>
+  );
+}
+
+function RoaTextSectionView({ title, section }: {
+  title: string;
+  section: RoaDraftValue["scopeOfAdvice"];
+}) {
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>{title}</h2>
+      <RoaParagraphBlock value={section.body} />
+      <RoaBulletList items={section.bullets} />
+      <div className={styles.roaPageNumber}>{title}</div>
+    </section>
+  );
+}
+
+function RoaRecommendationBlock({ title, recommendations }: {
+  title: string;
+  recommendations: RoaDraftValue["strategyRecommendations"];
+}) {
+  return (
+    <>
+      {recommendations.length ? (
+        recommendations.map((recommendation, index) => (
+          <section key={`${recommendation.heading}-${index}`} className={styles.roaPage}>
+            {index === 0 ? (
+              <>
+                <h2 className={styles.roaSectionHeading}>{title}</h2>
+                <p className={styles.roaSectionIntro}>
+                  This section outlines our recommendations, the benefits to you, how these strategies place you in a
+                  better position and other key information.
+                </p>
+              </>
+            ) : null}
+            <div className={styles.roaRecommendationBlock}>
+              <h3>{`Recommendation ${index + 1}`}</h3>
+              <p className={styles.roaRecommendationText}>{recommendation.recommendationText || "To be confirmed."}</p>
+              <div className={styles.roaDetailStack}>
+                <div className={styles.roaCard}>
+                  <h4>Benefits</h4>
+                  <RoaBulletList items={recommendation.benefits.length ? recommendation.benefits : ["To be confirmed."]} />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Consequences and trade-offs</h4>
+                  <RoaBulletList
+                    items={recommendation.consequences.length ? recommendation.consequences : ["To be confirmed."]}
+                  />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Alternatives considered</h4>
+                  <RoaBulletList
+                    items={
+                      recommendation.alternativesConsidered.length
+                        ? recommendation.alternativesConsidered
+                        : ["To be confirmed."]
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div className={styles.roaPageNumber}>{title}</div>
+          </section>
+        ))
+      ) : (
+        <section className={styles.roaPage}>
+          <h2 className={styles.roaSectionHeading}>{title}</h2>
+          <p className={styles.roaEmptyState}>No strategy recommendations have been drafted.</p>
+          <div className={styles.roaPageNumber}>{title}</div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function RoaProductRecommendationBlock({ recommendations }: {
+  recommendations: RoaDraftValue["productRecommendations"];
+}) {
+  return (
+    <>
+      {recommendations.length ? (
+        recommendations.map((recommendation, index) => (
+          <section key={`${recommendation.heading}-${index}`} className={styles.roaPage}>
+            <h2 className={styles.roaSectionHeading}>Product Recommendations</h2>
+            <div className={styles.roaRecommendationBlock}>
+              <h3>{`Product Recommendation ${index + 1}`}</h3>
+              <table className={styles.roaTable}>
+                <tbody>
+                  <tr>
+                    <th>Action</th>
+                    <td>{recommendation.action || "To be confirmed"}</td>
+                  </tr>
+                  <tr>
+                    <th>Product</th>
+                    <td>{recommendation.productName || "To be confirmed"}</td>
+                  </tr>
+                  <tr>
+                    <th>Provider</th>
+                    <td>{recommendation.provider || "To be confirmed"}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className={styles.roaRecommendationText}>{recommendation.recommendationText || "To be confirmed."}</p>
+              <div className={styles.roaDetailStack}>
+                <div className={styles.roaCard}>
+                  <h4>Benefits</h4>
+                  <RoaBulletList items={recommendation.benefits.length ? recommendation.benefits : ["To be confirmed."]} />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Consequences and trade-offs</h4>
+                  <RoaBulletList
+                    items={recommendation.consequences.length ? recommendation.consequences : ["To be confirmed."]}
+                  />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Costs</h4>
+                  <RoaBulletList items={recommendation.costs.length ? recommendation.costs : ["To be confirmed."]} />
+                </div>
+                <div className={styles.roaCard}>
+                  <h4>Alternatives considered</h4>
+                  <RoaBulletList
+                    items={
+                      recommendation.alternativesConsidered.length
+                        ? recommendation.alternativesConsidered
+                        : ["To be confirmed."]
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+            <div className={styles.roaPageNumber}>Product Recommendations</div>
+          </section>
+        ))
+      ) : (
+        <section className={styles.roaPage}>
+          <h2 className={styles.roaSectionHeading}>Product Recommendations</h2>
+          <p className={styles.roaEmptyState}>No product recommendations have been drafted.</p>
+          <div className={styles.roaPageNumber}>Product Recommendations</div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function RoaInvestmentPortfolioView({ section }: { section: RoaDraftValue["investmentPortfolioRecommendations"] }) {
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>Investment Portfolio Recommendations</h2>
+      <div className={styles.roaCard}>
+        <h3>Recommended Holdings</h3>
+        <h4>{section.ownerName || "To be confirmed"}</h4>
+        {section.body ? <RoaParagraphBlock value={section.body} /> : null}
+        <table className={styles.roaTable}>
           <thead>
             <tr>
-              <th>Fee type</th>
-              <th>Amount</th>
+              <th>Fund</th>
+              <th>Current</th>
+              <th>Change</th>
+              <th>Proposed</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>Advice preparation fee</td>
-              <td>{formatCurrencyAmount(advicePreparationFee)}</td>
-            </tr>
-            <tr>
-              <td>Implementation fee</td>
-              <td>{formatCurrencyAmount(implementationFee)}</td>
-            </tr>
-            <tr className={styles.engagementFeeTotal}>
-              <td>Total</td>
-              <td>{formatCurrencyAmount(totalFee)}</td>
-            </tr>
+            {section.holdings.map((row, index) => {
+              if (row.rowType === "platform") {
+                return (
+                  <tr key={`${row.fund}-${index}`} className={styles.roaPlatformRow}>
+                    <td colSpan={4}>{row.fund}</td>
+                  </tr>
+                );
+              }
+
+              return (
+                <tr
+                  key={`${row.fund}-${index}`}
+                  className={row.rowType === "subtotal" ? styles.roaPlatformSubtotalRow : undefined}
+                >
+                  <td>{row.fund}</td>
+                  <td>{row.current}</td>
+                  <td>{row.change}</td>
+                  <td>{row.proposed}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
+        <RoaBulletList items={section.bullets} />
+      </div>
+      <div className={styles.roaPageNumber}>Investment Portfolio Recommendations</div>
+    </section>
+  );
+}
 
-        <h2>Initial Advice Service</h2>
-        <p>
-          In order to achieve the outcomes and expectations for your particular circumstances, the services that we will
-          deliver are summarised below.
-        </p>
-
-        <h3>Tasks to be completed by us:</h3>
-        <div className={styles.engagementRichText} dangerouslySetInnerHTML={{ __html: servicesHtml }} />
-
-        <p>
-          Where the implementation of your financial plan incurs additional costs, these will be disclosed to you in your
-          Statement of Advice. Where your decision leads to a clawback of commission, we reserve the right to charge a
-          fee to recoup our costs.
-        </p>
-        <p>
-          Should we discover that the advice you require is more complex than we had originally thought, we may need to
-          increase this fee. In this event, we will consult with you first before you incur any additional cost.
-        </p>
-
-        <h2>Ongoing Advice Service</h2>
-        <p>
-          We may find as a result of our conversations with you that you would value ongoing advice. If this is the case,
-          we will provide you with an Ongoing Adviser Service Agreement for your consideration at the time of advice
-          presentation.
-        </p>
-        <p>
-          If you feel this service will be valuable to you, we would be happy to provide you with a fee estimate prior to
-          you engaging with our initial advice service.
-        </p>
-
-        <h2>Next Steps</h2>
-        <p>
-          Upon your completion of this engagement letter, we will contact you to begin the data collection process that
-          will allow us to completely understand your current situation, lifestyle objectives and goals.
-        </p>
-
-        <h2>Agreement</h2>
-        <p>
-          We ask that you sign this letter to confirm your understanding of these arrangements and to confirm our
-          engagement as your advisors. Could you please return a copy of this engagement letter to {practice}.
-          Alternatively, if you wish to further clarify any of the matters contained in this agreement, please contact
-          your adviser.
-        </p>
-        <p>
-          By agreeing to this document, either by printing and signing, electronic signature or written confirmation, you
-          are confirming your understanding of our business arrangements, and agreeing to pay the fee disclosed on the
-          first page of this document.
-        </p>
-        <p>This offer of engagement is valid for 30 days from its issue.</p>
-        <p>
-          We take this opportunity to once again thank you for our appointment. We look forward to a mutually beneficial
-          business partnership.
-        </p>
-
-        <div className={styles.engagementSignoff}>
-          <p>Yours sincerely,</p>
-          <strong>{adviserName?.trim() || "<<adviser.name>>"}</strong>
-          <span>{practiceName?.trim() || "<<practice.name>>"}</span>
-          <span>{licenseeName?.trim() || "<<licensee.name>>"}</span>
+function RoaPortfolioAllocationView({ allocation }: { allocation: RoaDraftValue["portfolioAllocation"] }) {
+  return (
+    <section className={styles.roaPage}>
+      <div className={styles.roaDetailStack}>
+        <div className={styles.roaCard}>
+          <h3>Asset Allocation Comparison</h3>
+          <p>Upon implementation of our recommendations, the asset allocation of each entity will be as shown below:</p>
+          <RoaParagraphBlock value={allocation.rationale} />
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Asset Class</th>
+                <th>Current</th>
+                <th>Risk Profile</th>
+                <th>Recommended</th>
+                <th>Variance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allocation.rows.map((row, index) => {
+                const isTotalRow = row.assetClass.toLowerCase().includes("total");
+                return (
+                  <tr key={`${row.assetClass}-${index}`} className={isTotalRow ? styles.roaTotalRow : undefined}>
+                    <td>{row.assetClass}</td>
+                    <td>{row.current}</td>
+                    <td>{row.riskProfile}</td>
+                    <td>{row.recommended}</td>
+                    <td>{row.variance}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
+        <div className={styles.roaCard}>
+          <h3>Recommended Asset Allocation Split</h3>
+          <RoaParagraphBlock value={allocation.implementationNotes} />
+        </div>
+      </div>
+      <div className={styles.roaPageNumber}>Portfolio Allocation</div>
+    </section>
+  );
+}
+
+function parseCurrencyLikeAmount(value: string) {
+  const numeric = Number(value.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatRoaCurrency(value: number) {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function RoaFeesView({ fees, recommendedProducts }: {
+  fees: RoaDraftValue["feesAndDisclosures"];
+  recommendedProducts: string[];
+}) {
+  const normalizedRecommendedProducts = recommendedProducts
+    .map((product) => product.trim().toLowerCase())
+    .filter(Boolean);
+  const recommendedRows = fees.productFeeRows.filter((row) => row.rowStatus === "recommended");
+  const legacyRecommendedRows = !recommendedRows.length && normalizedRecommendedProducts.length
+    ? fees.productFeeRows.filter((row) => normalizedRecommendedProducts.includes(row.product.trim().toLowerCase()))
+    : [];
+  const visibleProductFeeRows = recommendedRows.length
+    ? recommendedRows
+    : legacyRecommendedRows.length
+      ? legacyRecommendedRows
+      : fees.productFeeRows.filter((row) => row.rowStatus !== "current" && row.rowStatus !== "alternative");
+  const productFeeRows = visibleProductFeeRows.length
+    ? visibleProductFeeRows
+    : [{ rowStatus: "recommended" as const, product: "To be confirmed", feeType: "Confirm recommended product fees.", percentage: "-", amount: "To be confirmed" }];
+  const productFeeTotal = productFeeRows.reduce((sum, row) => sum + (parseCurrencyLikeAmount(row.amount) ?? 0), 0);
+  const hasProductFeeTotal = productFeeRows.some((row) => parseCurrencyLikeAmount(row.amount) != null);
+
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>Fees and Disclosures</h2>
+      <p className={styles.roaSectionIntro}>
+        This section outlines the amounts you pay for our advice and the services provided. We have also shown the
+        amounts we receive. All amounts are inclusive of GST where applicable.
+      </p>
+      <div className={styles.roaDetailStack}>
+        <div className={styles.roaCard}>
+          <h3>Advice Preparation &amp; Implementation Fee</h3>
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Fee Type</th>
+                <th>Amount (Include GST)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(fees.adviceFeeRows.length
+                ? fees.adviceFeeRows
+                : [{ feeType: "Advice Fee", amount: "Confirm advice fees." }]
+              ).map((row, index) => (
+                <tr key={`${index}-${row.feeType}`}>
+                  <td>{row.feeType}</td>
+                  <td>{row.amount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className={styles.roaCard}>
+          <h3>Product Fees</h3>
+          <p>The following tables outline the ongoing fees you will incur because of implementing the recommended products in this report:</p>
+          <h4>{fees.productFeeOwnerName || "To be confirmed"}</h4>
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Fee Type</th>
+                <th>%</th>
+                <th>$</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productFeeRows.map((row, index) => (
+                <tr key={`${index}-${row.product}-${row.feeType}`}>
+                  <td>{row.product}</td>
+                  <td>{row.feeType}</td>
+                  <td>{row.percentage}</td>
+                  <td>{row.amount}</td>
+                </tr>
+              ))}
+              {hasProductFeeTotal ? (
+                <tr className={styles.roaProductFeeTotalRow}>
+                  <td colSpan={3}>Total</td>
+                  <td>{formatRoaCurrency(productFeeTotal)}</td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+        <div className={styles.roaCard}>
+          <h3>Commissions and Disclosure Notes</h3>
+          <table className={styles.roaTable}>
+            <thead>
+              <tr>
+                <th>Disclosure type</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Commissions</td>
+                <td>{fees.commissions.length ? fees.commissions.join("; ") : "Confirm commissions."}</td>
+              </tr>
+              <tr>
+                <td>Disclosure Notes</td>
+                <td>{fees.disclosureNotes.length ? fees.disclosureNotes.join("; ") : "Confirm material disclosures."}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className={styles.roaPageNumber}>Fees and Disclosures</div>
+    </section>
+  );
+}
+
+function RoaAuthorityView({ authority, letterDetails, adviserName }: {
+  authority: RoaDraftValue["authorityToProceed"];
+  letterDetails: RoaLetterDetails;
+  adviserName?: string | null;
+}) {
+  const adviser = adviserName?.trim() || letterDetails.adviserName || "my adviser";
+  const practiceName = letterDetails.adviserPracticeName || letterDetails.adviserLicenseeName || "the advice practice";
+  const authorityBullets = [
+    `I have read and understood this Record of Advice (ROA) prepared by my adviser and dated ${formatToday()}, including the disclosure of fees and commission.`,
+    "I confirm that the information provided by me and restated in this ROA accurately summarises my current circumstances. I understand that if any of this information is incomplete or inaccurate then the advice may not be appropriate to my circumstances.",
+    "I understand that the recommendations in this ROA have been prepared for my sole use and are current for a period of 60 days from the date of the ROA. I acknowledge that after this time I should not implement the recommendations without further review from my adviser to ensure they remain appropriate.",
+    "I have received your Financial Services Guide and understood the contents.",
+    "I have received Product Disclosure Statements for all products recommended within this ROA and any additional information listed in this ROA, where applicable.",
+    `I/we consent to ${practiceName} receiving any monetary benefits disclosed in connection with the recommendations set out in this ROA.`,
+    ...authority.confirmations,
+  ];
+
+  return (
+    <section className={styles.roaPage}>
+      <h2 className={styles.roaSectionHeading}>Authority to Proceed</h2>
+      <div className={styles.roaAuthorityIntro}>
+        <div>{formatToday()}</div>
+        <div>{letterDetails.addressee}</div>
+        {letterDetails.addressLines.length ? (
+          letterDetails.addressLines.map((line) => <div key={line}>{line}</div>)
+        ) : (
+          <>
+            <div>&lt;&lt;address&gt;&gt;</div>
+            <div>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</div>
+          </>
+        )}
+      </div>
+      <div className={styles.roaAuthorityText}>
+        <RoaBulletList items={authorityBullets} />
+        <p>I accept the recommendations offered in this document and authorise {adviser} to implement all recommendations.</p>
+        {authority.actions.length ? (
+          <p>{authority.actions.join(" ")}</p>
+        ) : null}
+        {authority.outstandingItems.length ? (
+          <p>Outstanding items: {authority.outstandingItems.join("; ")}</p>
+        ) : null}
+      </div>
+      <table className={styles.roaTable}>
+        <tbody>
+          <tr>
+            <th>Signed</th>
+            <td>________________________________</td>
+          </tr>
+          <tr>
+            <th>Date</th>
+            <td>________________________________</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className={styles.roaPageNumber}>Authority to Proceed</div>
+    </section>
+  );
+}
+
+function defaultRoaLetterDetails(clientName: string, adviserName?: string | null): RoaLetterDetails {
+  return {
+    addressee: clientName,
+    addressLines: [],
+    adviserName: adviserName?.trim() || "Adviser",
+    adviserSignatureName: adviserName?.trim() || "Adviser",
+    adviserPracticeName: "",
+    adviserLicenseeName: "",
+    adviserAbn: "",
+    adviserAfsl: "368175",
+  };
+}
+
+function RecordOfAdviceRender({ draft, clientName, adviserName, letterDetails }: {
+  draft: RoaDraftValue;
+  clientName: string;
+  adviserName?: string | null;
+  letterDetails?: RoaLetterDetails | null;
+}) {
+  const details = letterDetails ?? defaultRoaLetterDetails(clientName, adviserName);
+
+  return (
+    <div className={styles.roaRender}>
+      <div className={styles.engagementRenderToolbar}>
+        <div>
+          <div className={styles.planLabel}>Live ROA Render</div>
+          <div className={styles.engagementRenderTitle}>Record of Advice</div>
+        </div>
+        <div className={styles.workflowStepBadge}>Editable Draft</div>
+      </div>
+
+      <div className={styles.roaDocument}>
+        <section className={`${styles.roaPage} ${styles.roaLetterPage}`}>
+          <div>{formatToday()}</div>
+          <div className={styles.roaAddressBlock}>
+            <div>{details.addressee}</div>
+            {details.addressLines.length ? (
+              details.addressLines.map((line) => <div key={line}>{line}</div>)
+            ) : (
+              <>
+                <div>&lt;&lt;address&gt;&gt;</div>
+                <div>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</div>
+              </>
+            )}
+          </div>
+          <div className={styles.roaGreeting}>Dear {details.addressee},</div>
+          <h1>Record of Advice</h1>
+          <RoaParagraphBlock value={draft.frontPageLetter} />
+          <div className={styles.roaSignoff}>
+            <p>Yours sincerely,</p>
+            <div className={styles.roaSignatureMark}>{details.adviserSignatureName}</div>
+            <div>{details.adviserName}</div>
+            {details.adviserPracticeName ? <div>{details.adviserPracticeName}</div> : null}
+            {details.adviserLicenseeName ? <div>{details.adviserLicenseeName}</div> : null}
+            {details.adviserAbn ? <div>ABN: {details.adviserAbn}</div> : null}
+            {details.adviserAfsl ? <div>AFSL: {details.adviserAfsl}</div> : null}
+          </div>
+          <div className={styles.roaPageNumber}>Record of Advice</div>
+        </section>
+
+        <RoaTextSectionView title="Scope of Advice" section={draft.scopeOfAdvice} />
+        <RoaRecommendationBlock title="Strategy Recommendations" recommendations={draft.strategyRecommendations} />
+        <RoaProductRecommendationBlock recommendations={draft.productRecommendations} />
+        <RoaInvestmentPortfolioView section={draft.investmentPortfolioRecommendations} />
+        <RoaPortfolioAllocationView allocation={draft.portfolioAllocation} />
+        <RoaTextSectionView title="Replacement Analysis" section={draft.replacementAnalysis} />
+        <RoaFeesView
+          fees={draft.feesAndDisclosures}
+          recommendedProducts={draft.productRecommendations.map((recommendation) => recommendation.productName)}
+        />
+        <RoaAuthorityView
+          authority={draft.authorityToProceed}
+          letterDetails={details}
+          adviserName={adviserName}
+        />
       </div>
     </div>
   );
@@ -386,11 +1052,13 @@ function AgreementRender({
   onExport,
   isExporting,
   exportError,
+  documentStyleProfile,
 }: {
   agreement: AgreementDraftCardState;
   onExport: () => void | Promise<void>;
   isExporting: boolean;
   exportError?: string | null;
+  documentStyleProfile?: Partial<DocumentStyleProfile> | null;
 }) {
   const isAnnual = agreement.agreementType === "annual";
   const clientSalutationName = salutationName(agreement.clientName);
@@ -399,6 +1067,53 @@ function AgreementRender({
   const fees = agreement.fees.length ? agreement.fees : defaultAgreementFeeRows();
   const totalAnnualFee = formatCurrencyAmount(totalAgreementAnnualFee(fees));
   const title = isAnnual ? "Annual Advice Agreement" : "Ongoing Service Agreement";
+  const openingParagraphs = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS
+    : ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS;
+  const detailSections = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+    : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const acknowledgementParagraphs = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+    : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
+  const acknowledgementItems = isAnnual
+    ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
+    : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS;
+  const activeDocumentStyle = normalizeDocumentStyleProfile(documentStyleProfile);
+  const documentStyleVars = {
+    "--engagement-document-font-family": activeDocumentStyle.fontFamily,
+    "--engagement-document-body-color": activeDocumentStyle.bodyTextColor,
+    "--engagement-document-heading-color": activeDocumentStyle.headingColor,
+    "--engagement-document-table-header-bg": activeDocumentStyle.tableHeaderColor,
+    "--engagement-document-table-header-text": getDocumentTableHeaderTextColor(activeDocumentStyle.tableHeaderColor),
+  } as CSSProperties;
+  const firstAgreementDetailSections = detailSections.slice(0, 1);
+  const remainingAgreementDetailSections = detailSections.slice(1);
+  const arrangementLabel = isAnnual ? "fixed term fee arrangement" : "ongoing fee arrangement";
+  const consentIntro =
+    isAnnual
+      ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+      : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.";
+  const consentRequired =
+    isAnnual
+      ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+      : "This consent may be withdrawn by you at any time by notifying us in writing.";
+  const terminationText = `You can terminate this ${arrangementLabel} at any time by providing us with written notice. If you terminate the arrangement in writing, no further fees will be charged to you, and no further services will be provided by us.`;
+  const feeHeading = isAnnual
+    ? "What fees are payable under my fixed term fee arrangement?"
+    : "What fees are payable under my ongoing fee arrangement?";
+  const feeDescription = isAnnual
+    ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+    : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:";
+  const servicesDescription = isAnnual
+    ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+    : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below.";
+  const consentDuration = isAnnual
+    ? "Your fixed term fee arrangement expiry date is to be confirmed."
+    : "Your ongoing fee arrangement anniversary date is to be confirmed.";
+  const renewalNotice = isAnnual
+    ? "We will contact you before this date with instructions about how you can enter into a further fixed term fee arrangement."
+    : "We will contact you before this date with instructions about how you can renew your ongoing fee arrangement.";
 
   return (
     <div className={styles.engagementRender}>
@@ -419,124 +1134,147 @@ function AgreementRender({
 
       {exportError ? <div className={styles.planWarning}>{exportError}</div> : null}
 
-      <div className={styles.engagementPage}>
-        <div className={styles.engagementDate}>{formatToday()}</div>
-        <div className={styles.engagementAddressBlock}>
-          <strong>{agreement.clientName}</strong>
-          {agreement.clientAddressLines?.length ? (
-            agreement.clientAddressLines.map((line) => <span key={line}>{line}</span>)
-          ) : (
-            <>
-              <span>&lt;&lt;address&gt;&gt;</span>
-              <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
-            </>
-          )}
-        </div>
-
-        <p>Dear {clientSalutationName},</p>
-
-        <h1>{title}</h1>
-        {isAnnual ? (
-          <>
-            <p>
-              As your Financial Adviser, it is our role to provide you with the advice you need to achieve your
-              financial goals. The purpose of this letter is to establish an Annual Advice Agreement.
-            </p>
-            <p>
-              The services you receive as part of your Annual Advice Agreement are important as they offer support to
-              help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled
-              to and the cost, are set out below.
-            </p>
-            <p>
-              This arrangement will be between {agreement.clientName} and{" "}
-              {agreement.practiceName?.trim() || "<<practice.name>>"}. The arrangement will commence on the date you
-              sign this agreement.
-            </p>
-          </>
-        ) : (
-          <>
-            <p>
-              As your Financial Adviser, it is our role to provide you with the advice you need to achieve your
-              financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.
-            </p>
-            <p>
-              We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent
-              being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.
-            </p>
-            <p>
-              The commencement date of this arrangement is the date you sign this agreement. Upon signing this
-              agreement, any existing service agreement between us is deemed to be automatically terminated and replaced
-              by this agreement.
-            </p>
-          </>
-        )}
-
-        <h2>{isAnnual ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive"}</h2>
-        {serviceGroups.map((group, index) => (
-          <div key={`${group.heading ?? "services"}-${index}`} className={styles.engagementRichText}>
-            {group.heading ? <h3>{group.heading}</h3> : null}
-            {group.items.length ? (
-              <ul>
-                {group.items.map((item, itemIndex) => (
-                  <li key={`${itemIndex}-${item}`}>{item}</li>
-                ))}
-              </ul>
-            ) : null}
+      <div className={styles.engagementDocument} style={documentStyleVars}>
+        <section className={styles.engagementPage}>
+          <div className={styles.engagementDate}>{formatToday()}</div>
+          <div className={styles.engagementAddressBlock}>
+            <strong>{agreement.clientName}</strong>
+            {agreement.clientAddressLines?.length ? (
+              agreement.clientAddressLines.map((line) => <span key={line}>{line}</span>)
+            ) : (
+              <>
+                <span>&lt;&lt;address&gt;&gt;</span>
+                <span>&lt;&lt;Suburb&gt;&gt; &lt;&lt;State&gt;&gt; &lt;&lt;Postcode&gt;&gt;</span>
+              </>
+            )}
           </div>
-        ))}
 
-        <h2>Fees Payable</h2>
-        <p>The fees payable for this agreement are set out below. All fees include GST where applicable.</p>
-        <table className={styles.engagementFeeTable}>
-          <thead>
-            <tr>
-              <th>Entity</th>
-              <th>Product</th>
-              <th>Fee amount</th>
-              <th>Frequency</th>
-              <th>Annual fee</th>
-            </tr>
-          </thead>
-          <tbody>
-            {fees.map((fee) => (
-              <tr key={fee.id}>
-                <td>{fee.entity}</td>
-                <td>{fee.product}</td>
-                <td>{fee.feeAmount}</td>
-                <td>{fee.frequency}</td>
-                <td>{fee.annualFee}</td>
-              </tr>
+          <h1>{title}</h1>
+          <p>Dear {clientSalutationName},</p>
+          {openingParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+          {firstAgreementDetailSections.map((section) => (
+            <div key={section.heading} className={styles.engagementRichText}>
+              <h2>{section.heading}</h2>
+              {section.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </div>
+          ))}
+          <div className={styles.engagementPageNumber}>{title}</div>
+        </section>
+
+        <section className={styles.engagementPage}>
+          <h1>{title}</h1>
+          {remainingAgreementDetailSections.map((section) => (
+            <div key={section.heading} className={styles.engagementRichText}>
+              <h2>{section.heading}</h2>
+              {section.paragraphs.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </div>
+          ))}
+          <h2>Your Acknowledgement</h2>
+          {acknowledgementParagraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+          <ul className={styles.engagementList}>
+            {acknowledgementItems.map((item) => (
+              <li key={item}>{item}</li>
             ))}
-            <tr className={styles.engagementFeeTotal}>
-              <td colSpan={4}>Total annual advice fees</td>
+          </ul>
+          <div className={styles.engagementSignoff}>
+            <p>Signed: ______________________________</p>
+            <strong>{agreement.clientName}</strong>
+            <p>Date: ______________________________</p>
+            <p>Adviser: {agreement.adviserName?.trim() || "<<adviser.name>>"}</p>
+          </div>
+          <div className={styles.engagementPageNumber}>{title}</div>
+        </section>
+
+        <section className={styles.engagementPage}>
+          <h1>Consent To Deduct Fees</h1>
+          <h2>Consent To Deduct Fees From Your Account</h2>
+          <p>{consentIntro}</p>
+          {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
+          <p>{consentRequired}</p>
+          <p>{terminationText}</p>
+
+          <h2>{feeHeading}</h2>
+          <p>{feeDescription}</p>
+          <table className={styles.engagementFeeTable}>
+            <thead>
+              <tr>
+                <th>Entity</th>
+                <th>Product</th>
+                <th>Fee amount</th>
+                <th>Frequency</th>
+                <th>Annual fee</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fees.map((fee) => (
+                <tr key={`consent-${fee.id}`}>
+                  <td>{fee.entity}</td>
+                  <td>{fee.product}</td>
+                  <td>{fee.feeAmount}</td>
+                  <td>{fee.frequency}</td>
+                  <td>{fee.annualFee}</td>
+                </tr>
+              ))}
+              <tr className={styles.engagementFeeTotal}>
+                <td colSpan={4}>Total annual advice fees</td>
               <td>{totalAnnualFee}</td>
-            </tr>
-          </tbody>
-        </table>
+              </tr>
+            </tbody>
+          </table>
+          <div className={styles.engagementPageNumber}>Consent To Deduct Fees</div>
+        </section>
 
-        <h2>Consent To Deduct Fees From Your Account</h2>
-        <p>
-          By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for
-          the services described in this agreement.
-        </p>
-        {agreement.consentNotes.trim() ? <p>{agreement.consentNotes}</p> : null}
-        <p>This consent may be withdrawn by you at any time by notifying us in writing.</p>
+        <section className={styles.engagementPage}>
+          <h1>Consent To Deduct Fees</h1>
+          <h2>The services you are entitled to receive</h2>
+          <p>{servicesDescription}</p>
+          {serviceGroups.map((group, index) => (
+            <div key={`consent-${group.heading ?? "services"}-${index}`} className={styles.engagementRichText}>
+              {group.heading ? <h3>{group.heading}</h3> : null}
+              {group.items.length ? (
+                <ul>
+                  {group.items.map((item, itemIndex) => (
+                    <li key={`consent-${itemIndex}-${item}`}>{item}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ))}
 
-        <h2>{isAnnual ? "Next Steps" : "Your Acknowledgement"}</h2>
-        <p>
-          {isAnnual
-            ? "Please sign the acknowledgement below and accept the Annual Advice Agreement outlined in this letter."
-            : "You agree to be bound by the terms and conditions of this agreement. You may terminate or vary the agreement at any time by notifying us in writing."}
-        </p>
+          <h2>Who is my financial adviser under this agreement?</h2>
+          <p>Your financial adviser and fee recipient is as follows:</p>
+          <div className={styles.engagementSignoff}>
+            <strong>{agreement.adviserName?.trim() || "<<adviser.name>>"}</strong>
+            <span>{agreement.practiceName?.trim() || "<<practice.name>>"}</span>
+            <span>{agreement.licenseeName?.trim() || "<<licensee.name>>"}</span>
+          </div>
 
-        <div className={styles.engagementSignoff}>
-          <p>Signed: ______________________________</p>
-          <strong>{agreement.clientName}</strong>
-          <p>Date: ______________________________</p>
-          <p>Adviser: {agreement.adviserName?.trim() || "<<adviser.name>>"}</p>
-          <span>{agreement.practiceName?.trim() || "<<practice.name>>"}</span>
-          <span>{agreement.licenseeName?.trim() || "<<licensee.name>>"}</span>
-        </div>
+          <h2>How long will my consent last?</h2>
+          <p>{consentDuration}</p>
+          <p>{renewalNotice}</p>
+
+          <h2>Your consent to deduct fees from your account</h2>
+          <p>
+            {isAnnual
+              ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+              : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form."}
+          </p>
+
+          <div className={styles.engagementSignoff}>
+            <p>Signed: ______________________________</p>
+            <strong>{agreement.clientName}</strong>
+            <p>Date: ______________________________</p>
+          </div>
+          <div className={styles.engagementPageNumber}>Consent To Deduct Fees</div>
+        </section>
       </div>
     </div>
   );
@@ -842,6 +1580,199 @@ function InvoiceWorkflowCard({
 
 function normalizeText(value?: string | null) {
   return value?.trim().toLowerCase() ?? "";
+}
+
+function CopyResponseIcon({ copied }: { copied: boolean }) {
+  if (copied) {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function renderInlineMarkdown(value: string, keyPrefix: string) {
+  const parts: ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+?\*\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let index = 0;
+
+  while ((match = pattern.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(value.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    if (token.startsWith("**")) {
+      parts.push(<strong key={`${keyPrefix}-strong-${index}`}>{token.slice(2, -2)}</strong>);
+    } else {
+      parts.push(<code key={`${keyPrefix}-code-${index}`}>{token.slice(1, -1)}</code>);
+    }
+
+    lastIndex = pattern.lastIndex;
+    index += 1;
+  }
+
+  if (lastIndex < value.length) {
+    parts.push(value.slice(lastIndex));
+  }
+
+  return parts.length ? parts : value;
+}
+
+function isMarkdownTableSeparator(value: string) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(value);
+}
+
+function isMarkdownTableStart(lines: string[], index: number) {
+  return Boolean(lines[index]?.includes("|") && lines[index + 1] && isMarkdownTableSeparator(lines[index + 1] ?? ""));
+}
+
+function splitMarkdownTableRow(value: string) {
+  return value
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function MarkdownTable({ lines, tableIndex }: { lines: string[]; tableIndex: number }) {
+  const headers = splitMarkdownTableRow(lines[0] ?? "");
+  const rows = lines.slice(2).map(splitMarkdownTableRow);
+
+  return (
+    <div className={styles.markdownTableWrap}>
+      <table className={styles.markdownTable}>
+        <thead>
+          <tr>
+            {headers.map((header, index) => (
+              <th key={`table-${tableIndex}-head-${index}`}>
+                {renderInlineMarkdown(header, `table-${tableIndex}-head-${index}`)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`table-${tableIndex}-row-${rowIndex}`}>
+              {headers.map((_, cellIndex) => (
+                <td key={`table-${tableIndex}-row-${rowIndex}-cell-${cellIndex}`}>
+                  {renderInlineMarkdown(row[cellIndex] ?? "", `table-${tableIndex}-row-${rowIndex}-cell-${cellIndex}`)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  const lines = content.replace(/\r/g, "").split("\n");
+  const nodes: ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (isMarkdownTableStart(lines, index)) {
+      const tableLines = [line, lines[index + 1] ?? ""];
+      index += 2;
+
+      while (index < lines.length && (lines[index] ?? "").includes("|") && (lines[index] ?? "").trim()) {
+        tableLines.push(lines[index] ?? "");
+        index += 1;
+      }
+
+      nodes.push(<MarkdownTable key={`table-${nodes.length}`} lines={tableLines} tableIndex={nodes.length} />);
+      continue;
+    }
+
+    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      const level = headingMatch[1]?.length ?? 2;
+      const text = headingMatch[2] ?? "";
+      const className = level === 1 ? styles.markdownHeadingLarge : styles.markdownHeading;
+      nodes.push(
+        <div className={className} key={`heading-${nodes.length}`}>
+          {renderInlineMarkdown(text, `heading-${nodes.length}`)}
+        </div>,
+      );
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*]\s+/.test((lines[index] ?? "").trim())) {
+        items.push((lines[index] ?? "").trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      nodes.push(
+        <ul className={styles.markdownList} key={`list-${nodes.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`list-${nodes.length}-${itemIndex}`}>{renderInlineMarkdown(item, `list-${nodes.length}-${itemIndex}`)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\d+\.\s+/.test((lines[index] ?? "").trim())) {
+        items.push((lines[index] ?? "").trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      nodes.push(
+        <ol className={styles.markdownList} key={`ordered-${nodes.length}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ordered-${nodes.length}-${itemIndex}`}>{renderInlineMarkdown(item, `ordered-${nodes.length}-${itemIndex}`)}</li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (
+      index < lines.length &&
+      (lines[index] ?? "").trim() &&
+      !isMarkdownTableStart(lines, index) &&
+      !/^(#{1,3})\s+/.test((lines[index] ?? "").trim()) &&
+      !/^[-*]\s+/.test((lines[index] ?? "").trim()) &&
+      !/^\d+\.\s+/.test((lines[index] ?? "").trim())
+    ) {
+      paragraphLines.push((lines[index] ?? "").trim());
+      index += 1;
+    }
+
+    nodes.push(
+      <p className={styles.markdownParagraph} key={`paragraph-${nodes.length}`}>
+        {renderInlineMarkdown(paragraphLines.join(" "), `paragraph-${nodes.length}`)}
+      </p>,
+    );
+  }
+
+  return <div className={styles.markdownContent}>{nodes}</div>;
 }
 
 function isTextExtractableFile(file: File) {
@@ -1151,8 +2082,8 @@ function buildEngagementDraftFromUploadedContext(
     "service-agreement",
   ]);
   const fallback = {
-    reasonsHtml: buildDefaultEngagementReasonsHtml(clientName, adviserName),
-    servicesHtml: buildDefaultEngagementServicesHtml(clientName),
+    reasonsHtml: buildDefaultEngagementReasonsHtml(adviserName),
+    servicesHtml: buildDefaultEngagementServicesHtml(),
     advicePreparationFee: "",
     implementationFee: "",
   };
@@ -1177,15 +2108,15 @@ function buildEngagementDraftFromUploadedContext(
 
   return {
     reasonsHtml: [
-      `<p>Based on our discussions and the information you have provided, we understand you are seeking advice that is relevant to your current circumstances and objectives.</p>`,
+      "<p>Based on our discussions and the information you have provided, you have asked us to help with advice that is relevant to your current circumstances and objectives.</p>",
       "<ul>",
       ...(reasonLines.length
         ? reasonLines.map((line) => `<li>${escapeHtml(line)}</li>`)
-        : ["<li>Review the client’s current circumstances, retirement position, advice needs, and agreed next steps.</li>"]),
+        : ["<li>Review your current circumstances, retirement position, advice needs and agreed next steps.</li>"]),
       "</ul>",
     ].join(""),
     servicesHtml: [
-      `<p>We will provide advice and assistance that is tailored to your circumstances. This may include the following services:</p>`,
+      "<p>We will provide advice and assistance that is tailored to your circumstances. This may include the following services:</p>",
       "<ul>",
       ...(clientFacingServiceBullets.length
         ? clientFacingServiceBullets.map((line) => `<li>${escapeHtml(line)}</li>`)
@@ -1492,22 +2423,30 @@ function formatCurrencyAmount(value: number) {
   }).format(value);
 }
 
-function buildDefaultEngagementReasonsHtml(clientName: string, adviserName?: string | null) {
+function getDocumentTableHeaderTextColor(hexColor: string) {
+  const red = Number.parseInt(hexColor.slice(1, 3), 16);
+  const green = Number.parseInt(hexColor.slice(3, 5), 16);
+  const blue = Number.parseInt(hexColor.slice(5, 7), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance >= 145 ? "#113864" : "#ffffff";
+}
+
+function buildDefaultEngagementReasonsHtml(adviserName?: string | null) {
   const adviser = adviserName?.trim() || "your adviser";
 
   return [
-    `<p>${clientName} is seeking advice to confirm current priorities and set a clear scope for the next stage of advice.</p>`,
+    "<p>You have asked us to help clarify your current priorities and agree the scope of advice for the next stage of work.</p>",
     "<ul>",
-    "<li>Review your current financial position and identify the key advice needs to be addressed.</li>",
-    "<li>Clarify the advice services, deliverables, and next steps for this engagement.</li>",
-    `<li>Document the basis on which ${adviser} will provide advice and implementation support.</li>`,
+    "<li>We will review the information you have provided about your current financial position, goals and advice needs.</li>",
+    "<li>We will confirm the services, deliverables and next steps that are relevant to this engagement.</li>",
+    `<li>We will document how ${adviser} will provide advice and, where you choose to proceed, implementation support.</li>`,
     "</ul>",
   ].join("");
 }
 
-function buildDefaultEngagementServicesHtml(clientName: string) {
+function buildDefaultEngagementServicesHtml() {
   return [
-    `<p>The following services are proposed for ${clientName} as part of this engagement:</p>`,
+    "<p>As part of this engagement, we expect to provide the following services:</p>",
     "<ul>",
     "<li>Initial discovery and fact find review.</li>",
     "<li>Research and preparation of advice recommendations.</li>",
@@ -1515,6 +2454,14 @@ function buildDefaultEngagementServicesHtml(clientName: string) {
     "<li>Implementation support for agreed recommendations, where instructed.</li>",
     "</ul>",
   ].join("");
+}
+
+function engagementSignaturePeople(clientName: string, partnerName?: string | null) {
+  const names = [clientName, partnerName]
+    .map((name) => name?.trim())
+    .filter((name): name is string => Boolean(name));
+
+  return Array.from(new Map(names.map((name) => [name.toLowerCase(), name])).values());
 }
 
 type FinleyClientSummary = ClientSummary & {
@@ -1670,13 +2617,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
   const [threadId] = useState(() => `thr_${crypto.randomUUID()}`);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
+  const [documentStyleProfile, setDocumentStyleProfile] = useState<DocumentStyleProfile>(
+    DEFAULT_DOCUMENT_STYLE_PROFILE,
+  );
   const [displayCard, setDisplayCard] = useState<FinleyDisplayCard | null>(null);
+  const [returnDisplayCard, setReturnDisplayCard] = useState<FinleyDisplayCard | null>(null);
   const [editorCard, setEditorCard] = useState<FinleyEditorCard | FinleyTableEditorCard | null>(null);
   const [factFindWorkflow, setFactFindWorkflow] = useState<FinleyFactFindWorkflow | null>(null);
   const [factFindStepIndex, setFactFindStepIndex] = useState(0);
   const [engagementLetterDraftCard, setEngagementLetterDraftCard] = useState<EngagementLetterDraftCardState | null>(null);
+  const [roaDraftCard, setRoaDraftCard] = useState<RoaDraftCardState | null>(null);
   const [agreementDraftCard, setAgreementDraftCard] = useState<AgreementDraftCardState | null>(null);
   const [documentPlaceholderCard, setDocumentPlaceholderCard] = useState<EngagementLetterPlaceholderCard | null>(null);
   const [invoicePlaceholderCard, setInvoicePlaceholderCard] = useState<InvoicePlaceholderCard | null>(null);
@@ -1695,6 +2648,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [fileNoteAttachmentFiles, setFileNoteAttachmentFiles] = useState<File[]>([]);
   const [conciergeUploads, setConciergeUploads] = useState<ConciergeUpload[]>([]);
   const [isUploadingConciergeFiles, setIsUploadingConciergeFiles] = useState(false);
+  const [isUploadsModalOpen, setIsUploadsModalOpen] = useState(false);
+  const [isConciergeSuggestionDismissed, setIsConciergeSuggestionDismissed] = useState(false);
   const [isExtractingFactFindImport, setIsExtractingFactFindImport] = useState(false);
   const [isApplyingFactFindImport, setIsApplyingFactFindImport] = useState(false);
   const [factFindImportCandidate, setFactFindImportCandidate] = useState<FactFindImportCandidate | null>(null);
@@ -1725,6 +2680,13 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const primaryFactFindUpload = useMemo(
     () => getUploadsWithTag(conciergeUploads, "fact-find")[0] ?? null,
     [conciergeUploads],
+  );
+  const primaryFactFindReviewUpload = useMemo(
+    () =>
+      primaryFactFindUpload ??
+      [...conciergeUploads].reverse().find((upload) => Boolean(upload.file || upload.extractedText?.trim())) ??
+      null,
+    [conciergeUploads, primaryFactFindUpload],
   );
   const conciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
     const tasks: ConciergeSuggestedTask[] = [];
@@ -1769,6 +2731,25 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       });
     }
 
+    if (
+      activeClient &&
+      (
+        conciergeUploadTags.has("fact-find") ||
+        conciergeUploadTags.has("meeting-transcript") ||
+        conciergeUploadTags.has("productrex") ||
+        conciergeUploadTags.has("strategy-paper") ||
+        conciergeUploadTags.has("record-of-advice")
+      )
+    ) {
+      tasks.push({
+        id: "prepare-record-of-advice-from-upload",
+        title: "Prepare a Record of Advice",
+        description: "Use the uploaded evidence and active client profile to start the live ROA draft.",
+        actionLabel: "Record of Advice",
+        action: "record_of_advice",
+      });
+    }
+
     if (conciergeUploadTags.has("service-agreement")) {
       tasks.push({
         id: "prepare-service-agreement",
@@ -1789,7 +2770,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       });
     }
 
-    if (conciergeUploads.length && !tasks.length) {
+    if (conciergeUploads.length && !tasks.some((task) => task.action === "summarise_documents")) {
       tasks.push({
         id: "summarise-uploaded-documents",
         title: "Review uploaded documents",
@@ -1799,14 +2780,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       });
     }
 
-    return tasks.slice(0, 5);
-  }, [conciergeUploadTags, conciergeUploads.length]);
+    return tasks.slice(0, 6);
+  }, [activeClient, conciergeUploadTags, conciergeUploads.length]);
   const conciergeInsightText = useMemo(() => {
     if (!conciergeUploads.length) {
       return "";
     }
 
     if (conciergeUploadTags.has("fact-find")) {
+      if (!activeClient) {
+        return "I found a fact find in the uploaded files. I can summarise it now; select a client before mapping profile data or creating client records.";
+      }
+
       return `I found a fact find for ${activeClient?.name ?? "this client"}. The most useful next step is to review the client profile updates before preparing client-facing documents. After that, I can create a file note or prepare the engagement letter.`;
     }
 
@@ -1822,10 +2807,82 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return `I found ProductRex material. This is more likely to support advice preparation, but I can still summarise the product and replacement context here.`;
     }
 
-    return `I’ve added the uploaded document${conciergeUploads.length > 1 ? "s" : ""}. I can review the content and suggest what to do next.`;
+    return `I’ve loaded the uploaded document${conciergeUploads.length > 1 ? "s" : ""} into Finley. I can review the content and suggest what to do next.`;
   }, [activeClient?.name, conciergeUploadTags, conciergeUploads.length]);
-  const primaryConciergeTask = conciergeSuggestedTasks[0] ?? null;
-  const secondaryConciergeTasks = conciergeSuggestedTasks.slice(1, 4);
+  const visibleConciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
+    if (activeClient) {
+      return conciergeSuggestedTasks;
+    }
+
+    const summariseTask = conciergeSuggestedTasks.find((task) => task.action === "summarise_documents");
+    if (summariseTask) {
+      return [
+        {
+          ...summariseTask,
+          title: "Review uploaded documents",
+          description: "Finley can summarise the uploaded files before you select a client.",
+          actionLabel: "Summarise documents",
+        },
+      ];
+    }
+
+    if (!conciergeUploads.length) {
+      return [];
+    }
+
+    return [
+      {
+        id: "summarise-uploaded-documents",
+        title: "Review uploaded documents",
+        description: "Finley can summarise the uploaded files before you select a client.",
+        actionLabel: "Summarise documents",
+        action: "summarise_documents",
+      },
+    ];
+  }, [activeClient, conciergeSuggestedTasks, conciergeUploads.length]);
+  const primaryConciergeTask = visibleConciergeSuggestedTasks[0] ?? null;
+  const secondaryConciergeTasks = visibleConciergeSuggestedTasks.slice(1, 4);
+  const uploadedFilesModalFiles = useMemo<UploadedFilesModalFile[]>(
+    () =>
+      conciergeUploads.map((upload) => ({
+        id: upload.id,
+        name: upload.name,
+        badges: upload.tags.map((tag) => ({
+          label: getConciergeTagLabel(tag),
+          tone:
+            tag === "fact-find"
+              ? "fact-find" as const
+              : tag === "productrex"
+                ? "product" as const
+                : tag === "insurance-quote" || tag === "insurance-needs-analysis"
+                  ? "insurance" as const
+                  : "default" as const,
+        })),
+        actions: [
+          ...(upload.tags.includes("fact-find") || upload.file || upload.extractedText?.trim()
+            ? [
+                {
+                  label:
+                    !activeClient
+                      ? "Select client to map"
+                      : isExtractingFactFindImport && factFindImportSourceFile === upload.name
+                      ? "Inspecting..."
+                      : "Map to profile",
+                  onClick: activeClient ? () => void inspectFactFindUpload(upload) : () => undefined,
+                  disabled: !activeClient || isExtractingFactFindImport,
+                },
+              ]
+            : []),
+          {
+            label: "Remove",
+            onClick: () => removeConciergeUpload(upload.id),
+            disabled: isExtractingFactFindImport && factFindImportSourceFile === upload.name,
+            variant: "danger" as const,
+          },
+        ],
+      })),
+    [activeClient, conciergeUploads, factFindImportSourceFile, isExtractingFactFindImport],
+  );
   const currentFactFindStep = useMemo(
     () =>
       factFindWorkflow && factFindWorkflow.steps.length
@@ -1878,6 +2935,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           body?.data?.items?.map((item) => ({
             id: item.id,
             name: [item.client?.name, item.partner?.name].filter(Boolean).join(" & "),
+            primaryClientName: item.client?.name?.trim() || undefined,
+            partnerName: item.partner?.name?.trim() || undefined,
             clientAdviserName: item.clientAdviserName ?? item.adviser?.name,
             clientAdviserPracticeName: item.clientAdviserPracticeName ?? item.practice,
             clientAdviserLicenseeName: item.clientAdviserLicenseeName ?? item.licensee,
@@ -1955,6 +3014,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         }
 
         setCurrentUserScope(body.data);
+        setDocumentStyleProfile(normalizeDocumentStyleProfile(body.data.documentStyleProfile));
       } catch {
         // Leave the new client defaults blank if the current user cannot be resolved.
       }
@@ -1965,6 +3025,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    try {
+      const storedProfile = window.localStorage.getItem(DOCUMENT_STYLE_PROFILE_STORAGE_KEY);
+      if (!storedProfile) {
+        return;
+      }
+
+      setDocumentStyleProfile(normalizeDocumentStyleProfile(JSON.parse(storedProfile) as Partial<DocumentStyleProfile>));
+    } catch {
+      setDocumentStyleProfile(DEFAULT_DOCUMENT_STYLE_PROFILE);
+    }
   }, []);
 
   function selectClient(clientId: string) {
@@ -1993,10 +3066,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setPendingPlanId(null);
     setComposerValue("");
     setDisplayCard(null);
+    setReturnDisplayCard(null);
     setEditorCard(null);
     setFactFindWorkflow(null);
     setFactFindStepIndex(0);
     setEngagementLetterDraftCard(null);
+    setRoaDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
     setIsSavingFactFindStep(false);
@@ -2014,10 +3089,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setFileNoteAttachments([]);
     setFileNoteAttachmentFiles([]);
     setConciergeUploads([]);
+    setIsConciergeSuggestionDismissed(false);
   }
 
   function clearLiveRenderOutputs() {
     setEngagementLetterDraftCard(null);
+    setRoaDraftCard(null);
     setAgreementDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
@@ -2067,6 +3144,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setWarnings([]);
     setPendingPlanId(null);
     setDisplayCard(null);
+    setReturnDisplayCard(null);
     setEditorCard(null);
     setFactFindWorkflow(null);
     setFactFindStepIndex(0);
@@ -2075,6 +3153,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setAgreementWorkflowError(null);
     setInvoiceWorkflowError(null);
     setEngagementLetterDraftCard(null);
+    setRoaDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
     const profile = activeClient.id ? await loadClientProfileForPreview(activeClient.id).catch(() => null) : null;
@@ -2107,6 +3186,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
 
     return null;
+  }
+
+  function shouldBypassActiveOutputEdit(message: string) {
+    const lower = message.toLowerCase();
+    return /\b(update fact find|fact find|create file note|file note|create invoice|invoice|engagement letter|ongoing agreement|annual agreement|statement of advice)\b/.test(lower);
   }
 
   function openCreateClient() {
@@ -2150,6 +3234,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setWarnings([]);
     setPendingPlanId(null);
     setDisplayCard(null);
+    setReturnDisplayCard(null);
     setEditorCard(null);
     clearLiveRenderOutputs();
     setFactFindWorkflow(normalizeFactFindWorkflow(body.workflow));
@@ -2161,7 +3246,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function inspectFactFindUpload(upload: ConciergeUpload) {
-    if (!upload.extractedText?.trim()) {
+    if (!upload.file && !upload.extractedText?.trim()) {
       setFactFindImportError("Finley could not read text from this fact find. Try uploading the original DOCX or a text-based file rather than a scanned PDF.");
       setFactFindImportCandidate(null);
       setIsFactFindImportModalOpen(true);
@@ -2174,14 +3259,26 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setFactFindImportSourceFile(upload.name);
 
     try {
+      const requestBody = upload.file
+        ? (() => {
+            const formData = new FormData();
+            formData.append("file", upload.file);
+            formData.append("clientName", activeClient?.name ?? "");
+            return formData;
+          })()
+        : null;
       const response = await fetch("/api/finley/fact-find/extract-import", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          fileName: upload.name,
-          extractedText: upload.extractedText,
-          clientName: activeClient?.name ?? null,
-        }),
+        ...(requestBody
+          ? { body: requestBody }
+          : {
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                fileName: upload.name,
+                extractedText: upload.extractedText,
+                clientName: activeClient?.name ?? null,
+              }),
+            }),
       });
       const body = (await response.json().catch(() => null)) as FactFindImportResponse | null;
 
@@ -2275,8 +3372,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     if (!activeClient || isSending) return;
 
     if (action === "fact_find") {
-      if (primaryFactFindUpload) {
-        await inspectFactFindUpload(primaryFactFindUpload);
+      if (primaryFactFindReviewUpload) {
+        await inspectFactFindUpload(primaryFactFindReviewUpload);
         return;
       }
 
@@ -2366,6 +3463,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setFactFindWorkflowError(null);
         setInvoiceWorkflowError(null);
         setEngagementLetterDraftCard(null);
+        setRoaDraftCard(null);
         setAgreementDraftCard(null);
         setDocumentPlaceholderCard(null);
         setInvoicePlaceholderCard({
@@ -2397,6 +3495,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       if (action === "engagement_letter") {
         const clientName = activeClient.name ?? "this client";
         const adviserName = activeClient.clientAdviserName ?? currentUserScope?.name ?? "";
+        const profile = activeClient.id ? await loadClientProfileForPreview(activeClient.id).catch(() => null) : null;
+        const clientAddressLines = personAddressLines(profile?.client);
         const uploadedDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, conciergeUploads);
         const usedUploadContext = Boolean(buildUploadedDocumentContext(conciergeUploads, [
           "fact-find",
@@ -2430,60 +3530,125 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setInvoicePlaceholderCard(null);
         setAgreementDraftCard(null);
         setDocumentPlaceholderCard(null);
+        setRoaDraftCard(null);
         setEngagementLetterDraftCard({
           title: `Prepare an engagement letter for ${clientName}`,
           description:
             "Send your client an initial engagement letter to outline the services you will provide and disclose the costs of your advice.",
           badge: "Live Render",
           clientName,
+          clientAddressLines,
+          primaryClientName: activeClient.primaryClientName ?? clientName,
+          partnerName: activeClient.partnerName ?? null,
           adviserName,
           value: uploadedDraft,
         });
         return;
       }
 
-      const placeholder =
-        action === "record_of_advice"
-          ? {
-              title: `Prepare a Record of Advice for ${activeClient.name}`,
-              description:
-                "This workflow will guide the adviser through changed circumstances, recommendation updates, and supporting rationale before generating the final Record of Advice.",
-              sections: [
-                "Client and review context",
-                "Changed circumstances and relevant updates",
-                "Recommendation summary and rationale",
-                "Implementation notes and disclosures",
-              ],
-              note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
-              badge: "ROA Placeholder",
-            }
-          : action === "statement_of_advice"
-            ? {
-                title: `Prepare a Statement of Advice for ${activeClient.name}`,
-                description:
-                  "This workflow will guide the adviser through full advice preparation, narrative drafting, recommendations, and disclosures before generating the final Statement of Advice.",
-                sections: [
-                  "Client circumstances and objectives",
-                  "Strategy recommendations and product scope",
-                  "Risks, research, and disclosures",
-                  "Implementation, fees, and next steps",
-                ],
-                note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
-                badge: "SOA Placeholder",
+      if (action === "record_of_advice") {
+        setIsSending(true);
+        setMessages([
+          {
+            id: `assistant-roa-draft-start-${Date.now()}`,
+            role: "assistant",
+            content: `I’m preparing a live Record of Advice draft for ${activeClient.name}. I’ll use the selected client profile and any uploaded supporting evidence, then show the editable draft in the workspace.`,
+          },
+        ]);
+
+        try {
+          const response = await fetch("/api/finley/roa/draft", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              clientId: activeClient.id,
+              clientName: activeClient.name,
+              adviserName: activeClient.clientAdviserName ?? currentUserScope?.name ?? null,
+              uploadedFiles: conciergeUploads.map((upload) => ({
+                name: upload.name,
+                tags: upload.tags,
+                extractedText: upload.extractedText?.slice(0, 7000) ?? null,
+              })),
+            }),
+          });
+          const body = (await response.json().catch(() => null)) as
+            | {
+                draft?: RoaDraftValue;
+                source?: "llm" | "fallback";
+                warning?: string | null;
+                letterDetails?: RoaLetterDetails | null;
+                error?: string | null;
               }
-            : {
-                title: `Prepare an engagement letter for ${activeClient.name}`,
-                description:
-                  "This workflow will guide the adviser through scope, fees, disclosures, and acknowledgements before generating the final engagement letter.",
-                sections: [
-                  "Client and adviser details",
-                  "Scope of advice and services",
-                  "Fee and payment terms",
-                  "Authority, acknowledgements, and signatures",
-                ],
-                note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
-                badge: "Placeholder",
-              };
+            | null;
+
+          if (!response.ok || !body?.draft) {
+            throw new Error(body?.error || "Unable to prepare the Record of Advice draft right now.");
+          }
+
+          setMessages([
+            {
+              id: `assistant-roa-draft-${Date.now()}`,
+              role: "assistant",
+              content:
+                body.source === "fallback"
+                  ? `I prepared a safe Record of Advice skeleton for ${activeClient.name}. Review the live draft and tell me what to refine.`
+                  : `I prepared a live Record of Advice draft for ${activeClient.name}. Review the sections and tell me what to refine.`,
+            },
+          ]);
+          setPlanSummary(null);
+          setPlanSteps([]);
+          setWarnings(body.warning ? [body.warning] : []);
+          setPendingPlanId(null);
+          setDisplayCard(null);
+          setEditorCard(null);
+          setFactFindWorkflow(null);
+          setFactFindStepIndex(0);
+          setFactFindWorkflowError(null);
+          setEngagementLetterWorkflowError(null);
+          setAgreementWorkflowError(null);
+          setInvoiceWorkflowError(null);
+          setInvoicePlaceholderCard(null);
+          setAgreementDraftCard(null);
+          setDocumentPlaceholderCard(null);
+          setEngagementLetterDraftCard(null);
+          setRoaDraftCard({
+            title: `Prepare a Record of Advice for ${activeClient.name}`,
+            description: "Live Record of Advice draft using the selected client profile and supporting evidence.",
+            badge: body.source === "fallback" ? "Safe Skeleton" : "Live Draft",
+            clientName: activeClient.name ?? "this client",
+            adviserName: activeClient.clientAdviserName ?? currentUserScope?.name ?? null,
+            letterDetails: body.letterDetails ?? null,
+            value: body.draft,
+          });
+        } catch (error) {
+          setMessages([
+            {
+              id: `assistant-roa-draft-error-${Date.now()}`,
+              role: "assistant",
+              content: error instanceof Error ? error.message : "Unable to prepare the Record of Advice draft right now.",
+            },
+          ]);
+        } finally {
+          setIsSending(false);
+        }
+        return;
+      }
+
+      const placeholder = {
+        title: `Prepare a Statement of Advice for ${activeClient.name}`,
+        description:
+          "This workflow will guide the adviser through full advice preparation, narrative drafting, recommendations, and disclosures before generating the final Statement of Advice.",
+        sections: [
+          "Client circumstances and objectives",
+          "Strategy recommendations and product scope",
+          "Risks, research, and disclosures",
+          "Implementation, fees, and next steps",
+        ],
+        note: "Placeholder only for now. The next build will connect this card to Finley drafting and document generation.",
+        badge: "SOA Placeholder",
+      };
 
       setMessages([
         {
@@ -2527,7 +3692,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function addConciergeUploads(files: FileList | null) {
-    if (!files?.length || !activeClient) {
+    if (!files?.length) {
       return;
     }
 
@@ -2543,6 +3708,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             name: file.name,
             mimeType: file.type || null,
             extractedText,
+            file,
             tags,
           } satisfies ConciergeUpload;
         }),
@@ -2557,22 +3723,54 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       );
 
       setConciergeUploads((current) => [...current, ...nextUploads]);
+      setIsConciergeSuggestionDismissed(false);
+      const activeClientName = activeClient?.name?.trim();
       setMessages((current) => [
         ...current,
         {
           id: `assistant-upload-${Date.now()}`,
           role: "assistant",
           content: detectedLabels.length
-            ? `I reviewed ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClient.name}. Detected: ${detectedLabels.join(", ")}. I’ve suggested the next useful tasks below.`
-            : `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClient.name}. I can review the documents and suggest what to do next.`,
+            ? activeClientName
+              ? `I reviewed ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClientName}. Detected: ${detectedLabels.join(", ")}. I’ve suggested the next useful tasks below.`
+              : `I reviewed ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} into Finley. Detected: ${detectedLabels.join(", ")}. Select a client when you’re ready to map profile data or create client records.`
+            : activeClientName
+              ? `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} for ${activeClientName}. I can review the documents and suggest what to do next.`
+              : `I added ${nextUploads.length} uploaded file${nextUploads.length > 1 ? "s" : ""} into Finley. I can review the documents now, and you can select a client later for profile work.`,
         },
       ]);
+      setIsUploadsModalOpen(true);
     } finally {
       setIsUploadingConciergeFiles(false);
     }
   }
 
+  function removeConciergeUpload(uploadId: string) {
+    setConciergeUploads((current) => {
+      const uploadToRemove = current.find((upload) => upload.id === uploadId);
+      const nextUploads = current.filter((upload) => upload.id !== uploadId);
+
+      if (uploadToRemove && factFindImportSourceFile === uploadToRemove.name) {
+        setFactFindImportSourceFile(null);
+        setFactFindImportCandidate(null);
+        setFactFindImportError(null);
+        setIsFactFindImportModalOpen(false);
+      }
+
+      if (!nextUploads.length) {
+        setIsConciergeSuggestionDismissed(true);
+      }
+
+      return nextUploads;
+    });
+  }
+
   async function handleConciergeSuggestedTask(task: ConciergeSuggestedTask) {
+    if (!activeClient && task.action !== "summarise_documents") {
+      await handleSend("I need to select a client before using this upload for a client workflow.");
+      return;
+    }
+
     if (task.action === "file_note" && conciergeUploadTags.has("meeting-transcript")) {
       const transcriptContext = buildUploadedDocumentContext(conciergeUploads, ["meeting-transcript"]);
       await handleSend(
@@ -2583,8 +3781,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return;
     }
 
-    if (task.action === "fact_find" && primaryFactFindUpload) {
-      await inspectFactFindUpload(primaryFactFindUpload);
+    if (task.action === "fact_find" && primaryFactFindReviewUpload) {
+      await inspectFactFindUpload(primaryFactFindReviewUpload);
       return;
     }
 
@@ -2910,6 +4108,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           outputKind: "engagement_letter" as const,
           currentOutput: engagementLetterDraftCard.value,
         }
+      : roaDraftCard
+        ? {
+            outputKind: "record_of_advice" as const,
+            currentOutput: roaDraftCard.value,
+          }
       : agreementDraftCard
         ? {
             outputKind: agreementDraftCard.agreementType === "annual" ? ("annual_agreement" as const) : ("ongoing_agreement" as const),
@@ -2929,6 +4132,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         : null;
 
     if (!activeOutput) {
+      return false;
+    }
+
+    if (shouldBypassActiveOutputEdit(message)) {
       return false;
     }
 
@@ -2971,6 +4178,17 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             ? {
                 ...current,
                 value: body.updatedEngagementLetter!,
+              }
+            : current,
+        );
+      }
+
+      if (activeOutput.outputKind === "record_of_advice" && body.updatedRecordOfAdvice) {
+        setRoaDraftCard((current) =>
+          current
+            ? {
+                ...current,
+                value: body.updatedRecordOfAdvice!,
               }
             : current,
         );
@@ -3023,14 +4241,40 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     return true;
   }
 
+  async function handleCopyAssistantMessage(messageId: string, content: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = content;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => {
+        setCopiedMessageId((currentId) => (currentId === messageId ? null : currentId));
+      }, 1800);
+    } catch {
+      setWarnings((current) => ["I couldn't copy that response to the clipboard.", ...current].slice(0, 3));
+    }
+  }
+
   async function handleSend(nextMessage?: string) {
     const message = (nextMessage ?? composerValue).trim();
 
-    if (!message || !activeClient) {
+    if (!message) {
       return;
     }
 
     const isFileNoteAssistRequest =
+      !!activeClient &&
       editorCard?.kind === "collection_form" &&
       editorCard.toolName === "create_file_note" &&
       !!activeAssistField &&
@@ -3106,13 +4350,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         return;
       }
 
-      const activeOutputHandled = await tryHandleActiveOutputInstruction(message, userMessage);
+      const activeOutputHandled = activeClient
+        ? await tryHandleActiveOutputInstruction(message, userMessage)
+        : false;
       if (activeOutputHandled) {
         return;
       }
 
       const requestedAgreementType = detectAgreementRequest(message);
-      if (requestedAgreementType) {
+      if (activeClient && requestedAgreementType) {
         await activateAgreementWorkflow(requestedAgreementType, "append");
         return;
       }
@@ -3126,8 +4372,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         },
         body: JSON.stringify({
           message,
-          activeClientId: activeClient.id,
-          activeClientName: activeClient.name,
+          activeClientId: activeClient?.id ?? null,
+          activeClientName: activeClient?.name ?? null,
           threadId,
           recentMessages: [...messages.slice(-4), userMessage].map((entry) => ({
             role: entry.role,
@@ -3170,6 +4416,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         clearLiveRenderOutputs();
       }
       setDisplayCard(body.displayCard ?? null);
+      setReturnDisplayCard(null);
       setEditorCard(nextEditorCard);
       setFileNoteSubjectManuallyEdited(false);
     } catch (error) {
@@ -3186,6 +4433,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setWarnings([]);
       setPendingPlanId(null);
       setDisplayCard(null);
+      setReturnDisplayCard(null);
       setEditorCard(null);
       setActiveAssistField(null);
       setFileNoteSubjectManuallyEdited(false);
@@ -3281,7 +4529,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setPlanSteps([]);
         setWarnings([]);
         setPendingPlanId(null);
-        setDisplayCard(body.displayCard ?? null);
+        setDisplayCard(body.displayCard ?? returnDisplayCard ?? null);
+        setReturnDisplayCard(null);
         setEditorCard(null);
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
@@ -3298,6 +4547,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setWarnings(body.warnings ?? []);
         setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
         setDisplayCard(body.displayCard ?? null);
+        if (body.displayCard) {
+          setReturnDisplayCard(null);
+        }
         setEditorCard(normalizeEditorCard(body.editorCard ?? null));
         setFileNoteSubjectManuallyEdited(false);
         setFileNoteAttachments([]);
@@ -3312,14 +4564,25 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           content: error instanceof Error ? error.message : "Unable to complete the requested plan action.",
         },
       ]);
-      setDisplayCard(null);
+      setDisplayCard(returnDisplayCard ?? null);
+      setReturnDisplayCard(null);
     } finally {
       setIsSending(false);
     }
   }
 
   async function handleDisplayCardEdit(
-    kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants",
+    kind:
+      | "assets"
+      | "liabilities"
+      | "employment"
+      | "income"
+      | "expenses"
+      | "superannuation"
+      | "retirement-income"
+      | "insurance"
+      | "entities"
+      | "dependants",
     recordId: string,
   ) {
     if (!activeClientId || !activeClient) return;
@@ -3347,6 +4610,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         throw new Error("Unable to prepare that record for editing right now.");
       }
 
+      setReturnDisplayCard(displayCard);
       setMessages((current) => [
         ...current,
         {
@@ -3366,6 +4630,9 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       setWarnings(body.warnings ?? []);
       setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
       setDisplayCard(body.displayCard ?? null);
+      if (body.displayCard) {
+        setReturnDisplayCard(null);
+      }
       setEditorCard(normalizeEditorCard(body.editorCard ?? null));
       setFileNoteSubjectManuallyEdited(false);
       setFileNoteAttachments([]);
@@ -3666,13 +4933,21 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           ) : null}
 
-          {activeClient && conciergeUploads.length ? (
+          {conciergeUploads.length && !isConciergeSuggestionDismissed ? (
             <section className={styles.conciergeSuggestionPanel} aria-label="Suggested next steps">
               <div className={styles.conciergeSuggestionHeader}>
                 <div>
                   <div className={styles.suggestionTitle}>Finley noticed something useful</div>
                   <div className={styles.conciergeSuggestionText}>{conciergeInsightText}</div>
                 </div>
+                <button
+                  type="button"
+                  className={styles.conciergeSuggestionClose}
+                  onClick={() => setIsConciergeSuggestionDismissed(true)}
+                  aria-label="Close suggested next steps"
+                >
+                  ×
+                </button>
               </div>
               <div className={styles.conciergeUploadList}>
                 {conciergeUploads.map((upload) => (
@@ -3719,59 +4994,69 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ) : null}
                 </div>
               ) : null}
-              <div className={styles.conciergeCommonTasks}>
-                <span>Other things I can help with:</span>
-                <div>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("file_note")}
-                    disabled={isSending}
-                  >
-                    Create file note
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("engagement_letter")}
-                    disabled={isSending}
-                  >
-                    Engagement letter
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("create_invoice")}
-                    disabled={isSending}
-                  >
-                    Invoice
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("ongoing_agreement")}
-                    disabled={isSending}
-                  >
-                    Ongoing agreement
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleStarterAction("annual_agreement")}
-                    disabled={isSending}
-                  >
-                    Annual agreement
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.conciergeCommonTaskButton}
-                    onClick={() => void handleSend("check what information is missing for this client")}
-                    disabled={isSending}
-                  >
-                    Check missing info
-                  </button>
+              {activeClient ? (
+                <div className={styles.conciergeCommonTasks}>
+                  <span>Other things I can help with:</span>
+                  <div>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("file_note")}
+                      disabled={isSending}
+                    >
+                      Create file note
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("engagement_letter")}
+                      disabled={isSending}
+                    >
+                      Engagement letter
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("create_invoice")}
+                      disabled={isSending}
+                    >
+                      Invoice
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("ongoing_agreement")}
+                      disabled={isSending}
+                    >
+                      Ongoing agreement
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("annual_agreement")}
+                      disabled={isSending}
+                    >
+                      Annual agreement
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleStarterAction("record_of_advice")}
+                      disabled={isSending}
+                    >
+                      Record of Advice
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.conciergeCommonTaskButton}
+                      onClick={() => void handleSend("check what information is missing for this client")}
+                      disabled={isSending}
+                    >
+                      Check missing info
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : null}
             </section>
           ) : null}
 
@@ -3780,7 +5065,22 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               {messages.map((message) => (
                 <div key={message.id} className={message.role === "assistant" ? styles.assistantMessageStack : ""}>
                   <div className={message.role === "assistant" ? styles.assistantBubble : styles.userBubble}>
-                    {message.content}
+                    {message.role === "assistant" ? (
+                      <>
+                        <button
+                          type="button"
+                          className={styles.copyResponseButton}
+                          onClick={() => void handleCopyAssistantMessage(message.id, message.content)}
+                          aria-label={copiedMessageId === message.id ? "Finley response copied" : "Copy Finley response"}
+                          title={copiedMessageId === message.id ? "Copied" : "Copy response"}
+                        >
+                          <CopyResponseIcon copied={copiedMessageId === message.id} />
+                        </button>
+                        <AssistantMarkdown content={message.content} />
+                      </>
+                    ) : (
+                      message.content
+                    )}
                   </div>
                   {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient ? (
                     <div className={styles.workflowPillRow} aria-label="Suggested Finley workflows">
@@ -3852,6 +5152,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ) : null}
                 </div>
               ))}
+              {isSending ? (
+                <div className={styles.finleyRespondingCard} role="status" aria-live="polite">
+                  <span className={styles.finleyRespondingDot} aria-hidden="true" />
+                  <div>
+                    <div className={styles.finleyRespondingTitle}>Finley is responding</div>
+                    <div className={styles.finleyRespondingText}>Preparing the next response now.</div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -3874,12 +5183,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ? activeAssistField
                     ? `Use "Finley:" to draft the file note ${activeAssistField === "content" ? "body" : activeAssistField}...`
                     : `Ask Finley to work on ${activeClient.name ?? "this client"}...`
-                  : "Select a client to start chatting with Finley..."
+                  : "Select a client, or ask Finley a general question..."
               }
               rows={2}
               value={composerValue}
               onChange={(event) => setComposerValue(event.target.value)}
-              disabled={!activeClient}
             />
             <div className={styles.composerFooter}>
               <div className={styles.composerHint}>
@@ -3887,14 +5195,20 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   ? activeAssistField
                     ? `Selected field: ${activeAssistField === "content" ? "File note body" : "File note subject"}. Start your message with "Finley:" to draft into that field.`
                     : ""
-                  : "Client context will appear here once you select a client."}
+                  : "General questions and document summaries work now. Select a client before mapping profile data or creating client records."}
               </div>
               <div className={styles.composerActions}>
                 <button
                   type="button"
                   className={styles.refreshButton}
-                  onClick={() => conciergeUploadInputRef.current?.click()}
-                  disabled={!activeClient || isUploadingConciergeFiles}
+                  onClick={() => {
+                    if (conciergeUploads.length) {
+                      setIsUploadsModalOpen(true);
+                      return;
+                    }
+                    conciergeUploadInputRef.current?.click();
+                  }}
+                  disabled={isUploadingConciergeFiles}
                 >
                   {isUploadingConciergeFiles
                     ? "Uploading..."
@@ -3914,7 +5228,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                   type="button"
                   className={styles.sendButton}
                   onClick={() => void handleSend()}
-                  disabled={isSending || !activeClient}
+                  disabled={isSending || !composerValue.trim()}
                 >
                   {isSending ? "Sending..." : "Send"}
                 </button>
@@ -3926,7 +5240,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
       <aside className={styles.outputPane} aria-label="Finley output">
         <div className={styles.outputSurface}>
-          {!engagementLetterDraftCard && !agreementDraftCard && !invoicePlaceholderCard ? (
+          {!engagementLetterDraftCard && !roaDraftCard && !agreementDraftCard && !invoicePlaceholderCard ? (
             <div className={styles.outputHeader}>
               <div>
                 <div className={styles.sidebarLabel}>Output</div>
@@ -3937,6 +5251,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
           {!currentFactFindStep &&
           !engagementLetterDraftCard &&
+          !roaDraftCard &&
           !agreementDraftCard &&
           !documentPlaceholderCard &&
           !invoicePlaceholderCard &&
@@ -3980,47 +5295,51 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               </div>
 
               {currentFactFindStep.displayCard ? (
-                <div className={styles.dataCard}>
-                  <div className={styles.planLabel}>Client Data</div>
-                  <div className={styles.planSummary}>{currentFactFindStep.displayCard.title}</div>
-                  <div className={styles.dataTableWrap}>
-                    <div className={styles.dataTableHeader}>
-                      {currentFactFindStep.displayCard.columns.map((column) => (
-                        <span key={column} className={styles.dataTableHeaderCell}>
-                          {column}
-                        </span>
-                      ))}
-                      {currentFactFindStep.displayCard.rows.some((row) => row.editAction) ? (
-                        <span className={styles.dataTableHeaderCell}>Action</span>
-                      ) : null}
-                    </div>
-                    {currentFactFindStep.displayCard.rows.map((row) => (
-                      <div key={row.id} className={styles.dataTableRow}>
-                        {row.cells.map((cell, index) => (
-                          <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
-                            {cell || "-"}
-                          </span>
+                (() => {
+                  const tableView = buildDisplayCardTableView(currentFactFindStep.displayCard);
+
+                  return (
+                    <div className={styles.dataCard}>
+                      <div className={styles.planLabel}>Client Data</div>
+                      <div className={styles.planSummary}>{currentFactFindStep.displayCard.title}</div>
+                      <div className={styles.dataTableWrap}>
+                        <div className={styles.dataTableHeader} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                          {tableView.columns.map((column) => (
+                            <span key={column} className={styles.dataTableHeaderCell}>
+                              {column}
+                            </span>
+                          ))}
+                          {tableView.hasActions ? <span className={styles.dataTableHeaderCell}>Action</span> : null}
+                        </div>
+                        {tableView.rows.map((row) => (
+                          <div key={row.id} className={styles.dataTableRow} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                            {row.cells.map((cell, index) => (
+                              <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
+                                {cell || "-"}
+                              </span>
+                            ))}
+                            {tableView.hasActions ? (
+                              <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
+                                {row.editAction ? (
+                                  <button
+                                    type="button"
+                                    className={styles.dataTableEditButton}
+                                    onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
+                                    disabled={isSending}
+                                  >
+                                    {row.editAction.label ?? "Edit"}
+                                  </button>
+                                ) : (
+                                  <span className={styles.dataTableActionPlaceholder}>-</span>
+                                )}
+                              </span>
+                            ) : null}
+                          </div>
                         ))}
-                        {currentFactFindStep.displayCard!.rows.some((entry) => entry.editAction) ? (
-                          <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
-                            {row.editAction ? (
-                              <button
-                                type="button"
-                                className={styles.dataTableEditButton}
-                                onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
-                                disabled={isSending}
-                              >
-                                {row.editAction.label ?? "Edit"}
-                              </button>
-                            ) : (
-                              <span className={styles.dataTableActionPlaceholder}>-</span>
-                            )}
-                          </span>
-                        ) : null}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  );
+                })()
               ) : null}
 
               {currentFactFindStep.editorCard ? (
@@ -4185,12 +5504,25 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             <EngagementLetterRender
               draft={engagementLetterDraftCard.value}
               clientName={engagementLetterDraftCard.clientName}
+              clientAddressLines={engagementLetterDraftCard.clientAddressLines}
+              clientSignatureName={engagementLetterDraftCard.primaryClientName ?? activeClient?.primaryClientName}
+              partnerName={engagementLetterDraftCard.partnerName ?? activeClient?.partnerName}
               adviserName={engagementLetterDraftCard.adviserName}
               practiceName={activeClient?.clientAdviserPracticeName ?? currentUserScope?.practice?.name}
               licenseeName={activeClient?.clientAdviserLicenseeName}
               onExport={() => void handleEngagementLetterGenerateDocx()}
               isExporting={isGeneratingEngagementLetterDocx}
               exportError={engagementLetterWorkflowError}
+              documentStyleProfile={documentStyleProfile}
+            />
+          ) : null}
+
+          {roaDraftCard ? (
+            <RecordOfAdviceRender
+              draft={roaDraftCard.value}
+              clientName={roaDraftCard.clientName}
+              adviserName={roaDraftCard.adviserName}
+              letterDetails={roaDraftCard.letterDetails}
             />
           ) : null}
 
@@ -4200,6 +5532,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               onExport={() => void handleAgreementGenerateDocx()}
               isExporting={isGeneratingAgreementDocx}
               exportError={agreementWorkflowError}
+              documentStyleProfile={documentStyleProfile}
             />
           ) : null}
 
@@ -4254,50 +5587,53 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           ) : null}
 
           {displayCard ? (
-            <div className={styles.dataCard}>
-              <div className={styles.planLabel}>
-                {displayCard.title.toLowerCase().includes("document") ? "Document Review" : "Client Data"}
-              </div>
-              <div className={styles.planSummary}>{displayCard.title}</div>
-              <div className={styles.dataTableWrap}>
-                <div className={styles.dataTableHeader}>
-                  {displayCard.columns.map((column) => (
-                    <span key={column} className={styles.dataTableHeaderCell}>
-                      {column}
-                    </span>
-                  ))}
-                  {displayCard.rows.some((row) => row.editAction) ? (
-                    <span className={styles.dataTableHeaderCell}>Action</span>
-                  ) : null}
-                </div>
-                {displayCard.rows.map((row) => (
-                  <div key={row.id} className={styles.dataTableRow}>
-                    {row.cells.map((cell, index) => (
-                      <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
-                        {cell || "-"}
-                      </span>
+            (() => {
+              const isDocumentReview = displayCard.title.toLowerCase().includes("document");
+              const tableView = buildDisplayCardTableView(displayCard, { preserveAllColumns: isDocumentReview });
+
+              return (
+                <div className={styles.dataCard}>
+                  <div className={styles.planLabel}>{isDocumentReview ? "Document Review" : "Client Data"}</div>
+                  <div className={styles.planSummary}>{displayCard.title}</div>
+                  <div className={styles.dataTableWrap}>
+                    <div className={styles.dataTableHeader} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                      {tableView.columns.map((column) => (
+                        <span key={column} className={styles.dataTableHeaderCell}>
+                          {column}
+                        </span>
+                      ))}
+                      {tableView.hasActions ? <span className={styles.dataTableHeaderCell}>Action</span> : null}
+                    </div>
+                    {tableView.rows.map((row) => (
+                      <div key={row.id} className={styles.dataTableRow} style={{ gridTemplateColumns: tableView.gridTemplateColumns }}>
+                        {row.cells.map((cell, index) => (
+                          <span key={`${row.id}-${index}`} className={styles.dataTableCell}>
+                            {cell || "-"}
+                          </span>
+                        ))}
+                        {tableView.hasActions ? (
+                          <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
+                            {row.editAction ? (
+                              <button
+                                type="button"
+                                className={styles.dataTableEditButton}
+                                onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
+                                disabled={isSending}
+                              >
+                                {row.editAction.label ?? "Edit"}
+                              </button>
+                            ) : (
+                              <span className={styles.dataTableActionPlaceholder}>-</span>
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
                     ))}
-                    {displayCard.rows.some((entry) => entry.editAction) ? (
-                      <span className={`${styles.dataTableCell} ${styles.dataTableActionCell}`.trim()}>
-                        {row.editAction ? (
-                          <button
-                            type="button"
-                            className={styles.dataTableEditButton}
-                            onClick={() => void handleDisplayCardEdit(row.editAction!.kind, row.editAction!.recordId)}
-                            disabled={isSending}
-                          >
-                            {row.editAction.label ?? "Edit"}
-                          </button>
-                        ) : (
-                          <span className={styles.dataTableActionPlaceholder}>-</span>
-                        )}
-                      </span>
-                    ) : null}
                   </div>
-                ))}
-              </div>
-              {displayCard.footer ? <div className={styles.planWarning}>{displayCard.footer}</div> : null}
-            </div>
+                  {displayCard.footer ? <div className={styles.planWarning}>{displayCard.footer}</div> : null}
+                </div>
+              );
+            })()
           ) : null}
 
           {planSummary ? (
@@ -4865,6 +6201,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {isUploadsModalOpen ? (
+        <UploadedFilesModal
+          clientName={activeClient?.name ?? "Finley workspace"}
+          files={uploadedFilesModalFiles}
+          onClose={() => setIsUploadsModalOpen(false)}
+          onAddMore={() => {
+            setIsUploadsModalOpen(false);
+            conciergeUploadInputRef.current?.click();
+          }}
+        />
       ) : null}
 
       <CreateClientDialog

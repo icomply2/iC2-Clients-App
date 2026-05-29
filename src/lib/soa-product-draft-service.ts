@@ -4,7 +4,7 @@ import type {
   ProductDraftResponseV1,
   ProductRecommendationDraftV1,
 } from "@/lib/soa-output-contracts";
-import { normalizeRecommendationLanguage } from "@/lib/soa-recommendation-language";
+import { normalizeRecommendationLanguage, sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
 
 export type SoaProductDraftRequest = {
   clientName?: string | null;
@@ -170,6 +170,34 @@ function summarizeRecentMessages(recentMessages: SoaProductDraftRequest["recentM
     }));
 }
 
+function looksLikeInsuranceAdvice(text: string | null | undefined) {
+  return /\b(insurance|life\s*(?:\/|and)?\s*tpd|tpd|trauma|income protection|ip cover|life cover|cover adequacy|cover gap|sum insured|insured|premium|underwriting|waiting period|benefit period|policy|default cover|in-super cover|insurance needs|needs analysis)\b/i.test(
+    text ?? "",
+  );
+}
+
+function isAllowedProductRecommendation(entry: ProductRecommendationDraftV1) {
+  if (entry.productType === "insurance") return false;
+
+  const text = [
+    entry.recommendationText,
+    entry.currentProductName,
+    entry.currentProvider,
+    entry.recommendedProductName,
+    entry.recommendedProvider,
+    entry.suitabilityRationale,
+    ...entry.clientBenefits,
+    ...entry.consequences,
+    ...entry.alternativesConsidered.flatMap((alternative) => [
+      alternative.productName,
+      alternative.provider,
+      alternative.reasonDiscounted,
+    ]),
+  ].filter(Boolean).join(" ");
+
+  return !looksLikeInsuranceAdvice(text);
+}
+
 function normalizeProductDrafts(value: unknown, clientName?: string | null): ProductRecommendationDraftV1[] | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -218,40 +246,48 @@ function normalizeProductDrafts(value: unknown, clientName?: string | null): Pro
         typeof entry.recommendedProductName === "string" ? entry.recommendedProductName.trim() : null,
       recommendedProvider:
         typeof entry.recommendedProvider === "string" ? entry.recommendedProvider.trim() : null,
-      clientBenefits: normalizeStringArray(entry.clientBenefits),
-      consequences: normalizeStringArray(entry.consequences),
-      suitabilityRationale: typeof entry.suitabilityRationale === "string" ? entry.suitabilityRationale.trim() : null,
+      clientBenefits: normalizeStringArray(entry.clientBenefits).map(sanitizeClientFacingResearchLanguage),
+      consequences: normalizeStringArray(entry.consequences).map(sanitizeClientFacingResearchLanguage),
+      suitabilityRationale:
+        typeof entry.suitabilityRationale === "string"
+          ? sanitizeClientFacingResearchLanguage(entry.suitabilityRationale)
+          : null,
       alternativesConsidered: Array.isArray(entry.alternativesConsidered)
         ? entry.alternativesConsidered
             .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
             .map((item) => ({
               productName: typeof item.productName === "string" ? item.productName.trim() : null,
               provider: typeof item.provider === "string" ? item.provider.trim() : null,
-              reasonDiscounted: typeof item.reasonDiscounted === "string" ? item.reasonDiscounted.trim() : null,
+                reasonDiscounted:
+                  typeof item.reasonDiscounted === "string"
+                    ? sanitizeClientFacingResearchLanguage(item.reasonDiscounted)
+                    : null,
             }))
         : [],
     }))
-    .filter((entry) => entry.recommendationText);
+    .filter((entry) => entry.recommendationText && isAllowedProductRecommendation(entry));
 
   return normalized.length ? normalized : null;
 }
 
 function buildFallbackProductDrafts(request: SoaProductDraftRequest): ProductRecommendationDraftV1[] {
-  return (request.intakeAssessment?.candidateProductReviewNotes ?? []).map((note) => ({
-    action: "retain",
-    productType: "other",
-    recommendedFor: (request.clientPeople?.length ? request.clientPeople.map((person) => person.name) : [request.clientName ?? "Client"]).filter(Boolean),
-    recommendationText: normalizeRecommendationLanguage(note, request.clientName),
-    linkedObjectiveTexts: request.objectives.map((objective) => objective.text).filter(Boolean),
-    currentProductName: null,
-    currentProvider: null,
-    recommendedProductName: null,
-    recommendedProvider: null,
-    clientBenefits: [],
-    consequences: [],
-    suitabilityRationale: null,
-    alternativesConsidered: [],
-  }));
+  return (request.intakeAssessment?.candidateProductReviewNotes ?? [])
+    .filter((note) => !looksLikeInsuranceAdvice(note))
+    .map((note) => ({
+      action: "retain",
+      productType: "other",
+      recommendedFor: (request.clientPeople?.length ? request.clientPeople.map((person) => person.name) : [request.clientName ?? "Client"]).filter(Boolean),
+      recommendationText: normalizeRecommendationLanguage(note, request.clientName),
+      linkedObjectiveTexts: request.objectives.map((objective) => objective.text).filter(Boolean),
+      currentProductName: null,
+      currentProvider: null,
+      recommendedProductName: null,
+      recommendedProvider: null,
+      clientBenefits: [],
+      consequences: [],
+      suitabilityRationale: null,
+      alternativesConsidered: [],
+    }));
 }
 
 function fallbackProductDrafts(request: SoaProductDraftRequest, warning?: string | null): ProductDraftResponseV1 {
@@ -281,7 +317,10 @@ async function requestOpenAiProductDrafts(
           content: [
             "You are Finley, an AI assistant helping an Australian financial adviser prepare a Statement of Advice.",
             "Draft product recommendations only and return JSON matching the provided schema.",
-            "Product Recommendations are the correct home for advice to retain, replace, rollover, consolidate, establish, commence, switch, dispose of, or alter any superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial product.",
+            "Product Recommendations are only for investment, superannuation, pension, annuity, platform, wrap, managed account, portfolio, and related administration products.",
+            "Do not draft insurance recommendations in Product Recommendations. Exclude Life/TPD, Trauma, Income Protection, personal insurance, default cover, in-super cover, premiums, underwriting, cover adequacy, insurance needs analysis, insurance retention, insurance replacement, policy ownership, or applications for cover. Those belong only in Insurance Needs Analysis, Recommended Insurance Policies, Insurance Replacement, or another insurance-specific section.",
+            "For this response, never use productType 'insurance'. If the evidence only supports insurance advice, return an empty recommendations array.",
+            "Product Recommendations are the correct home for advice to retain, replace, rollover, consolidate, establish, commence, switch, dispose of, or alter any superannuation, pension, investment, annuity, platform, wrap, managed account, portfolio, or other non-insurance financial product.",
             "Product Recommendations are also the correct home for investment portfolio advice, asset allocation implementation, model portfolio recommendations, risk profile implementation, product/platform administration, product fee comparisons, product retention, and product establishment.",
             "Every product recommendation must explicitly identify who the product recommendation is for. Populate recommendedFor with one or more names from clientPeople.",
             "If the product recommendation applies only to the primary client, address that person by name in recommendationText.",
@@ -291,6 +330,7 @@ async function requestOpenAiProductDrafts(
             "Write as an adviser-assistant reasoning about this specific client and their likely product needs, not as a generic product marketing template.",
             "Write all recommendationText, clientBenefits, suitabilityRationale, consequences, and alternativesConsidered.reasonDiscounted in second person, addressed directly to the client using 'you' and 'your'.",
             "For recommendationText, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'.",
+            "Never mention ProductRex, ProductRex report, uploaded report names, or internal research tooling in client-facing SOA wording. Use 'our product research', 'our research', 'the product comparison', or direct product facts instead.",
             "Do not use 'you should', 'you need to', or 'you must' in recommendationText because that reads as opinion or instruction rather than advice.",
             "Do not write about the client in third person using wording such as 'Guy's superannuation', 'their objectives', 'the client will benefit', 'he', 'she', or 'they'.",
             "For joint clients, use 'you' and 'your' as the collective addressee. Use names only where needed to identify account ownership, policy ownership, or which person will take a specific action, then return to second-person wording.",
@@ -323,6 +363,8 @@ async function requestOpenAiProductDrafts(
                 "trade-offs and implementation reality",
                 "discounted alternatives",
               ],
+              exclusionBoundary:
+                "Exclude all insurance recommendations, including Life/TPD, Trauma, Income Protection, default or in-super cover, policy ownership, premiums, underwriting, cover adequacy, insurance needs analysis, insurance retention, insurance replacement, and applications for cover. Product Recommendations are limited to investment, superannuation, pension, annuity, platform, wrap, managed account, portfolio, and related non-insurance products.",
             },
             objectives: summarizeObjectives(request.objectives),
             scope: request.scope ?? null,

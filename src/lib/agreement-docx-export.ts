@@ -7,7 +7,21 @@ import {
   normalizeDocumentStyleProfile,
   type DocumentStyleProfile,
 } from "@/lib/documents/document-style-profile";
-import { DEFAULT_SERVICE_AGREEMENT_SERVICES, groupServiceAgreementServices } from "@/lib/documents/document-sections";
+import {
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS,
+  ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  DEFAULT_SERVICE_AGREEMENT_SERVICES,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
+  ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS,
+  ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS,
+  ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
+  groupServiceAgreementServices,
+} from "@/lib/documents/document-sections";
+import { readAppDefaultFinleyTemplate, readLicenseeFinleyTemplate } from "@/lib/finley-template-store";
+import { buildProfileScalarTemplateFields } from "@/lib/finley-template-profile-fields";
+import { extractFinleyTemplateFieldsFromXml, type FinleyTemplateDocumentType } from "@/lib/finley-template-validation";
 
 export type StandaloneAgreementType = "ongoing" | "annual";
 
@@ -33,6 +47,8 @@ export type StandaloneAgreementFeeRow = {
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const BODY_FONT_SIZE = 22;
+const TEMPLATE_PLACEHOLDER_WARNING =
+  "This template contains unsupported Finley placeholders. Validate the template in Admin > Templates before using it.";
 let activeDocumentStyle = DEFAULT_DOCUMENT_STYLE_PROFILE;
 
 function activeBodyColor() {
@@ -100,6 +116,15 @@ function escapeXml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function decodeXmlText(value: string) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 function text(value?: string | null) {
@@ -184,6 +209,10 @@ function headingXml(value: string, level: 1 | 2 = 1) {
   });
 }
 
+function pageBreakXml() {
+  return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+}
+
 function tableCellXml(
   value: string,
   options: { widthPct?: number; bold?: boolean; fill?: string; align?: "center" | "right" } = {},
@@ -209,6 +238,23 @@ function servicesXml(services: string[]) {
       ...group.items.map((item) => paragraphXml(item, { bullet: true, spacingAfter: 40 })),
     ].join(""))
     .join("");
+}
+
+function sectionsXml(sections: Array<{ heading: string; paragraphs: string[] }>) {
+  return sections
+    .map((section) => [
+      headingXml(section.heading, 2),
+      ...section.paragraphs.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
+    ].join(""))
+    .join("");
+}
+
+function paragraphsXml(paragraphs: string[]) {
+  return paragraphs.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })).join("");
+}
+
+function bulletListXml(items: string[]) {
+  return items.map((item) => paragraphXml(item, { bullet: true, spacingAfter: 40 })).join("");
 }
 
 function parseCurrencyAmount(value?: string | null) {
@@ -302,6 +348,300 @@ function signatureTableXml(names: string[], adviserName: string) {
   </w:tbl>${paragraphXml(`Adviser: ${adviserName || "<<adviser.name>>"}`, { spacingAfter: 0 })}`;
 }
 
+function placeholderParagraphXml(fieldName: string, options: Parameters<typeof paragraphXml>[1] = {}) {
+  return paragraphXml(`<<${fieldName}>>`, options);
+}
+
+function templateTokens(fieldName: string) {
+  return [`&lt;&lt;${fieldName}&gt;&gt;`, `<<${fieldName}>>`];
+}
+
+type XmlTextChar = {
+  char: string;
+  start: number;
+  end: number;
+};
+
+type TemplateTokenOccurrence = {
+  fieldName: string;
+  start: number;
+  end: number;
+};
+
+function decodeXmlTextWithRanges(value: string, offset: number) {
+  const chars: XmlTextChar[] = [];
+  let index = 0;
+
+  while (index < value.length) {
+    if (value[index] === "&") {
+      const entityEnd = value.indexOf(";", index);
+
+      if (entityEnd !== -1) {
+        const entity = value.slice(index, entityEnd + 1);
+        const decoded = decodeXmlText(entity);
+
+        if (decoded.length === 1) {
+          chars.push({ char: decoded, start: offset + index, end: offset + entityEnd + 1 });
+          index = entityEnd + 1;
+          continue;
+        }
+      }
+    }
+
+    chars.push({ char: value[index] ?? "", start: offset + index, end: offset + index + 1 });
+    index += 1;
+  }
+
+  return chars;
+}
+
+function findTemplateTokenOccurrences(xml: string, fieldName?: string) {
+  const chars: XmlTextChar[] = [];
+  const textNodePattern = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+  let textNodeMatch: RegExpExecArray | null;
+
+  while ((textNodeMatch = textNodePattern.exec(xml)) !== null) {
+    const content = textNodeMatch[1] ?? "";
+    const contentOffset = textNodeMatch.index + textNodeMatch[0].indexOf(">") + 1;
+    chars.push(...decodeXmlTextWithRanges(content, contentOffset));
+  }
+
+  const visibleText = chars.map((item) => item.char).join("");
+  const tokenPattern = /<<\s*([^<>]+?)\s*>>/g;
+  const occurrences: TemplateTokenOccurrence[] = [];
+  let tokenMatch: RegExpExecArray | null;
+
+  while ((tokenMatch = tokenPattern.exec(visibleText)) !== null) {
+    const matchedFieldName = tokenMatch[1]?.trim();
+    const matchLength = tokenMatch[0].length;
+    const firstChar = chars[tokenMatch.index];
+    const lastChar = chars[tokenMatch.index + matchLength - 1];
+
+    if (!matchedFieldName || !firstChar || !lastChar || (fieldName && matchedFieldName !== fieldName)) {
+      continue;
+    }
+
+    occurrences.push({
+      fieldName: matchedFieldName,
+      start: firstChar.start,
+      end: lastChar.end,
+    });
+  }
+
+  return occurrences;
+}
+
+function replaceTemplateTokenText(xml: string, fieldName: string, value: string) {
+  return findTemplateTokenOccurrences(xml, fieldName)
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (current, occurrence) => `${current.slice(0, occurrence.start)}${escapeXml(value)}${current.slice(occurrence.end)}`,
+      xml,
+    );
+}
+
+function findParagraphStartBefore(xml: string, index: number) {
+  const precedingXml = xml.slice(0, index);
+  const starts = Array.from(precedingXml.matchAll(/<w:p(?:\s|>)/g));
+
+  return starts.length ? starts[starts.length - 1]?.index ?? -1 : -1;
+}
+
+function replaceInlineField(xml: string, fieldName: string, value: string) {
+  const rawTokenReplaced = templateTokens(fieldName).reduce(
+    (current, token) => current.replaceAll(token, escapeXml(value)),
+    xml,
+  );
+
+  return replaceTemplateTokenText(rawTokenReplaced, fieldName, value);
+}
+
+function replaceParagraphContainingField(xml: string, fieldName: string, valueXml: string) {
+  let nextXml = xml;
+  const occurrences = findTemplateTokenOccurrences(xml, fieldName).sort((left, right) => right.start - left.start);
+
+  for (const occurrence of occurrences) {
+    const paragraphStart = findParagraphStartBefore(nextXml, occurrence.start);
+    const paragraphEnd = nextXml.indexOf("</w:p>", occurrence.end);
+
+    if (paragraphStart === -1 || paragraphEnd === -1) {
+      nextXml = `${nextXml.slice(0, occurrence.start)}${valueXml}${nextXml.slice(occurrence.end)}`;
+      continue;
+    }
+
+    const replacementEnd = paragraphEnd + "</w:p>".length;
+    nextXml = `${nextXml.slice(0, paragraphStart)}${valueXml}${nextXml.slice(replacementEnd)}`;
+  }
+
+  return nextXml;
+}
+
+function replaceBlockField(xml: string, fieldName: string, valueXml: string) {
+  const rawTokenReplaced = templateTokens(fieldName).reduce((current, token) => {
+    let nextXml = current;
+    let searchFrom = 0;
+
+    while (searchFrom < nextXml.length) {
+      const tokenIndex = nextXml.indexOf(token, searchFrom);
+
+      if (tokenIndex === -1) {
+        break;
+      }
+
+      const paragraphStart = findParagraphStartBefore(nextXml, tokenIndex);
+      const paragraphEnd = nextXml.indexOf("</w:p>", tokenIndex);
+
+      if (paragraphStart === -1 || paragraphEnd === -1) {
+        nextXml = `${nextXml.slice(0, tokenIndex)}${valueXml}${nextXml.slice(tokenIndex + token.length)}`;
+        searchFrom = tokenIndex + valueXml.length;
+        continue;
+      }
+
+      const replacementEnd = paragraphEnd + "</w:p>".length;
+      nextXml = `${nextXml.slice(0, paragraphStart)}${valueXml}${nextXml.slice(replacementEnd)}`;
+      searchFrom = paragraphStart + valueXml.length;
+    }
+
+    return nextXml;
+  }, xml);
+
+  return replaceParagraphContainingField(rawTokenReplaced, fieldName, valueXml);
+}
+
+function resolveLicenseeId(profile: ClientProfile) {
+  return text(profile.adviser?.licensee?.id) || text(profile.licensee);
+}
+
+function agreementDocumentType(agreementType: StandaloneAgreementType): FinleyTemplateDocumentType {
+  return agreementType === "annual" ? "annual-agreement" : "ongoing-agreement";
+}
+
+function buildAgreementTemplateModel(profile: ClientProfile, input: StandaloneAgreementDocxInput = {}) {
+  const clientName = personName(profile);
+  const agreementType = input.agreementType === "annual" ? "annual" : "ongoing";
+  const title = agreementType === "annual" ? "Annual Advice Agreement" : "Ongoing Service Agreement";
+  const adviserName = text(input.adviserName) || text(profile.adviser?.name) || "<<adviser.name>>";
+  const practiceName = text(input.practiceName) || text(profile.practice) || text(profile.adviser?.practice?.name) || "<<practice.name>>";
+  const licenseeName = text(input.licenseeName) || text(profile.licensee) || text(profile.adviser?.licensee?.name) || "";
+  const signatureNames = [profile.client?.name, profile.partner?.name].filter(Boolean) as string[];
+  const opening =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS;
+  const agreementDetailSections =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+      : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const acknowledgementParagraphs =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
+  const acknowledgementItems =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS;
+  const consentOpeningParagraphs = [
+    agreementType === "annual"
+      ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+      : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.",
+    agreementType === "annual"
+      ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+      : "This consent may be withdrawn by you at any time by notifying us in writing.",
+  ];
+  const consentNotes = text(input.consentNotes);
+
+  return {
+    inline: {
+      ...buildProfileScalarTemplateFields(profile),
+      "document.date": formatToday(),
+      "client.addressee": clientName,
+      "client.salutation": salutationName(clientName),
+      "agreement.title": title,
+      "consent.title": "Consent To Deduct Fees From Your Account",
+      "adviser.name": adviserName,
+      "practice.name": practiceName,
+      "practice.licenseeName": licenseeName,
+    },
+    blocks: {
+      "client.addressBlock": personAddressLines(profile.client).map((line) => paragraphXml(line, { spacingAfter: 0 })).join(""),
+      "agreement.openingParagraphs": paragraphsXml(opening),
+      "agreement.detailSections": sectionsXml(agreementDetailSections),
+      "agreement.services": servicesXml(input.services?.filter(Boolean) ?? DEFAULT_SERVICE_AGREEMENT_SERVICES),
+      "agreement.feesTable": feeTableXml(input.fees),
+      "agreement.acknowledgement": [
+        paragraphsXml(acknowledgementParagraphs),
+        bulletListXml(acknowledgementItems),
+      ].join(""),
+      "client.signatureBlock": signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),
+      "agreement.clientSignatures": signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),
+      "consent.openingParagraphs": paragraphsXml(consentOpeningParagraphs),
+      "consent.notes": consentNotes ? paragraphXml(consentNotes, { spacingAfter: 160 }) : "",
+      "consent.feesTable": feeTableXml(input.fees),
+      "consent.clientSignatures": signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),
+    },
+    imageFields: ["practice.logo", "practice.letterhead", "practice.footer", "adviser.signatureImage"],
+  };
+}
+
+function defaultAgreementTemplateDocumentXml(agreementType: StandaloneAgreementType) {
+  const isAnnual = agreementType === "annual";
+  const body = [
+    placeholderParagraphXml("document.date", { spacingAfter: 220 }),
+    placeholderParagraphXml("client.addressee", { bold: true, spacingAfter: 0 }),
+    placeholderParagraphXml("html:client.addressBlock"),
+    headingXml("<<agreement.title>>"),
+    paragraphXml("Dear <<client.salutation>>,", { spacingAfter: 180 }),
+    placeholderParagraphXml("html:agreement.openingParagraphs"),
+    placeholderParagraphXml("agreement.detailSections"),
+    headingXml("The services you are entitled to receive", 2),
+    paragraphXml(
+      isAnnual
+        ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+        : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below.",
+      { spacingAfter: 160 },
+    ),
+    placeholderParagraphXml("agreement.services"),
+    headingXml(isAnnual ? "What fees are payable under my fixed term fee arrangement?" : "What fees are payable under my ongoing fee arrangement?", 2),
+    paragraphXml(
+      isAnnual
+        ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+        : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:",
+      { spacingAfter: 160 },
+    ),
+    placeholderParagraphXml("agreement.feesTable"),
+    headingXml("Your Acknowledgement", 2),
+    placeholderParagraphXml("agreement.acknowledgement"),
+    placeholderParagraphXml("client.signatureBlock"),
+    pageBreakXml(),
+    headingXml("<<consent.title>>"),
+    placeholderParagraphXml("html:consent.openingParagraphs"),
+    placeholderParagraphXml("html:consent.notes"),
+    headingXml(isAnnual ? "What fees are payable under my fixed term fee arrangement?" : "What fees are payable under my ongoing fee arrangement?", 2),
+    placeholderParagraphXml("consent.feesTable"),
+    headingXml("Your consent to deduct fees from your account", 2),
+    paragraphXml(
+      isAnnual
+        ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+        : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form.",
+      { spacingAfter: 180 },
+    ),
+    placeholderParagraphXml("client.signatureBlock"),
+    placeholderParagraphXml("practice.name"),
+    placeholderParagraphXml("practice.licenseeName"),
+  ].join("");
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    ${body}
+    <w:sectPr>
+      <w:pgSz w:w="11906" w:h="16838"/>
+      <w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/>
+    </w:sectPr>
+  </w:body>
+</w:document>`;
+}
+
 function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocxInput = {}) {
   const clientName = personName(profile);
   const clientSalutationName = salutationName(clientName);
@@ -315,38 +655,72 @@ function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocx
 
   const opening =
     agreementType === "annual"
-      ? [
-          "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. The purpose of this letter is to establish an Annual Advice Agreement.",
-          "The services you receive as part of your Annual Advice Agreement are important as they offer support to help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled to and the cost, are set out below.",
-          `This arrangement will be between ${clientName} and ${practiceName}. The arrangement will commence on the date you sign this agreement.`,
-        ]
-      : [
-          "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.",
-          "We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.",
-          "The commencement date of this arrangement is the date you sign this agreement. Upon signing this agreement, any existing service agreement between us is deemed to be automatically terminated and replaced by this agreement.",
-        ];
+      ? ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS;
+  const agreementDetailSections =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS
+      : ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS;
+  const acknowledgementParagraphs =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS;
+  const acknowledgementItems =
+    agreementType === "annual"
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS;
+
+  const serviceAndFeeXml = [
+    headingXml("The services you are entitled to receive", 2),
+    paragraphXml(
+      agreementType === "annual"
+        ? "The terms of the Fixed Term Arrangement, including the services you are entitled to and the cost, are set out below."
+        : "The terms of the Ongoing Service Arrangement, including the services you are entitled to and the cost, are set out below.",
+      { spacingAfter: 160 },
+    ),
+    servicesXml(input.services?.filter(Boolean) ?? DEFAULT_SERVICE_AGREEMENT_SERVICES),
+    headingXml(agreementType === "annual" ? "What fees are payable under my fixed term fee arrangement?" : "What fees are payable under my ongoing fee arrangement?", 2),
+    paragraphXml(
+      agreementType === "annual"
+        ? "The following fixed term fees will be payable to cover the services you are entitled to receive under the fixed term fee arrangement:"
+        : "The following ongoing fees will be payable to cover the services you are entitled to receive under the ongoing fee arrangement:",
+      { spacingAfter: 160 },
+    ),
+    feeTableXml(input.fees),
+  ].join("");
 
   const body = [
     paragraphXml(formatToday(), { spacingAfter: 220 }),
     paragraphXml(clientName, { bold: true, spacingAfter: 0 }),
     ...addressLines.map((line) => paragraphXml(line, { spacingAfter: 0 })),
-    paragraphXml(`Dear ${clientSalutationName},`, { spacingAfter: 180 }),
     headingXml(title),
+    paragraphXml(`Dear ${clientSalutationName},`, { spacingAfter: 180 }),
     ...opening.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
-    headingXml(agreementType === "annual" ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive", 2),
-    servicesXml(input.services?.filter(Boolean) ?? DEFAULT_SERVICE_AGREEMENT_SERVICES),
-    headingXml("Fees Payable", 2),
-    paragraphXml("The fees payable for this agreement are set out below. All fees include GST where applicable.", { spacingAfter: 160 }),
-    feeTableXml(input.fees),
+    sectionsXml(agreementDetailSections),
+    headingXml("Your Acknowledgement", 2),
+    ...acknowledgementParagraphs.map((paragraph) => paragraphXml(paragraph, { spacingAfter: 160 })),
+    ...acknowledgementItems.map((item) => paragraphXml(item, { bullet: true, spacingAfter: 40 })),
+    signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),
     headingXml("Consent To Deduct Fees From Your Account", 2),
-    paragraphXml("By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.", { spacingAfter: 160 }),
-    text(input.consentNotes) ? paragraphXml(text(input.consentNotes), { spacingAfter: 160 }) : "",
-    paragraphXml("This consent may be withdrawn by you at any time by notifying us in writing.", { spacingAfter: 160 }),
-    headingXml(agreementType === "annual" ? "Next Steps" : "Your Acknowledgement", 2),
     paragraphXml(
       agreementType === "annual"
-        ? "Please sign the acknowledgement below and accept the Annual Advice Agreement outlined in this letter."
-        : "You agree to be bound by the terms and conditions of this agreement. You may terminate or vary the agreement at any time by notifying us in writing.",
+        ? "We are required to obtain your written consent to deduct the fees payable for our advice services for the upcoming 12 months. Without your consent, our fixed term service agreement cannot be entered into."
+        : "By signing this consent, you authorise the agreed advice fees to be deducted from the nominated account for the services described in this agreement.",
+      { spacingAfter: 160 },
+    ),
+    text(input.consentNotes) ? paragraphXml(text(input.consentNotes), { spacingAfter: 160 }) : "",
+    paragraphXml(
+      agreementType === "annual"
+        ? "Accordingly, no services or advice will be delivered if you do not return this signed and dated form consenting to payment of our fixed term advice fees."
+        : "This consent may be withdrawn by you at any time by notifying us in writing.",
+      { spacingAfter: 160 },
+    ),
+    serviceAndFeeXml,
+    headingXml("Your consent to deduct fees from your account", 2),
+    paragraphXml(
+      agreementType === "annual"
+        ? "I/we consent to the payment of fixed term advice fees in accordance with the terms of this fee consent form."
+        : "I/we consent to the payment of ongoing advice fees in accordance with the terms of this fee consent form.",
       { spacingAfter: 180 },
     ),
     signatureTableXml(signatureNames.length ? signatureNames : [clientName], adviserName),
@@ -364,6 +738,71 @@ function buildDocumentXml(profile: ClientProfile, input: StandaloneAgreementDocx
     </w:sectPr>
   </w:body>
 </w:document>`;
+}
+
+async function createDocxFromDocumentXml(documentXml: string) {
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", CONTENT_TYPES_XML);
+  zip.folder("_rels")?.file(".rels", ROOT_RELS_XML);
+  const word = zip.folder("word");
+  word?.file("document.xml", documentXml);
+  word?.file("styles.xml", stylesXml(activeDocumentStyle));
+  word?.folder("_rels")?.file("document.xml.rels", DOCUMENT_RELS_XML);
+
+  return Buffer.from(await zip.generateAsync({ type: "uint8array", mimeType: DOCX_MIME_TYPE }));
+}
+
+function replaceImageFieldWithEmpty(xml: string, fieldName: string) {
+  return replaceBlockField(replaceInlineField(xml, fieldName, ""), fieldName, "");
+}
+
+async function buildDefaultAgreementTemplateDocx(
+  agreementType: StandaloneAgreementType,
+  style?: Partial<DocumentStyleProfile> | null,
+) {
+  activeDocumentStyle = normalizeDocumentStyleProfile(style);
+  return createDocxFromDocumentXml(defaultAgreementTemplateDocumentXml(agreementType));
+}
+
+async function mergeAgreementTemplateBuffer(
+  templateBuffer: Buffer,
+  profile: ClientProfile,
+  input: StandaloneAgreementDocxInput,
+) {
+  const zip = await JSZip.loadAsync(templateBuffer);
+  const model = buildAgreementTemplateModel(profile, input);
+
+  await Promise.all(
+    Object.values(zip.files)
+      .filter((file) => /^word\/(?:document|header\d+|footer\d+)\.xml$/i.test(file.name))
+      .map(async (file) => {
+        let xml = await file.async("string");
+
+        for (const [fieldName, value] of Object.entries(model.blocks)) {
+          xml = replaceBlockField(xml, fieldName, value);
+          xml = replaceBlockField(xml, `html:${fieldName}`, value);
+        }
+
+        for (const [fieldName, value] of Object.entries(model.inline)) {
+          xml = replaceInlineField(xml, fieldName, value);
+          xml = replaceInlineField(xml, `html:${fieldName}`, paragraphXml(value));
+        }
+
+        for (const fieldName of model.imageFields) {
+          xml = replaceImageFieldWithEmpty(xml, fieldName);
+        }
+
+        if (file.name === "word/document.xml" && extractFinleyTemplateFieldsFromXml(xml).length) {
+          xml = xml.replace("</w:body>", `${paragraphXml(TEMPLATE_PLACEHOLDER_WARNING, { italic: true })}</w:body>`);
+        }
+
+        zip.file(file.name, xml);
+      }),
+  );
+
+  zip.folder("word")?.file("styles.xml", stylesXml(activeDocumentStyle));
+
+  return Buffer.from(await zip.generateAsync({ type: "uint8array", mimeType: DOCX_MIME_TYPE }));
 }
 
 function formatToday() {
@@ -385,18 +824,23 @@ export async function renderStandaloneAgreementDocx(
   input: StandaloneAgreementDocxInput = {},
 ) {
   activeDocumentStyle = normalizeDocumentStyleProfile(input.documentStyleProfile);
+  const agreementType = input.agreementType === "annual" ? "annual" : "ongoing";
+  const documentType = agreementDocumentType(agreementType);
+  const licenseeTemplate = await readLicenseeFinleyTemplate(documentType, resolveLicenseeId(profile));
+  const appDefaultTemplate = licenseeTemplate ? null : await readAppDefaultFinleyTemplate(documentType);
+  const templateBuffer =
+    licenseeTemplate?.content
+    ?? appDefaultTemplate?.content
+    ?? await buildDefaultAgreementTemplateDocx(agreementType, activeDocumentStyle);
 
-  const zip = new JSZip();
-  zip.file("[Content_Types].xml", CONTENT_TYPES_XML);
-  zip.folder("_rels")?.file(".rels", ROOT_RELS_XML);
-  const word = zip.folder("word");
-  word?.file("document.xml", buildDocumentXml(profile, input));
-  word?.file("styles.xml", stylesXml(activeDocumentStyle));
-  word?.folder("_rels")?.file("document.xml.rels", DOCUMENT_RELS_XML);
+  try {
+    return await mergeAgreementTemplateBuffer(templateBuffer, profile, { ...input, agreementType });
+  } catch {
+    return createDocxFromDocumentXml(buildDocumentXml(profile, { ...input, agreementType }));
+  }
+}
 
-  return zip.generateAsync({
-    type: "arraybuffer",
-    mimeType: DOCX_MIME_TYPE,
-    compression: "DEFLATE",
-  });
+export async function buildAgreementTemplateSampleDocx(documentType: FinleyTemplateDocumentType) {
+  const agreementType = documentType === "annual-agreement" ? "annual" : "ongoing";
+  return buildDefaultAgreementTemplateDocx(agreementType, DEFAULT_DOCUMENT_STYLE_PROFILE);
 }

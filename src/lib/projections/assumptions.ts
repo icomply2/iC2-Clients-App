@@ -16,8 +16,27 @@ export const currentProjectionAssumptions: ProjectionAssumptions = {
       medicareShadeInRate: 0.1,
       medicareShadeInThreshold: 34028,
       offsets: {
-        seniorsAndPensionersTaxOffset: 0,
-        lowIncomeTaxOffset: 0,
+        lowIncomeTaxOffset: {
+          maximumOffset: 700,
+          firstThreshold: 37500,
+          secondThreshold: 45000,
+          upperThreshold: 66667,
+          firstTaperRate: 0.05,
+          secondTaperRate: 0.015,
+        },
+        seniorsAndPensionersTaxOffset: {
+          single: {
+            maximumOffset: 2230,
+            shadeOutThreshold: 34919,
+            cutOutThreshold: 52759,
+          },
+          coupleEach: {
+            maximumOffset: 1602,
+            shadeOutThreshold: 30994,
+            cutOutThreshold: 43810,
+          },
+          taperRate: 0.125,
+        },
       },
     },
     agePension: {

@@ -32,7 +32,7 @@
 .nav {
   display: grid;
   gap: 0.3rem;
-  padding: 1rem 0.35rem 1rem 0.35rem;
+  padding: 1rem 0.35rem;
 }
 
 .navGroup {
@@ -43,9 +43,8 @@
 .navItem {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
   min-height: 2.25rem;
-  padding: 0.45rem 0.5rem;
+  padding: 0.45rem 0.55rem 0.45rem 1.35rem;
   border: 0;
   border-radius: 0.6rem;
   background: transparent;
@@ -69,16 +68,10 @@
   font-size: 0.8rem;
 }
 
-.navIcon {
-  width: 0.9rem;
-  text-align: center;
-  font-size: 0.95rem;
-}
-
 .subnav {
   display: grid;
   gap: 0.2rem;
-  padding-left: 1.85rem;
+  padding-left: 1.35rem;
 }
 
 .subnavItem {
@@ -694,6 +687,38 @@
   font-weight: 800;
 }
 
+.factFindDataTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.factFindBulkDeleteButton {
+  min-height: 2.2rem;
+  padding: 0 0.85rem;
+  border: 1px solid #f3b3ae;
+  border-radius: 0.55rem;
+  background: #fff5f5;
+  color: #b42318;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.factFindBulkDeleteButton:hover:not(:disabled) {
+  border-color: #b42318;
+  background: #fff0f0;
+}
+
+.factFindBulkDeleteButton:disabled {
+  border-color: #d7dee7;
+  background: #f8fafc;
+  color: #8a99ab;
+  cursor: not-allowed;
+}
+
 .factFindDetailSections {
   display: grid;
   gap: 0.85rem;
@@ -794,6 +819,29 @@
   text-transform: uppercase;
 }
 
+.factFindDataTableActionHeaderCell {
+  text-align: center;
+}
+
+.factFindDataTableSelectCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-right: 0.3rem;
+  padding-left: 0.3rem;
+}
+
+.factFindRowCheckbox {
+  width: 1rem;
+  height: 1rem;
+  accent-color: #f2c500;
+  cursor: pointer;
+}
+
+.factFindRowCheckbox:disabled {
+  cursor: not-allowed;
+}
+
 .factFindDataTableCell {
   border-top: 1px solid #edf2f7;
   word-break: break-word;
@@ -802,7 +850,8 @@
 .factFindDataTableActionCell {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  gap: 0.45rem;
 }
 
 .factFindDataTableActionPlaceholder {
@@ -827,6 +876,15 @@
 .factFindEditButton:hover {
   border-color: #102a56;
   background: #f8fafc;
+}
+
+.factFindDeleteButton {
+  color: #b42318;
+}
+
+.factFindDeleteButton:hover {
+  border-color: #f3b3ae;
+  background: #fff5f5;
 }
 
 .factFindEditButton svg {

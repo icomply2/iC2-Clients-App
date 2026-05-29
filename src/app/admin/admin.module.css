@@ -217,6 +217,186 @@
   font-weight: 800;
 }
 
+.templateGuideGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.templateGuideCard,
+.templateValidationReport {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid #d7e0ec;
+  border-radius: 0.45rem;
+  background: #fbfdff;
+}
+
+.templateGuideCard h3,
+.templateValidationReport h3 {
+  margin: 0;
+  color: #0f2e57;
+  font-size: 0.96rem;
+}
+
+.templateGuideCard p {
+  margin: 0;
+  color: #425466;
+  line-height: 1.5;
+}
+
+.templateUploadRow {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.fileInput {
+  min-height: 2.5rem;
+  padding: 0.45rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #102a56;
+  font: inherit;
+}
+
+.actionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.45rem;
+  padding: 0 0.85rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #102a56;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.actionButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.statusMessage {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #f1d372;
+  border-radius: 0.4rem;
+  background: #fffbea;
+  color: #7b5b00;
+  font-weight: 700;
+}
+
+.templateRuleList,
+.templateValidationGroup ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: #425466;
+  line-height: 1.55;
+}
+
+.templateValidationGroup {
+  display: grid;
+  gap: 0.35rem;
+  color: #102a56;
+}
+
+.templateManager {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.templateToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  padding: 0.75rem;
+  border: 1px solid #d7e0ec;
+  border-radius: 0.45rem;
+  background: #f7fafc;
+}
+
+.templateToolbarGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.toolbarButton {
+  display: inline-grid;
+  place-items: center;
+  width: 2.4rem;
+  min-height: 2.35rem;
+  padding: 0;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #102a56;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.toolbarButtonPrimary {
+  border-color: #1f7dbd;
+  background: #1f7dbd;
+  color: #fff;
+}
+
+.toolbarButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.toolbarIcon {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+}
+
+.templateToolbarHint {
+  max-width: 44rem;
+  color: #5f7286;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.hiddenFileInput {
+  display: none;
+}
+
+.templateSelectColumn {
+  width: 5.8rem;
+  text-align: center;
+}
+
+.templateSelectColumn input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.selectedTemplateRow td {
+  background: #fff8da !important;
+}
+
+.templateFileName {
+  margin: 0.35rem 0 0;
+  color: #102a56;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
 .table tbody tr:nth-child(odd) td {
   background: #fffdf4;
 }

@@ -7,7 +7,17 @@ export async function POST(request: NextRequest) {
         activeClientId?: string | null;
         activeClientName?: string | null;
         threadId?: string | null;
-        kind?: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
+        kind?:
+          | "assets"
+          | "liabilities"
+          | "employment"
+          | "income"
+          | "expenses"
+          | "superannuation"
+          | "retirement-income"
+          | "insurance"
+          | "entities"
+          | "dependants";
         recordId?: string | null;
       }
     | null;

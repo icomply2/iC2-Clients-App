@@ -10,16 +10,44 @@ export type ProjectionPerson = {
   isHomeowner: boolean;
 };
 
+export type ProjectionDependant = {
+  dependantId: string;
+  ownerPersonId: string;
+  name: string;
+  relationship?: string | null;
+  dateOfBirth?: string | null;
+};
+
 export type ProjectionAsset = {
   assetId: string;
   ownerPersonId: string;
-  type: "primary-residence" | "cash" | "funeral-bond" | "personal-asset" | "investment";
+  type:
+    | "primary-residence"
+    | "cash"
+    | "bank-account"
+    | "offset-account"
+    | "term-deposit"
+    | "investment"
+    | "investment-property"
+    | "australian-shares"
+    | "international-shares"
+    | "managed-fund"
+    | "etf"
+    | "funeral-bond"
+    | "home-contents"
+    | "motor-vehicle"
+    | "personal-asset"
+    | "business"
+    | "other";
   name: string;
   openingValue: number;
   annualIncome?: number;
   growthRateKey: "none" | "cpi" | "cash" | "Defensive" | "Moderate" | "Balanced" | "Growth" | "High Growth";
-  centrelink: "assessable" | "exempt" | "financial-asset" | "unknown";
+  centrelink: "assessable" | "exempt" | "financial-asset";
   reserveTarget?: number | null;
+  costBase?: number | null;
+  acquisitionDate?: string | null;
+  cgtTreatment?: "taxable" | "main-residence-exempt" | "personal-use-exempt" | "not-applicable";
 };
 
 export type ProjectionLiability = {
@@ -31,6 +59,50 @@ export type ProjectionLiability = {
   annualInterestRate: number;
   annualRepayment: number;
   repaymentTiming: "start-of-year" | "end-of-year";
+  repaymentType?: "principal-and-interest" | "interest-only";
+  interestDeductible?: boolean;
+};
+
+export type AssetSaleEvent = {
+  eventId: string;
+  label: string;
+  assetId: string;
+  saleDate: string | null;
+  amountMode: "full-value" | "fixed-amount";
+  fixedAmount?: number;
+  targetAssetId?: string | null;
+  enabled: boolean;
+};
+
+export type LiabilityPaymentEvent = {
+  eventId: string;
+  label: string;
+  liabilityId: string;
+  paymentDate: string | null;
+  amountMode: "full-balance" | "fixed-amount";
+  fixedAmount?: number;
+  sourceAssetId?: string | null;
+  enabled: boolean;
+};
+
+export type AssetPurchaseEvent = {
+  eventId: string;
+  label: string;
+  assetId: string;
+  purchaseDate: string | null;
+  amount: number;
+  sourceAssetId?: string | null;
+  enabled: boolean;
+};
+
+export type LiabilityDrawdownEvent = {
+  eventId: string;
+  label: string;
+  liabilityId: string;
+  drawdownDate: string | null;
+  amount: number;
+  targetAssetId?: string | null;
+  enabled: boolean;
 };
 
 export type RetirementAccount = {
@@ -41,6 +113,7 @@ export type RetirementAccount = {
   productName: string;
   openingBalance: number;
   annualFeeRate?: number;
+  annualInsurancePremium?: number;
   annualContribution?: number;
   annualContributionType?: "concessional" | "non-concessional";
   rolloverToPensionDate?: string | null;
@@ -54,10 +127,90 @@ export type RetirementAccount = {
   centrelink: "financial-asset" | "exempt" | "unknown";
 };
 
+export type SuperContributionStrategy = {
+  strategyId: string;
+  ownerPersonId: string;
+  targetAccountId: string;
+  label: string;
+  annualAmount: number;
+  contributionType: "concessional" | "non-concessional";
+  startDate?: string | null;
+  endDate?: string | null;
+  indexedToCpi: boolean;
+  enabled: boolean;
+};
+
+export type SuperRolloverEvent = {
+  eventId: string;
+  label: string;
+  sourceAccountId: string;
+  destinationAccountId?: string | null;
+  destinationPensionName?: string | null;
+  rolloverDate: string | null;
+  amountMode: "full-balance" | "fixed-amount";
+  fixedAmount?: number;
+  annualDrawdown?: number;
+  drawdownIndexedToCpi?: boolean;
+  enabled: boolean;
+};
+
+export type PensionWithdrawalEvent = {
+  eventId: string;
+  label: string;
+  accountId: string;
+  withdrawalDate: string | null;
+  amountMode: "fixed-amount" | "full-balance";
+  fixedAmount?: number;
+  targetAssetId?: string | null;
+  enabled: boolean;
+};
+
+export const projectionIncomeCategories = [
+  "employment-income",
+  "salary-income",
+  "business-income",
+  "rental-income",
+  "investment-income",
+  "superannuation-income",
+  "pension-income",
+  "centrelink-income",
+  "annuity-income",
+  "other-income",
+] as const;
+
+export const projectionExpenseCategories = [
+  "living-expense",
+  "housing-expense",
+  "rent-expense",
+  "mortgage-repayment",
+  "loan-repayment",
+  "insurance-premium",
+  "medical-expense",
+  "transport-expense",
+  "education-expense",
+  "travel-expense",
+  "entertainment-expense",
+  "tax-expense",
+  "advice-fee",
+  "other-expense",
+] as const;
+
+export type CashflowIncomeCategory = typeof projectionIncomeCategories[number];
+export type CashflowExpenseCategory = typeof projectionExpenseCategories[number];
+export type CashflowCategory = CashflowIncomeCategory | CashflowExpenseCategory;
+
+export function isCashflowIncomeCategory(category: CashflowCategory) {
+  return (projectionIncomeCategories as readonly string[]).includes(category);
+}
+
+export function isCashflowExpenseCategory(category: CashflowCategory) {
+  return (projectionExpenseCategories as readonly string[]).includes(category);
+}
+
 export type CashflowItem = {
   itemId: string;
   ownerPersonId: string;
-  category: "living-expense" | "other-income" | "other-expense";
+  category: CashflowCategory;
   label: string;
   annualAmount: number;
   startDate?: string | null;
@@ -72,6 +225,7 @@ export type ProjectionScenario = {
   startYear: number;
   startMonth: number;
   people: ProjectionPerson[];
+  dependants?: ProjectionDependant[];
   primaryPersonId: string;
   projectionEnd: {
     type: "life-expectancy";
@@ -79,7 +233,14 @@ export type ProjectionScenario = {
   };
   assets: ProjectionAsset[];
   liabilities: ProjectionLiability[];
+  assetSaleEvents: AssetSaleEvent[];
+  assetPurchaseEvents?: AssetPurchaseEvent[];
+  liabilityDrawdownEvents?: LiabilityDrawdownEvent[];
+  liabilityPaymentEvents: LiabilityPaymentEvent[];
   retirementAccounts: RetirementAccount[];
+  superContributionStrategies: SuperContributionStrategy[];
+  superRolloverEvents: SuperRolloverEvent[];
+  pensionWithdrawalEvents: PensionWithdrawalEvent[];
   cashflowItems: CashflowItem[];
   cashflowAllocation?: {
     surplusTarget?: {
@@ -103,8 +264,27 @@ export type LegislativeAssumptions = {
     medicareShadeInRate: number;
     medicareShadeInThreshold: number;
     offsets: {
-      seniorsAndPensionersTaxOffset: number;
-      lowIncomeTaxOffset: number;
+      lowIncomeTaxOffset: {
+        maximumOffset: number;
+        firstThreshold: number;
+        secondThreshold: number;
+        upperThreshold: number;
+        firstTaperRate: number;
+        secondTaperRate: number;
+      };
+      seniorsAndPensionersTaxOffset: {
+        single: {
+          maximumOffset: number;
+          shadeOutThreshold: number;
+          cutOutThreshold: number;
+        };
+        coupleEach: {
+          maximumOffset: number;
+          shadeOutThreshold: number;
+          cutOutThreshold: number;
+        };
+        taperRate: number;
+      };
     };
   };
   agePension: {
@@ -181,15 +361,20 @@ export type TaxProjectionYear = {
   taxableAgePension: number;
   taxableBankInterest: number;
   taxableOtherIncome: number;
+  taxableCapitalGains: number;
+  deductibleInterest: number;
   taxFreeAccountBasedPension: number;
   taxableIncome: number;
   grossTax: number;
   medicareLevy: number;
+  lowIncomeTaxOffset: number;
+  seniorsAndPensionersTaxOffset: number;
   taxOffsets: number;
   taxPayable: number;
 };
 
 export type AgePensionProjectionYear = {
+  ageEligible: boolean;
   assessableAssets: number;
   deemedIncome: number;
   maximumAnnualRate: number;
@@ -206,6 +391,26 @@ export type RetirementAccountProjectionDetail = {
   rolloverOut: number;
   grossEmployerContribution: number;
   additionalContribution: number;
+  contributionStrategyDetails: Array<{
+    strategyId: string;
+    label: string;
+    grossContribution: number;
+    contributionTax: number;
+    netContribution: number;
+  }>;
+  rolloverEventDetails: Array<{
+    eventId: string;
+    label: string;
+    rolloverIn: number;
+    rolloverOut: number;
+  }>;
+  lumpSumWithdrawal: number;
+  pensionWithdrawalDetails: Array<{
+    eventId: string;
+    label: string;
+    amount: number;
+    targetAssetId: string | null;
+  }>;
   contributionTax: number;
   netEmployerContribution: number;
   drawdown: number;
@@ -213,6 +418,7 @@ export type RetirementAccountProjectionDetail = {
   investmentGrowth: number;
   investmentTax: number;
   fees: number;
+  insurancePremium: number;
   taxPayable: number;
   closingBalance: number;
 };
@@ -237,8 +443,30 @@ export type ProjectionYearResult = {
   year: number;
   ageByPersonId: Record<string, number>;
   cashflowItemValues: Record<string, number>;
+  assetSaleEventValues: Record<string, number>;
+  assetPurchaseEventValues: Record<string, number>;
   assetIncomeValues: Record<string, number>;
+  assetCostBases: Record<string, number>;
+  assetSaleEventCgtDetails: Record<
+    string,
+    {
+      proceeds: number;
+      costBaseUsed: number;
+      grossCapitalGain: number;
+      taxableCapitalGain: number;
+      discountApplied: number;
+      carriedForwardLossApplied: number;
+      cgtTreatment: NonNullable<ProjectionAsset["cgtTreatment"]>;
+    }
+  >;
+  liabilityPaymentEventValues: Record<string, number>;
+  liabilityDrawdownEventValues: Record<string, number>;
   liabilityRepaymentValues: Record<string, number>;
+  liabilityInterestValues: Record<string, number>;
+  liabilityPrincipalRepaymentValues: Record<string, number>;
+  deductibleInterestByPersonId: Record<string, number>;
+  taxableCapitalGainsByPersonId: Record<string, number>;
+  carriedForwardCapitalLossesByPersonId: Record<string, number>;
   accountBasedPension: number;
   employerSuperContributions: number;
   concessionalContributionsTax: number;
@@ -246,6 +474,7 @@ export type ProjectionYearResult = {
   employerSuperContributionsByPersonId: Record<string, number>;
   concessionalContributionsTaxByPersonId: Record<string, number>;
   agePension: AgePensionProjectionYear;
+  agePensionByPersonId: Record<string, AgePensionProjectionYear>;
   bankInterest: number;
   totalIncome: number;
   expenses: number;

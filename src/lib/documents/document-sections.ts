@@ -168,6 +168,109 @@ export const DEFAULT_SERVICE_AGREEMENT_SERVICES = [
   "- Where you have queries or concerns, please contact me via telephone during business hours or email me at any time.",
 ];
 
+export const ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS = [
+  "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals.",
+  "The purpose of this letter is to set out the terms and conditions of our services, while the attached Fee Deduction Consent details the services we will provide, the fees payable, and the account from which these fees will be deducted. We cannot enter into an Ongoing Service Agreement without this agreement, and the fee consent signed and dated by you.",
+  "Our advice fees may be partially or fully tax deductible; you should consult your registered tax agent or accountant to obtain specific advice about the tax-deductibility of our fees.",
+  "If we provide advice and for any reason you elect not to proceed with the recommendations, you will be liable for the associated fees to cover the cost or expense incurred for work already undertaken on your behalf.",
+  "If your circumstances, or the scope of the advice you require, changes significantly and a new Statement of Advice is required, additional advice preparation fees may be payable. This will be discussed with you and agreed to prior to any work commencing.",
+  "Fees can be paid by way of deduction from your investments/super; however, you may elect to pay by cheque or direct debit. You can nominate and amend your chosen method of payment at any time. If you change how you want to pay your fees, we will provide you with another fee consent form.",
+];
+
+export const ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS = [
+  "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals.",
+  "The purpose of this letter is to set out the terms and conditions of our services, while the attached Fee Deduction Consent details the services we will provide, the fees payable, and the account from which these fees will be deducted. We cannot enter into an Annual Advice Agreement without this agreement, and the fee consent signed and dated by you.",
+  "Our advice fees may be partially or fully tax deductible; you should consult your registered tax agent or accountant to obtain specific advice about the tax-deductibility of our fees.",
+  "If we provide advice and for any reason you elect not to proceed with the recommendations, you will be liable for the associated fees to cover the cost or expense incurred for work already undertaken on your behalf.",
+  "If your circumstances, or the scope of the advice you require, changes significantly and a new Statement of Advice is required, additional advice preparation fees may be payable. This will be discussed with you and agreed to prior to any work commencing.",
+  "Fees can be paid by way of deduction from your investments/super; however, you may elect to pay by cheque or direct debit. You can nominate and amend your chosen method of payment at any time. If you change how you want to pay your fees, we will provide you with another fee consent form.",
+];
+
+export const ONGOING_SERVICE_AGREEMENT_DETAIL_SECTIONS = [
+  {
+    heading: "Commencement and Terms of the Agreement",
+    paragraphs: [
+      "The commencement date of this arrangement is the date you sign this agreement. Upon signing this agreement, any existing service agreement between us is deemed to be automatically terminated and replaced by this agreement.",
+      "We may amend the terms on which we provide our services (including the fees we charge for those services) by the mutual agreement of the parties, or by providing you 30 days' written notice.",
+    ],
+  },
+  {
+    heading: "Renewing this agreement",
+    paragraphs: [
+      "You will be required to consent to renew this agreement and continue to deduct ongoing fees annually.",
+      "We will provide you with a Fee Consent Form to renew your ongoing fee deduction within 60 days before the 12-month anniversary of you entering into this agreement, or no later than 150 days after the anniversary date. The Fee Consent Form will explain the services we will provide, and the fees we will charge, for the following year. If you wish to renew the agreement, you will need to sign, date and return that form to us within the timeframe specified at that time.",
+    ],
+  },
+  {
+    heading: "Termination",
+    paragraphs: [
+      "You may terminate or vary the agreement at any time by notifying us in writing. You may also vary or withdraw your consent to the deduction of advice fees at any time by providing written notice to us, your account provider or superannuation fund.",
+      "We may also terminate the agreement at any time by providing written notice to you.",
+      "If this agreement expires or is terminated, no further advice will be provided, or fees charged.",
+    ],
+  },
+  {
+    heading: "Your Participation",
+    paragraphs: [
+      "To ensure that the services provided continue to meet your needs, your participation is important. As part of this participation, you agree to provide me with all the information required to provide the service you have requested, and to engage with us for a review of your situation.",
+      "If you choose to withhold or are unable to provide information, or you have provided inaccurate information, then there is a risk that I may not be able to provide you with advice or that the advice I provide is not appropriate for your personal circumstances. If this situation arises, I will warn you of the consequences and ask that you reconsider your stance before proceeding.",
+    ],
+  },
+];
+
+export const ANNUAL_ADVICE_AGREEMENT_DETAIL_SECTIONS = [
+  {
+    heading: "Commencement and Terms of the Agreement",
+    paragraphs: [
+      "The commencement date of this arrangement is the date you sign this agreement. Upon signing this agreement, any existing service agreement between us is deemed to be automatically terminated and replaced by this agreement.",
+      "We may amend the terms on which we provide our services (including the fees we charge for those services) by the mutual agreement of the parties, or by providing you 30 days' written notice.",
+    ],
+  },
+  {
+    heading: "Termination",
+    paragraphs: [
+      "You may terminate or vary the agreement at any time by notifying us in writing. You may also vary or withdraw your consent to the deduction of advice fees at any time by providing written notice to us, your account provider or superannuation fund.",
+      "We may also terminate the agreement at any time by providing written notice to you.",
+      "If this agreement expires or is terminated, no further advice will be provided, or fees charged.",
+    ],
+  },
+  {
+    heading: "Your Participation",
+    paragraphs: [
+      "To ensure that the services provided continue to meet your needs, your participation is important. As part of this participation, you agree to provide me with all the information required to provide the service you have requested, and to engage with us for a review of your situation.",
+      "If you choose to withhold or are unable to provide information, or you have provided inaccurate information, then there is a risk that I may not be able to provide you with advice or that the advice I provide is not appropriate for your personal circumstances. If this situation arises, I will warn you of the consequences and ask that you reconsider your stance before proceeding.",
+    ],
+  },
+];
+
+export const ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS = [
+  "We have discussed these terms, and you have had the opportunity to clarify anything that is unclear. If you have any further queries, please ask me for clarification before agreeing to proceed with the service.",
+  "If you wish to proceed with the service, please acknowledge this by signing below and returning it to me.",
+  "By entering into an Ongoing Service Agreement with us, you:",
+];
+
+export const ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS = [
+  "We have discussed these terms, and you have had the opportunity to clarify anything that is unclear. If you have any further queries, please ask me for clarification before agreeing to proceed with the service.",
+  "If you wish to proceed with the service, please acknowledge this by signing below and returning it to me.",
+  "By entering into an Annual Advice Agreement with us, you:",
+];
+
+export const ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS = [
+  "agree to be bound by the terms and conditions of this agreement;",
+  "acknowledge that this agreement will continue, subject to your annual renewal, until such time as either party provides notice of termination in writing;",
+  "have read, understood and agree to the services we will provide, and the fees you will be charged, in the attached Consent to commence an ongoing fee deduction form;",
+  "acknowledge that entering into this agreement will automatically replace and terminate any existing service agreement between us; and",
+  "acknowledge that on termination we will cease charging you fees and cease providing you with the services under this agreement.",
+];
+
+export const ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS = [
+  "agree to be bound by the terms and conditions of this agreement;",
+  "acknowledge that this agreement will continue until such time as either party provides notice of termination in writing;",
+  "have read, understood and agree to the services we will provide, and the fees you will be charged, in the attached Consent to commence a non-ongoing fee deduction form;",
+  "acknowledge that entering into this agreement will automatically replace and terminate any existing service agreement between us; and",
+  "acknowledge that on termination we will cease charging you fees and cease providing you with the services under this agreement.",
+];
+
 export type ServiceAgreementServiceGroup = {
   heading: string | null;
   items: string[];
@@ -332,31 +435,15 @@ export function buildServiceAgreementSectionModel({
     arrangementLabel: isFixedTermAgreement ? "fixed term advice agreement" : "ongoing fee arrangement",
     serviceHeading: isFixedTermAgreement ? "My Annual Advice Service Includes" : "The Services You Are Entitled To Receive",
     openingParagraphs: isFixedTermAgreement
-      ? [
-          "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. The purpose of this letter is to establish an Annual Advice Agreement.",
-          "The services you receive as part of your Annual Advice Agreement are important as they offer support to help you stay on track. The terms of the Annual Advice Agreement, including the services you are entitled to and the cost, are set out below.",
-          `This arrangement will be between ${clientNames} and ${practiceName}. The arrangement will commence on the date you sign this agreement.`,
-        ]
-      : [
-          "As your Financial Adviser, it is our role to provide you with the advice you need to achieve your financial goals. This Ongoing Service Agreement sets out the terms and conditions of our services.",
-          "We cannot enter into an Ongoing Service Agreement without this agreement and the relevant fee consent being signed and dated by you. Your ongoing fee arrangement will need to be renewed annually.",
-          "The commencement date of this arrangement is the date you sign this agreement. Upon signing this agreement, any existing service agreement between us is deemed to be automatically terminated and replaced by this agreement.",
-        ],
-    nextStepHeading: isFixedTermAgreement ? "Next Steps" : "Your Acknowledgement",
+      ? ANNUAL_ADVICE_AGREEMENT_OPENING_PARAGRAPHS
+      : ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
+    nextStepHeading: isFixedTermAgreement ? "Your Acknowledgement" : "Your Acknowledgement",
     nextStepParagraphs: isFixedTermAgreement
-      ? [
-          "Please sign the acknowledgement below and accept the Annual Advice Agreement outlined in this letter.",
-          "You may terminate this service at any time by contacting us. If terminated, we will cancel this service and turn off any applicable Annual Advice Agreement costs.",
-        ]
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_PARAGRAPHS
       : [],
     acknowledgementItems: isFixedTermAgreement
-      ? []
-      : [
-          "You agree to be bound by the terms and conditions of this agreement.",
-          "You acknowledge that this agreement will continue, subject to annual renewal, until either party provides notice of termination in writing.",
-          "You acknowledge that entering into this agreement will replace and terminate any existing service agreement between us.",
-          "You may terminate or vary the agreement at any time by notifying us in writing.",
-        ],
+      ? ANNUAL_ADVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS
+      : ONGOING_SERVICE_AGREEMENT_ACKNOWLEDGEMENT_ITEMS,
     services,
     serviceGroups: groupServiceAgreementServices(services),
     feeItems,

@@ -1,5 +1,20 @@
 import type { ProjectionAsset, ProjectionAssumptions } from "./types";
 
+export function isCashAssetType(type: ProjectionAsset["type"]) {
+  return type === "cash" || type === "bank-account" || type === "offset-account" || type === "term-deposit";
+}
+
+export function isInvestmentAssetType(type: ProjectionAsset["type"]) {
+  return (
+    type === "investment" ||
+    type === "investment-property" ||
+    type === "australian-shares" ||
+    type === "international-shares" ||
+    type === "managed-fund" ||
+    type === "etf"
+  );
+}
+
 export function getAssetGrowthRate(asset: ProjectionAsset, assumptions: ProjectionAssumptions) {
   if (asset.growthRateKey === "cpi") {
     return assumptions.economic.cpiRate;
@@ -58,7 +73,7 @@ export function sumFinancialAssets(input: {
   }>;
 }) {
   const financialAssetTotal = input.assets.reduce((total, asset) => {
-    if (asset.type !== "cash") {
+    if (asset.centrelink !== "financial-asset") {
       return total;
     }
 

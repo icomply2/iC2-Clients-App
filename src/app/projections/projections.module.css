@@ -490,6 +490,20 @@
   cursor: not-allowed;
 }
 
+.exportButton {
+  min-height: 2.4rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid #143b68;
+  border-radius: 8px;
+  background: #143b68;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .page {
   display: grid;
   gap: 1rem;
@@ -641,6 +655,11 @@
   overflow-x: auto;
   border: 1px solid #d7e1ed;
   border-radius: 8px;
+}
+
+.tableWrap:has(.rowActionMenu[open]) {
+  min-height: 13rem;
+  overflow: visible;
 }
 
 .dataTable {
@@ -812,6 +831,185 @@
   padding: 0.45rem 0.65rem;
 }
 
+.segmentedControl {
+  display: inline-flex;
+  gap: 0.2rem;
+  padding: 0.2rem;
+  border: 1px solid #cfdced;
+  border-radius: 8px;
+  background: #f6f9fc;
+}
+
+.segmentedButton,
+.segmentedButtonActive {
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  border-radius: 6px;
+  color: #183150;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.segmentedButton {
+  background: transparent;
+}
+
+.segmentedButtonActive {
+  background: #f4ca14;
+}
+
+.cashflowChartShell {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.cashflowChartLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.85rem;
+  color: #42566e;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.cashflowChartLegend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cashflowChartLegend i {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.expenseLegendLine {
+  height: 0.2rem !important;
+  background: #28c817;
+  border-radius: 999px !important;
+}
+
+.cashflowChartScroller {
+  overflow-x: auto;
+  border: 1px solid #d7e1ed;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.cashflowChart {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  min-width: 58rem;
+  min-height: 24rem;
+  padding: 1rem 1rem 0.8rem 0;
+}
+
+.cashflowChartScale {
+  position: relative;
+  padding: 0.25rem 0.75rem 2rem 1rem;
+  color: #60748d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.cashflowChartScaleInner {
+  position: relative;
+  height: calc(100% - 2.25rem);
+  min-height: 16rem;
+}
+
+.cashflowChartScaleInner span {
+  position: absolute;
+  right: 0;
+  transform: translateY(50%);
+  white-space: nowrap;
+}
+
+.cashflowChartPlot {
+  position: relative;
+  min-height: 19rem;
+  padding: 0.25rem 0.35rem 2rem;
+  background:
+    linear-gradient(to bottom, rgba(207, 220, 237, 0.55) 1px, transparent 1px) 0 0 / 100% 25%,
+    #fbfdff;
+}
+
+.cashflowChartGrid {
+  position: absolute;
+  inset: 0.25rem 0.35rem 2rem;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.cashflowChartGrid span {
+  position: absolute;
+  right: 0;
+  left: 0;
+  border-top: 1px solid #e1eaf4;
+}
+
+.cashflowChartColumns {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.55rem;
+  height: 100%;
+}
+
+.cashflowChartColumn {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 0.5rem;
+  min-width: 3.6rem;
+}
+
+.cashflowChartBar {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 16rem;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+}
+
+.cashflowChartSegment {
+  display: block;
+  min-height: 0;
+}
+
+.cashflowChartYear {
+  color: #42566e;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cashflowExpenseLine {
+  position: absolute;
+  inset: 0.25rem 0.35rem 2rem;
+  z-index: 2;
+  width: calc(100% - 0.7rem);
+  height: calc(100% - 2.25rem);
+  pointer-events: none;
+}
+
+.cashflowExpenseLine polyline {
+  fill: none;
+  stroke: #28c817;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+}
+
 .assumptionStrip {
   display: flex;
   flex-wrap: wrap;
@@ -913,6 +1111,53 @@
   color: #9a2e21;
 }
 
+.rowActionMenu {
+  position: relative;
+  display: inline-block;
+}
+
+.rowActionMenu summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  min-height: 2.45rem;
+  border: 1px solid #cfdced;
+  border-radius: 8px;
+  background: #fff;
+  color: #0d315f;
+  cursor: pointer;
+  font-size: 1.25rem;
+  font-weight: 900;
+  line-height: 1;
+  list-style: none;
+}
+
+.rowActionMenu summary::-webkit-details-marker {
+  display: none;
+}
+
+.rowActionMenuList {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 0.45rem;
+  min-width: 12rem;
+  padding: 0.55rem;
+  border: 1px solid #d7e1ed;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(3, 22, 46, 0.16);
+}
+
+.rowActionMenuList button {
+  justify-content: flex-start;
+  width: 100%;
+  white-space: nowrap;
+}
+
 .inputGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(12rem, 1fr));
@@ -987,6 +1232,24 @@
   min-width: 0;
 }
 
+.percentAffixInput {
+  grid-template-columns: minmax(3.1rem, max-content) auto;
+  width: fit-content;
+  min-width: 5.2rem;
+  max-width: 8rem;
+}
+
+.percentAffixInput input {
+  width: 4.1rem;
+  min-width: 0;
+  padding-right: 0.15rem;
+}
+
+.percentAffixInput span {
+  padding-right: 0.55rem;
+  padding-left: 0.2rem;
+}
+
 .affixInput:focus-within {
   border-color: #7aa5d7;
   box-shadow: 0 0 0 3px rgba(122, 165, 215, 0.18);
@@ -1005,6 +1268,71 @@
   color: #42566e;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(3, 22, 46, 0.48);
+}
+
+.modalPanel {
+  display: grid;
+  gap: 1rem;
+  width: min(48rem, 100%);
+  max-height: min(90vh, 44rem);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid #cfdced;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 22px 60px rgba(3, 22, 46, 0.28);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.modalHeader h3 {
+  margin: 0;
+  color: #0b315f;
+  font-size: 1.2rem;
+}
+
+.modalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(13rem, 1fr));
+  gap: 0.8rem;
+}
+
+.modalGrid label {
+  display: grid;
+  gap: 0.35rem;
+  color: #42566e;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.checkboxField {
+  display: inline-flex !important;
+  align-items: center;
+  align-self: end;
+  min-height: 2.2rem;
+  gap: 0.45rem !important;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
 }
 
 .ruleStack,

@@ -73,6 +73,8 @@ export const margaretCurrentScenario: ProjectionScenario = {
       repaymentTiming: "start-of-year",
     },
   ],
+  assetSaleEvents: [],
+  liabilityPaymentEvents: [],
   retirementAccounts: [
     {
       accountId: "amp-mynorth-pension",
@@ -82,6 +84,7 @@ export const margaretCurrentScenario: ProjectionScenario = {
       productName: "AMP MyNorth Pension",
       openingBalance: 485000,
       annualFeeRate: 0.015,
+      annualInsurancePremium: 0,
       annualContribution: 0,
       annualContributionType: "concessional",
       investmentProfileKey: "Balanced",
@@ -98,6 +101,7 @@ export const margaretCurrentScenario: ProjectionScenario = {
       productName: "Aware Super accumulation",
       openingBalance: 38000,
       annualFeeRate: 0.015,
+      annualInsurancePremium: 0,
       annualContribution: 0,
       annualContributionType: "concessional",
       investmentProfileKey: "Defensive",
@@ -107,6 +111,9 @@ export const margaretCurrentScenario: ProjectionScenario = {
       centrelink: "financial-asset",
     },
   ],
+  superContributionStrategies: [],
+  superRolloverEvents: [],
+  pensionWithdrawalEvents: [],
   cashflowItems: [
     {
       itemId: "living-expenses",
