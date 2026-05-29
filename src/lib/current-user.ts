@@ -1,7 +1,7 @@
 import type { UserSummary } from "@/lib/api/types";
 import { getApiBaseUrl } from "@/lib/server-runtime";
 
-export function decodeJwtPayload(token: string) {
+export function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
 
   if (parts.length < 2) {
@@ -13,7 +13,7 @@ export function decodeJwtPayload(token: string) {
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
     const payload = Buffer.from(padded, "base64").toString("utf8");
 
-    return JSON.parse(payload);
+    return JSON.parse(payload) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -42,6 +42,20 @@ function userMatchesClaims(user: UserSummary | null | undefined, payload: Record
   const name = readStringClaim(payload, ["name", "given_name"]);
   const id = readStringClaim(payload, ["Id", "id", "sub", "nameid"]);
 
+  return (
+    (!!id && normalizeText(user.id) === normalizeText(id)) ||
+    (!!email && normalizeText(user.email) === normalizeText(email)) ||
+    (!!name && normalizeText(user.name) === normalizeText(name))
+  );
+}
+
+export async function resolveCurrentUserFromApi(token: string) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl) {
+    return null;
+  }
+
   const payload = decodeJwtPayload(token);
   const userId = payload
     ? readStringClaim(payload, [
@@ -55,11 +69,28 @@ function userMatchesClaims(user: UserSummary | null | undefined, payload: Record
       ])
     : null;
 
-  if (!userId) {
-    return null;
+  if (userId) {
+    const response = await fetch(new URL(`/api/Users/${encodeURIComponent(userId)}`, apiBaseUrl), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    const body = (await response.json().catch(() => null)) as
+      | {
+          data?: UserSummary | null;
+        }
+      | null;
+
+    if (response.ok && body?.data) {
+      return body.data;
+    }
   }
- 
-  const response = await fetch(new URL(`/api/Users/${encodeURIComponent(userId)}`, apiBaseUrl), {
+
+  const response = await fetch(new URL("/api/Users", apiBaseUrl), {
     method: "GET",
     headers: {
       Accept: "application/json",
@@ -75,10 +106,8 @@ function userMatchesClaims(user: UserSummary | null | undefined, payload: Record
     | null;
 
   if (!response.ok) {
-    return [] as UserSummary[];
+    return null;
   }
 
-  return (
-    body?.data?? null
-  );
+  return body?.data?.find((user) => userMatchesClaims(user, payload)) ?? null;
 }
