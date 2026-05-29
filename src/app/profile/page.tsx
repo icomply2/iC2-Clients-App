@@ -1,4 +1,4 @@
-import { getUsers } from "@/lib/api/users";
+import { getUser, getUsers } from "@/lib/api/users";
 import { isAppAdminValue } from "@/lib/app-admin";
 import { readAuthTokenFromCookies, readCurrentUserFromCookies } from "@/lib/auth";
 import {
@@ -62,17 +62,22 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
   if (token) {
     try {
-      const usersResult = await getUsers(token);
-      const apiMatchedUser =
-        usersResult.data?.find((user) => {
-          const idMatches = currentUser?.id && user.id && currentUser.id === user.id;
-          const emailMatches =
-            currentUser?.email &&
-            user.email &&
-            currentUser.email.toLowerCase() === user.email.toLowerCase();
+      let apiMatchedUser = currentUser?.id ? await getUser(currentUser.id, token).then((result) => result.data) : null;
 
-          return idMatches || emailMatches;
-        }) ?? null;
+      if (!apiMatchedUser) {
+        const usersResult = await getUsers(token);
+        apiMatchedUser =
+          usersResult.data?.find((user) => {
+            const idMatches = currentUser?.id && user.id && currentUser.id === user.id;
+            const emailMatches =
+              currentUser?.email &&
+              user.email &&
+              currentUser.email.toLowerCase() === user.email.toLowerCase();
+
+            return idMatches || emailMatches;
+          }) ?? null;
+      }
+
       const profileOverride = apiMatchedUser?.id ? await readUserProfileOverride(apiMatchedUser.id) : null;
       const matchedUser = apiMatchedUser;
 
