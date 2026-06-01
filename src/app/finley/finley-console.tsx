@@ -36,7 +36,7 @@ import {
   ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
   groupServiceAgreementServices,
 } from "@/lib/documents/document-sections";
-import { getFactFindImportCounts, type FactFindImportCandidate } from "@/lib/fact-find-import";
+import { getFactFindImportCounts, getFactFindInsurancePolicies, type FactFindImportCandidate } from "@/lib/fact-find-import";
 import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "./finley-avatar.png";
 import styles from "./page.module.css";
@@ -253,6 +253,30 @@ type ConciergeSuggestedTask = {
     | "service_agreement"
     | "summarise_documents";
 };
+
+type StarterWorkflowAction =
+  | "fact_find"
+  | "file_note"
+  | "engagement_letter"
+  | "record_of_advice"
+  | "statement_of_advice"
+  | "create_invoice"
+  | "ongoing_agreement"
+  | "annual_agreement";
+
+const WORKFLOW_LAUNCH_ACTIONS: Array<{
+  label: string;
+  action: StarterWorkflowAction;
+}> = [
+  { label: "Update Fact Find", action: "fact_find" },
+  { label: "Engagement Letter", action: "engagement_letter" },
+  { label: "File Note", action: "file_note" },
+  { label: "Invoice", action: "create_invoice" },
+  { label: "Record of Advice", action: "record_of_advice" },
+  { label: "Statement of Advice", action: "statement_of_advice" },
+  { label: "Ongoing Agreement", action: "ongoing_agreement" },
+  { label: "Annual Agreement", action: "annual_agreement" },
+];
 
 type FactFindImportResponse = {
   candidate?: FactFindImportCandidate | null;
@@ -1945,24 +1969,6 @@ function getUploadsWithTag(uploads: ConciergeUpload[], tag: ConciergeDocumentTag
   return uploads.filter((upload) => upload.tags.includes(tag) && upload.extractedText?.trim());
 }
 
-function buildUploadedDocumentContext(uploads: ConciergeUpload[], tags?: ConciergeDocumentTag[]) {
-  const tagSet = tags?.length ? new Set(tags) : null;
-  return uploads
-    .filter((upload) => upload.extractedText?.trim())
-    .filter((upload) => !tagSet || upload.tags.some((tag) => tagSet.has(tag)))
-    .map((upload) => {
-      const tagLabels = upload.tags.filter((tag) => tag !== "unknown").map(getConciergeTagLabel).join(", ");
-      return [
-        `File: ${upload.name}`,
-        tagLabels ? `Detected: ${tagLabels}` : null,
-        upload.extractedText?.trim().slice(0, 6000),
-      ]
-        .filter(Boolean)
-        .join("\n");
-    })
-    .join("\n\n---\n\n");
-}
-
 function findFirstMoneyNear(text: string, patterns: RegExp[]) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
@@ -2673,6 +2679,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     () => [...messages].reverse().find((message) => message.role === "assistant")?.id ?? null,
     [messages],
   );
+  const hasActiveWorkspace = Boolean(
+    planSummary ||
+    planSteps.length ||
+    displayCard ||
+    editorCard ||
+    factFindWorkflow ||
+    engagementLetterDraftCard ||
+    roaDraftCard ||
+    agreementDraftCard ||
+    documentPlaceholderCard ||
+    invoicePlaceholderCard,
+  );
   const conciergeUploadTags = useMemo(
     () => new Set(conciergeUploads.flatMap((upload) => upload.tags)),
     [conciergeUploads],
@@ -3174,23 +3192,23 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     });
   }
 
-  function detectAgreementRequest(message: string): AgreementType | null {
+  function shouldBypassActiveOutputEdit(
+    message: string,
+    activeOutputKind: "engagement_letter" | "record_of_advice" | "annual_agreement" | "ongoing_agreement",
+  ) {
     const lower = message.toLowerCase();
+    const workflowRequests = [
+      { kind: "fact_find", pattern: /\b(update fact find|fact find)\b/ },
+      { kind: "file_note", pattern: /\b(create file note|file note|client note)\b/ },
+      { kind: "create_invoice", pattern: /\b(create invoice|invoice)\b/ },
+      { kind: "engagement_letter", pattern: /\b(engagement letter)\b/ },
+      { kind: "record_of_advice", pattern: /\b(record of advice|roa)\b/ },
+      { kind: "statement_of_advice", pattern: /\b(statement of advice|soa)\b/ },
+      { kind: "ongoing_agreement", pattern: /\b(ongoing agreement|ongoing service agreement)\b/ },
+      { kind: "annual_agreement", pattern: /\b(annual agreement|annual advice agreement)\b/ },
+    ] as const;
 
-    if (/\b(annual agreement|annual advice agreement|fixed term agreement|fixed-term agreement)\b/.test(lower)) {
-      return "annual";
-    }
-
-    if (/\b(ongoing agreement|ongoing service agreement|service agreement)\b/.test(lower)) {
-      return "ongoing";
-    }
-
-    return null;
-  }
-
-  function shouldBypassActiveOutputEdit(message: string) {
-    const lower = message.toLowerCase();
-    return /\b(update fact find|fact find|create file note|file note|create invoice|invoice|engagement letter|ongoing agreement|annual agreement|statement of advice)\b/.test(lower);
+    return workflowRequests.some((request) => request.kind !== activeOutputKind && request.pattern.test(lower));
   }
 
   function openCreateClient() {
@@ -3359,17 +3377,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function handleStarterAction(
-    action:
-      | "fact_find"
-      | "file_note"
-      | "engagement_letter"
-      | "record_of_advice"
-      | "statement_of_advice"
-      | "create_invoice"
-      | "ongoing_agreement"
-      | "annual_agreement",
+    action: StarterWorkflowAction,
+    options?: { preserveMessages?: boolean },
   ) {
     if (!activeClient || isSending) return;
+
+    const setStarterAssistantMessage = (message: Message) => {
+      if (options?.preserveMessages) {
+        setMessages((current) => [...current, message]);
+        return;
+      }
+
+      setMessages([message]);
+    };
 
     if (action === "fact_find") {
       if (primaryFactFindReviewUpload) {
@@ -3397,7 +3417,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
 
     if (action === "ongoing_agreement" || action === "annual_agreement") {
-      void activateAgreementWorkflow(action === "annual_agreement" ? "annual" : "ongoing");
+      void activateAgreementWorkflow(
+        action === "annual_agreement" ? "annual" : "ongoing",
+        options?.preserveMessages ? "append" : "replace",
+      );
       return;
     }
 
@@ -3445,13 +3468,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           // Fall back to the lightweight client summary values already on hand.
         }
 
-        setMessages([
-          {
-            id: `assistant-invoice-placeholder-${Date.now()}`,
-            role: "assistant",
-            content: `I’m ready to help prepare an invoice for ${activeClient.name}. I’ll show the live invoice render in the output pane so you can review it before exporting to Word.`,
-          },
-        ]);
+        setStarterAssistantMessage({
+          id: `assistant-invoice-placeholder-${Date.now()}`,
+          role: "assistant",
+          content: `I’m ready to help prepare an invoice for ${activeClient.name}. I’ll show the live invoice render in the output pane so you can review it before exporting to Word.`,
+        });
         setPlanSummary(null);
         setPlanSteps([]);
         setWarnings([]);
@@ -3497,24 +3518,13 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         const adviserName = activeClient.clientAdviserName ?? currentUserScope?.name ?? "";
         const profile = activeClient.id ? await loadClientProfileForPreview(activeClient.id).catch(() => null) : null;
         const clientAddressLines = personAddressLines(profile?.client);
-        const uploadedDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, conciergeUploads);
-        const usedUploadContext = Boolean(buildUploadedDocumentContext(conciergeUploads, [
-          "fact-find",
-          "meeting-transcript",
-          "strategy-paper",
-          "engagement-letter",
-          "service-agreement",
-        ]).trim());
+        const initialDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, []);
 
-        setMessages([
-          {
-            id: `assistant-engagement-letter-${Date.now()}`,
-            role: "assistant",
-            content: usedUploadContext
-              ? `I reviewed the uploaded client pack and used that context to draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`
-              : `I’m ready to help draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`,
-          },
-        ]);
+        setStarterAssistantMessage({
+          id: `assistant-engagement-letter-${Date.now()}`,
+          role: "assistant",
+          content: `I’ve opened the Engagement Letter workspace for ${clientName}. Tell me what to draft or refine, and I’ll update the live render here.`,
+        });
         setPlanSummary(null);
         setPlanSteps([]);
         setWarnings([]);
@@ -3541,20 +3551,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           primaryClientName: activeClient.primaryClientName ?? clientName,
           partnerName: activeClient.partnerName ?? null,
           adviserName,
-          value: uploadedDraft,
+          value: initialDraft,
         });
         return;
       }
 
       if (action === "record_of_advice") {
         setIsSending(true);
-        setMessages([
-          {
-            id: `assistant-roa-draft-start-${Date.now()}`,
-            role: "assistant",
-            content: `I’m preparing a live Record of Advice draft for ${activeClient.name}. I’ll use the selected client profile and any uploaded supporting evidence, then show the editable draft in the workspace.`,
-          },
-        ]);
+        setStarterAssistantMessage({
+          id: `assistant-roa-draft-start-${Date.now()}`,
+          role: "assistant",
+          content: `I’m preparing a live Record of Advice draft for ${activeClient.name}. I’ll use the selected client profile and any uploaded supporting evidence, then show the editable draft in the workspace.`,
+        });
 
         try {
           const response = await fetch("/api/finley/roa/draft", {
@@ -3587,16 +3595,14 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             throw new Error(body?.error || "Unable to prepare the Record of Advice draft right now.");
           }
 
-          setMessages([
-            {
-              id: `assistant-roa-draft-${Date.now()}`,
-              role: "assistant",
-              content:
-                body.source === "fallback"
-                  ? `I prepared a safe Record of Advice skeleton for ${activeClient.name}. Review the live draft and tell me what to refine.`
-                  : `I prepared a live Record of Advice draft for ${activeClient.name}. Review the sections and tell me what to refine.`,
-            },
-          ]);
+          setStarterAssistantMessage({
+            id: `assistant-roa-draft-${Date.now()}`,
+            role: "assistant",
+            content:
+              body.source === "fallback"
+                ? `I prepared a safe Record of Advice skeleton for ${activeClient.name}. Review the live draft and tell me what to refine.`
+                : `I prepared a live Record of Advice draft for ${activeClient.name}. Review the sections and tell me what to refine.`,
+          });
           setPlanSummary(null);
           setPlanSteps([]);
           setWarnings(body.warning ? [body.warning] : []);
@@ -3623,13 +3629,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             value: body.draft,
           });
         } catch (error) {
-          setMessages([
-            {
-              id: `assistant-roa-draft-error-${Date.now()}`,
-              role: "assistant",
-              content: error instanceof Error ? error.message : "Unable to prepare the Record of Advice draft right now.",
-            },
-          ]);
+          setStarterAssistantMessage({
+            id: `assistant-roa-draft-error-${Date.now()}`,
+            role: "assistant",
+            content: error instanceof Error ? error.message : "Unable to prepare the Record of Advice draft right now.",
+          });
         } finally {
           setIsSending(false);
         }
@@ -3650,13 +3654,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         badge: "SOA Placeholder",
       };
 
-      setMessages([
-        {
-          id: `assistant-document-placeholder-${Date.now()}`,
-          role: "assistant",
-          content: `I’m ready to help prepare ${placeholder.title.replace(`Prepare `, "").toLowerCase()} for ${activeClient.name}. This placeholder card shows the planned workflow while we finish the generation and API steps.`,
-        },
-      ]);
+      setStarterAssistantMessage({
+        id: `assistant-document-placeholder-${Date.now()}`,
+        role: "assistant",
+        content: `I’m ready to help prepare ${placeholder.title.replace(`Prepare `, "").toLowerCase()} for ${activeClient.name}. This placeholder card shows the planned workflow while we finish the generation and API steps.`,
+      });
       setPlanSummary(null);
       setPlanSteps([]);
       setWarnings([]);
@@ -3674,21 +3676,70 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return;
     }
 
-    setPlanSummary(null);
-    setPlanSteps([]);
-    setWarnings([]);
-    setPendingPlanId(null);
-    setDisplayCard(null);
-    setEditorCard(null);
-    setFactFindWorkflow(null);
-    setFactFindStepIndex(0);
-    setFactFindWorkflowError(null);
-    clearLiveRenderOutputs();
-    setActiveAssistField(null);
-    setFileNoteSubjectManuallyEdited(false);
-    setFileNoteAttachments([]);
-    setFileNoteAttachmentFiles([]);
-    await handleSend("create a file note");
+    setIsSending(true);
+
+    try {
+      const response = await fetch("/api/finley/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: "Start Create File Note workflow",
+          workflowAction: "create_file_note",
+          activeClientId: activeClient.id ?? null,
+          activeClientName: activeClient.name ?? null,
+          threadId,
+          recentMessages: [],
+          uploadedFiles: conciergeUploads.map((upload) => ({
+            name: upload.name,
+            tags: upload.tags,
+            extractedText: upload.extractedText?.slice(0, 6000) ?? null,
+          })),
+        }),
+      });
+
+      const body = (await response.json().catch(() => null)) as FinleyChatResponse | null;
+
+      if (!response.ok || !body) {
+        throw new Error("Unable to start the Create File Note workflow right now.");
+      }
+
+      setStarterAssistantMessage({
+        id: `assistant-file-note-workflow-${Date.now()}`,
+        role: "assistant",
+        content: body.assistantMessage,
+      });
+      setPlanSummary(body.plan?.summary ?? null);
+      setPlanSteps(
+        (body.plan?.steps ?? []).map((step) => ({
+          toolName: step.toolName,
+          description: step.description,
+          inputsPreview: step.inputsPreview,
+        })),
+      );
+      setWarnings(body.warnings ?? []);
+      setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
+      setDisplayCard(body.displayCard ?? null);
+      setReturnDisplayCard(null);
+      setEditorCard(normalizeEditorCard(body.editorCard ?? null));
+      setFactFindWorkflow(null);
+      setFactFindStepIndex(0);
+      setFactFindWorkflowError(null);
+      clearLiveRenderOutputs();
+      setActiveAssistField(null);
+      setFileNoteSubjectManuallyEdited(false);
+      setFileNoteAttachments([]);
+      setFileNoteAttachmentFiles([]);
+    } catch (error) {
+      setStarterAssistantMessage({
+        id: `assistant-file-note-workflow-error-${Date.now()}`,
+        role: "assistant",
+        content: error instanceof Error ? error.message : "Unable to start the Create File Note workflow right now.",
+      });
+    } finally {
+      setIsSending(false);
+    }
   }
 
   async function addConciergeUploads(files: FileList | null) {
@@ -3768,16 +3819,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   async function handleConciergeSuggestedTask(task: ConciergeSuggestedTask) {
     if (!activeClient && task.action !== "summarise_documents") {
       await handleSend("I need to select a client before using this upload for a client workflow.");
-      return;
-    }
-
-    if (task.action === "file_note" && conciergeUploadTags.has("meeting-transcript")) {
-      const transcriptContext = buildUploadedDocumentContext(conciergeUploads, ["meeting-transcript"]);
-      await handleSend(
-        transcriptContext
-          ? `create a file note from the uploaded meeting transcript:\n\n${transcriptContext}`
-          : "create a file note from the uploaded meeting transcript",
-      );
       return;
     }
 
@@ -4135,7 +4176,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return false;
     }
 
-    if (shouldBypassActiveOutputEdit(message)) {
+    if (shouldBypassActiveOutputEdit(message, activeOutput.outputKind)) {
       return false;
     }
 
@@ -4354,12 +4395,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         ? await tryHandleActiveOutputInstruction(message, userMessage)
         : false;
       if (activeOutputHandled) {
-        return;
-      }
-
-      const requestedAgreementType = detectAgreementRequest(message);
-      if (activeClient && requestedAgreementType) {
-        await activateAgreementWorkflow(requestedAgreementType, "append");
         return;
       }
 
@@ -4747,8 +4782,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         { label: "Liabilities", records: factFindImportCandidate.liabilities },
         { label: "Superannuation", records: factFindImportCandidate.superannuation },
         { label: "Pensions", records: factFindImportCandidate.pensions },
-        { label: "Insurance", records: factFindImportCandidate.insurance },
       ]
+    : [];
+  const factFindImportInsurancePolicies = factFindImportCandidate
+    ? getFactFindInsurancePolicies(factFindImportCandidate)
     : [];
 
   return (
@@ -4858,7 +4895,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 <div className={styles.emptyStateTitle}>Start a new Finley chat</div>
                 <div className={styles.emptyStateText}>
                   {activeClient
-                    ? "Choose a workflow to begin, or upload documents and Finley can suggest some tasks to be completed."
+                    ? "Ask Finley questions, summarise documents, or choose a workflow when you want to create or update client records."
                     : "Select a client from the left rail or create a new client to begin working in Finley."}
                 </div>
                 {activeClient ? (
@@ -5082,72 +5119,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                       message.content
                     )}
                   </div>
-                  {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient ? (
-                    <div className={styles.workflowPillRow} aria-label="Suggested Finley workflows">
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("fact_find")}
-                        disabled={isSending}
-                      >
-                        Update fact find
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("engagement_letter")}
-                        disabled={isSending}
-                      >
-                        Engagement letter
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("file_note")}
-                        disabled={isSending}
-                      >
-                        File note
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("create_invoice")}
-                        disabled={isSending}
-                      >
-                        Invoice
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("record_of_advice")}
-                        disabled={isSending}
-                      >
-                        Record of Advice
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("ongoing_agreement")}
-                        disabled={isSending}
-                      >
-                        Ongoing agreement
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("annual_agreement")}
-                        disabled={isSending}
-                      >
-                        Annual agreement
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleSend("check what information is missing for this client")}
-                        disabled={isSending}
-                      >
-                        Check missing info
-                      </button>
+                  {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient && !hasActiveWorkspace ? (
+                    <div className={styles.workflowPillRow} aria-label="Start a Finley workflow">
+                      {WORKFLOW_LAUNCH_ACTIONS.map((workflowAction) => (
+                        <button
+                          key={workflowAction.action}
+                          type="button"
+                          className={styles.workflowPill}
+                          onClick={() => void handleStarterAction(workflowAction.action, { preserveMessages: true })}
+                          disabled={isSending}
+                        >
+                          {workflowAction.label}
+                        </button>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -5194,7 +5178,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 {activeClient
                   ? activeAssistField
                     ? `Selected field: ${activeAssistField === "content" ? "File note body" : "File note subject"}. Start your message with "Finley:" to draft into that field.`
-                    : ""
+                    : "Chat is for questions, summaries, drafts, and analysis. Use workflow buttons to create or change saved client records."
                   : "General questions and document summaries work now. Select a client before mapping profile data or creating client records."}
               </div>
               <div className={styles.composerActions}>
@@ -5260,7 +5244,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             <div className={styles.outputEmptyState}>
               <div className={styles.outputEmptyTitle}>No output yet</div>
               <div className={styles.outputEmptyText}>
-                Start a workflow or ask Finley to prepare a document, update a record, create an invoice, or draft a file note.
+                Start a workflow to create records or documents. Chat can answer questions, summarise uploads, and draft copy without saving changes.
               </div>
             </div>
           ) : null}
@@ -6126,6 +6110,29 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                         </div>
                       ) : null,
                     )}
+
+                    {factFindImportInsurancePolicies.length ? (
+                      <div className={styles.factFindImportReviewCard}>
+                        <strong>Insurance policies</strong>
+                        <ul>
+                          {factFindImportInsurancePolicies.slice(0, 5).map((policy, index) => (
+                            <li key={`insurance-policy-${policy.ownerName ?? "owner"}-${policy.insurer ?? policy.policyNumber ?? index}`}>
+                              {[
+                                policy.ownerName,
+                                policy.insurer ?? policy.provider,
+                                policy.policyNumber,
+                                policy.covers.map((cover) => cover.coverType).filter(Boolean).join(", "),
+                              ]
+                                .filter(Boolean)
+                                .join(" | ")}
+                            </li>
+                          ))}
+                        </ul>
+                        {factFindImportInsurancePolicies.length > 5 ? (
+                          <p>Plus {factFindImportInsurancePolicies.length - 5} more insurance policies.</p>
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     {factFindImportCandidate.dependants.length || factFindImportCandidate.entities.length ? (
                       <div className={styles.factFindImportReviewCard}>

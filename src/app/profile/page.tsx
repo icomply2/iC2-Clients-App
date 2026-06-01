@@ -1,4 +1,4 @@
-import { getUsers } from "@/lib/api/users";
+import { getUserPreferences, getUsers } from "@/lib/api/users";
 import { isAppAdminValue } from "@/lib/app-admin";
 import { readAuthTokenFromCookies, readCurrentUserFromCookies } from "@/lib/auth";
 import {
@@ -59,6 +59,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
   let practiceLogo = "";
   let practiceLetterHead = "";
   let documentStyleProfile = DEFAULT_DOCUMENT_STYLE_PROFILE;
+  let defaultLandingPage = "/clients";
+  let defaultPageSize = 10;
+  let compactLists = false;
 
   if (token) {
     try {
@@ -74,10 +77,19 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
           return idMatches || emailMatches;
         }) ?? null;
       const profileOverride = apiMatchedUser?.id ? await readUserProfileOverride(apiMatchedUser.id) : null;
+      const preferencesResult = apiMatchedUser?.id
+        ? await getUserPreferences(apiMatchedUser.id, token).catch(() => null)
+        : null;
+      const preferences = preferencesResult?.data ?? null;
       const matchedUser = apiMatchedUser;
 
       if (matchedUser) {
-        documentStyleProfile = normalizeDocumentStyleProfile(profileOverride?.documentStyleProfile);
+        documentStyleProfile = normalizeDocumentStyleProfile(
+          preferences?.documentStyle ?? profileOverride?.documentStyleProfile,
+        );
+        defaultLandingPage = preferences?.application?.landingPage?.trim() || defaultLandingPage;
+        defaultPageSize = preferences?.application?.pageSize || defaultPageSize;
+        compactLists = Boolean(preferences?.application?.useCompactListSpacing);
         userId = matchedUser.id ?? userId;
         name = matchedUser.name ?? name;
         email = matchedUser.email ?? email;
@@ -148,6 +160,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
       practiceLogo={practiceLogo}
       practiceLetterHead={practiceLetterHead}
       documentStyleProfile={documentStyleProfile}
+      defaultLandingPage={defaultLandingPage}
+      defaultPageSize={defaultPageSize}
+      compactLists={compactLists}
       rexConnected={rexConnection.connected}
       rexExpiresAt={rexConnection.expiresAt}
       desktopBrokerConfigured={isDesktopBrokerConfigured()}

@@ -23,11 +23,15 @@ import {
 import type {
   AdviceCaseV1,
   AdviceModuleV1,
+  InsuranceAdvicePersonV1,
+  InsuranceCurrentPolicyReviewV1,
+  InsuranceInsurabilityAssessmentV1,
   InsurancePolicyCoverComponentV1,
   InsuranceNeedsAnalysisLineItemKeyV1,
   InsurancePolicyOwnershipGroupV1,
   InsurancePolicyRecommendationV1,
   InsurancePolicyReplacementV1,
+  InsuranceProductResearchOptionV1,
   PortfolioAllocationRowV1,
   PortfolioHoldingV1,
   ProductFeeItemV1,
@@ -70,6 +74,19 @@ import {
   normalizeInsuranceNeedsLineItems,
   type InsuranceNeedsCoverColumnKey,
 } from "@/lib/soa-insurance-needs";
+import {
+  createEmptyInsuranceInsurabilityAssessment,
+  getInsuranceAdvicePeople,
+  hasCurrentCoverReviewContent,
+  hasInsuranceRecommendationsContent,
+  mergeLegacyInsuranceIntoAdvice,
+  syncLegacyInsuranceFieldsFromAdvice,
+} from "@/lib/soa-insurance-advice";
+import {
+  readInsuranceWorkspaceDraft,
+  writeInsuranceWorkspaceDraft,
+  type InsuranceWorkspaceDraftValue,
+} from "@/lib/insurance-workspace-storage";
 import { parseRecommendationMarkdown } from "@/lib/recommendation-markdown";
 import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "../finley-avatar.png";
@@ -95,6 +112,14 @@ type FactFindImportResponse = {
   candidate?: FactFindImportCandidate | null;
   source?: "llm" | "fallback";
   model?: string | null;
+  warning?: string | null;
+  error?: string | null;
+};
+
+type InsuranceWorkspaceIntakeResponse = {
+  people?: InsuranceWorkspaceDraftValue["people"];
+  clientName?: string | null;
+  insuranceAdvice?: InsuranceAdvicePersonV1[];
   warning?: string | null;
   error?: string | null;
 };
@@ -127,9 +152,11 @@ type SectionId =
   | "strategy-recommendations"
   | "product-recommendations"
   | "replacement-analysis"
+  | "insurance-current-cover"
   | "insurance-analysis"
   | "insurance-policies"
   | "insurance-replacement"
+  | "insurance-recommendations"
   | "portfolio-allocation"
   | "projections"
   | "disclosure"
@@ -291,9 +318,9 @@ const SECTION_CONFIGS: SectionConfig[] = [
   { id: "product-recommendations", label: "Product Recommendations", module: "product-advice" },
   { id: "portfolio-allocation", label: "Portfolio Allocation", module: "portfolio-advice" },
   { id: "replacement-analysis", label: "Replacement Analysis", module: "replacement-advice" },
+  { id: "insurance-current-cover", label: "Current Cover Review", module: "insurance-advice" },
   { id: "insurance-analysis", label: "Insurance Needs Analysis", module: "insurance-advice" },
-  { id: "insurance-policies", label: "Recommended Insurance Policies", module: "insurance-advice" },
-  { id: "insurance-replacement", label: "Insurance Replacement", module: "insurance-advice" },
+  { id: "insurance-recommendations", label: "Insurance Recommendations", module: "insurance-advice" },
   { id: "projections", label: "Projections", module: "projection-analysis" },
   { id: "disclosure", label: "Disclosure" },
   { id: "service-agreement", label: "Service Agreement" },
@@ -465,6 +492,147 @@ function isInsuranceProductRecommendation(recommendation: AdviceCaseV1["recommen
   return looksLikeInsuranceRecommendationText(text);
 }
 
+function hasInsuranceIntakeEvidence(assessment: IntakeAssessmentV1) {
+  return (
+    assessment.candidateModules.includes("insurance-advice") ||
+    assessment.candidateInsuranceReviewNotes.length > 0 ||
+    assessment.candidateInsuranceAdvice.length > 0 ||
+    assessment.candidateInsuranceNeedsAnalyses.length > 0 ||
+    assessment.candidateInsurancePolicyRecommendations.length > 0 ||
+    assessment.candidateInsurancePolicyReplacements.length > 0 ||
+    assessment.commercialsAndAgreements.insuranceCommissionDetails.length > 0
+  );
+}
+
+function hasMeaningfulInsuranceWorkspaceDraft(draft: InsuranceWorkspaceDraftValue | null | undefined) {
+  return Boolean(
+    draft?.insuranceAdvice?.some(
+      (person) =>
+        person.currentCoverReview.policies.length > 0 ||
+        person.needsAnalyses.length > 0 ||
+        person.productResearchOptions.length > 0 ||
+        person.recommendations.length > 0 ||
+        person.replacementAnalyses.length > 0,
+    ),
+  );
+}
+
+function hasWorkspaceValue(value: unknown) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return Boolean(normalized && normalized !== "unknown" && normalized !== "not-discussed");
+  }
+
+  return value !== null && value !== undefined;
+}
+
+function preferWorkspaceText(existing?: string | null, generated?: string | null) {
+  return hasWorkspaceValue(existing) ? existing ?? null : generated ?? existing ?? null;
+}
+
+function mergeWorkspaceObjectsPreservingExisting<T extends object>(existing: T, generated: T): T {
+  const merged: Record<string, unknown> = {
+    ...(generated as Record<string, unknown>),
+    ...(existing as Record<string, unknown>),
+  };
+  const existingRecord = existing as Record<string, unknown>;
+
+  for (const [key, generatedValue] of Object.entries(generated as Record<string, unknown>)) {
+    if (!hasWorkspaceValue(existingRecord[key]) && hasWorkspaceValue(generatedValue)) {
+      merged[key] = generatedValue;
+    }
+  }
+
+  return merged as T;
+}
+
+function mergeWorkspaceArraysByKey<T>(
+  existing: T[] | null | undefined,
+  generated: T[] | null | undefined,
+  getKey: (item: T) => string | null | undefined,
+) {
+  const existingItems = existing ?? [];
+  const existingKeys = new Set(existingItems.map(getKey).filter((key): key is string => Boolean(key)));
+  const additions = (generated ?? []).filter((item) => {
+    const key = getKey(item);
+    return !key || !existingKeys.has(key);
+  });
+
+  return [...existingItems, ...additions];
+}
+
+function mergeInsuranceAdvicePersonDraft(
+  existing: InsuranceAdvicePersonV1,
+  generated: InsuranceAdvicePersonV1,
+): InsuranceAdvicePersonV1 {
+  return {
+    ...generated,
+    ...existing,
+    currentCoverReview: {
+      summary: preferWorkspaceText(existing.currentCoverReview.summary, generated.currentCoverReview.summary),
+      reviewNotes: preferWorkspaceText(existing.currentCoverReview.reviewNotes, generated.currentCoverReview.reviewNotes),
+      policies: mergeWorkspaceArraysByKey(
+        existing.currentCoverReview.policies,
+        generated.currentCoverReview.policies,
+        (policy) => policy.policyId,
+      ),
+    },
+    insurabilityAssessment: mergeWorkspaceObjectsPreservingExisting(
+      existing.insurabilityAssessment,
+      generated.insurabilityAssessment,
+    ),
+    needsAnalyses: mergeWorkspaceArraysByKey(existing.needsAnalyses, generated.needsAnalyses, (analysis) => analysis.analysisId),
+    productResearchOptions: mergeWorkspaceArraysByKey(
+      existing.productResearchOptions,
+      generated.productResearchOptions,
+      (option) => option.optionId,
+    ),
+    recommendations: mergeWorkspaceArraysByKey(
+      existing.recommendations,
+      generated.recommendations,
+      (recommendation) => recommendation.policyRecommendationId,
+    ),
+    replacementAnalyses: mergeWorkspaceArraysByKey(
+      existing.replacementAnalyses,
+      generated.replacementAnalyses,
+      (replacement) => replacement.replacementId,
+    ),
+  };
+}
+
+function mergeInsuranceWorkspaceDrafts(
+  existing: InsuranceWorkspaceDraftValue | null,
+  generated: InsuranceWorkspaceDraftValue,
+): InsuranceWorkspaceDraftValue {
+  if (!existing?.insuranceAdvice?.length) {
+    return {
+      ...generated,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  const generatedByPerson = new Map((generated.insuranceAdvice ?? []).map((person) => [person.personId, person]));
+  const existingPersonIds = new Set(existing.insuranceAdvice.map((person) => person.personId));
+  const mergedExistingPeople = existing.insuranceAdvice.map((person) => {
+    const generatedPerson = generatedByPerson.get(person.personId);
+    return generatedPerson ? mergeInsuranceAdvicePersonDraft(person, generatedPerson) : person;
+  });
+  const generatedAdditions = (generated.insuranceAdvice ?? []).filter((person) => !existingPersonIds.has(person.personId));
+
+  return {
+    ...generated,
+    ...existing,
+    clientProfileId: existing.clientProfileId ?? generated.clientProfileId ?? null,
+    clientId: existing.clientId ?? generated.clientId ?? null,
+    clientName: existing.clientName ?? generated.clientName ?? null,
+    people: existing.people?.length ? existing.people : generated.people,
+    insuranceAdvice: [...mergedExistingPeople, ...generatedAdditions],
+    activeTab: existing.activeTab ?? generated.activeTab ?? "scenario-details",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 function normalizeAdviceCaseRecommendationLanguage(caseValue: AdviceCaseV1, clientName?: string | null): AdviceCaseV1 {
   const allPersonIds = caseValue.clientGroup.clients.map((client) => client.personId);
 
@@ -581,7 +749,6 @@ const INSURANCE_COVER_TYPE_OPTIONS: Array<{ value: InsurancePolicyCoverComponent
   { value: "tpd", label: "TPD" },
   { value: "trauma", label: "Trauma" },
   { value: "income-protection", label: "Income protection" },
-  { value: "other", label: "Other" },
 ];
 
 const INSURANCE_NEEDS_COVER_COLUMNS: Array<{ value: "life" | "tpd" | "trauma" | "income-protection"; label: string }> = [
@@ -1210,8 +1377,14 @@ function getSectionStatus(
       return adviceCase.recommendations.product.length ? (workflowStarted ? "needs-confirmation" : "in-progress") : "in-progress";
     case "replacement-analysis":
       return adviceCase.recommendations.replacement.length ? (workflowStarted ? "needs-confirmation" : "in-progress") : "in-progress";
+    case "insurance-current-cover":
+      return hasCurrentCoverReviewContent(getInsuranceAdvicePeople(adviceCase))
+        ? workflowStarted
+          ? "needs-confirmation"
+          : "in-progress"
+        : "in-progress";
     case "insurance-analysis":
-      return adviceCase.recommendations.insuranceNeedsAnalyses?.length ||
+      return getInsuranceAdvicePeople(adviceCase).some((entry) => entry.needsAnalyses.length) ||
         adviceCase.recommendations.insurance?.length
         ? workflowStarted
           ? "needs-confirmation"
@@ -1219,6 +1392,12 @@ function getSectionStatus(
         : "in-progress";
     case "insurance-policies":
       return adviceCase.recommendations.insurancePolicies?.length
+        ? workflowStarted
+          ? "needs-confirmation"
+          : "in-progress"
+        : "in-progress";
+    case "insurance-recommendations":
+      return hasInsuranceRecommendationsContent(getInsuranceAdvicePeople(adviceCase))
         ? workflowStarted
           ? "needs-confirmation"
           : "in-progress"
@@ -1501,6 +1680,66 @@ function createInsurancePolicyReplacement(ownerPersonId?: string | null): Insura
   };
 }
 
+function createCurrentInsurancePolicy(ownerPersonId?: string | null): InsuranceCurrentPolicyReviewV1 {
+  return {
+    policyId: makeId("current-insurance-policy"),
+    ownerPersonIds: ownerPersonId ? [ownerPersonId] : [],
+    insuredPersonId: ownerPersonId ?? null,
+    insurerName: "",
+    productName: "",
+    policyName: "",
+    policyNumber: "",
+    ownership: "unknown",
+    fundingSource: "",
+    linkedSuperFund: "",
+    status: "active",
+    premiumAmount: null,
+    premiumFrequency: "monthly",
+    annualisedPremium: null,
+    benefits: [
+      {
+        benefitId: makeId("current-insurance-benefit"),
+        coverType: "life",
+        details: "",
+        sumInsured: null,
+        monthlyBenefit: null,
+        premiumAmount: null,
+        premiumFrequency: "monthly",
+        waitingPeriod: null,
+        benefitPeriod: null,
+        status: "active",
+        exclusionsOrLoadings: null,
+        notes: null,
+      },
+    ],
+    exclusionsOrLoadings: "",
+    retainabilityNotes: "",
+    variationOptions: "",
+    replacementRiskNotes: "",
+    sourceEvidence: null,
+  };
+}
+
+function createInsuranceProductResearchOption(): InsuranceProductResearchOptionV1 {
+  return {
+    optionId: makeId("insurance-product-option"),
+    insurerName: "",
+    productName: "",
+    ownership: "unknown",
+    actionConsidered: "apply-new",
+    coverSummary: "",
+    premiumAmount: null,
+    premiumFrequency: "monthly",
+    annualisedPremium: null,
+    keyFeatures: [],
+    limitations: [],
+    underwritingAssumptions: "",
+    status: "alternative",
+    rationale: "",
+    sourceEvidence: null,
+  };
+}
+
 function toTitleCase(value: string) {
   return value
     .split("-")
@@ -1631,6 +1870,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const [isPortfolioAllocationEditing, setIsPortfolioAllocationEditing] = useState(false);
   const [scenarioReady, setScenarioReady] = useState(false);
   const [previewVersion, setPreviewVersion] = useState(0);
+  const [insuranceWorkspaceRefreshKey, setInsuranceWorkspaceRefreshKey] = useState(0);
+  const [insuranceWorkspaceDraft, setInsuranceWorkspaceDraft] = useState<InsuranceWorkspaceDraftValue | null>(null);
   const [soaRenderStyle, setSoaRenderStyle] = useState<SoaRenderStyle>(DEFAULT_SOA_RENDER_STYLE);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1641,6 +1882,10 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   const [adviceCase, setAdviceCase] = useState<AdviceCaseV1>(() => buildInitialCase(activeClient));
   const [linkedProjectionPackage, setLinkedProjectionPackage] = useState<SoaProjectionOutputPackage | null>(null);
   const [projectionScenarioOptions, setProjectionScenarioOptions] = useState<SoaProjectionOutputPackage[]>([]);
+
+  useEffect(() => {
+    setInsuranceWorkspaceDraft(readInsuranceWorkspaceDraft(activeClientId));
+  }, [activeClientId, insuranceWorkspaceRefreshKey]);
 
   function resetConsoleState(nextAdviceCase: AdviceCaseV1) {
     setAdviceCase(nextAdviceCase);
@@ -2829,6 +3074,73 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     return (await response.json()) as ProductDraftResponseV1;
   }
 
+  async function autoPrepareInsuranceWorkspaceDraft(nextAssessment: IntakeAssessmentV1) {
+    if (!activeClientId || !hasInsuranceIntakeEvidence(nextAssessment)) {
+      return null;
+    }
+
+    const existingDraft = readInsuranceWorkspaceDraft(activeClientId);
+
+    try {
+      const response = await fetch("/api/finley/insurance-workspace/intake", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          clientId: activeClientId,
+          adviserInstruction:
+            "Auto-prepare the insurance workspace from the SOA intake. Preserve existing current cover and adviser-entered workspace data. Use uploaded evidence for product research, recommendations, and replacement advice where supported.",
+          currentAssessment: nextAssessment,
+          workspaceContext: {
+            clientName: existingDraft?.clientName ?? activeClient?.name ?? null,
+            people: existingDraft?.people ?? adviceCase.clientGroup.clients,
+            insuranceAdvice: existingDraft?.insuranceAdvice ?? adviceCase.recommendations.insuranceAdvice ?? [],
+          },
+          uploadedFiles: uploads.map((upload) => ({
+            name: upload.name,
+            kind: upload.kind,
+            extractedText: upload.extractedText ?? null,
+          })),
+        }),
+      });
+      const body = (await response.json().catch(() => null)) as InsuranceWorkspaceIntakeResponse | null;
+
+      if (!response.ok) {
+        return body?.error
+          ? `SOA intake completed, but the insurance workspace draft could not be prepared: ${body.error}`
+          : "SOA intake completed, but the insurance workspace draft could not be prepared.";
+      }
+
+      const generatedDraft: InsuranceWorkspaceDraftValue = {
+        clientProfileId: activeClientId,
+        clientId: activeClientId,
+        clientName: body?.clientName ?? existingDraft?.clientName ?? activeClient?.name ?? null,
+        people: body?.people ?? existingDraft?.people ?? adviceCase.clientGroup.clients,
+        insuranceAdvice: body?.insuranceAdvice ?? [],
+        activeTab: existingDraft?.activeTab ?? "scenario-details",
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (!hasMeaningfulInsuranceWorkspaceDraft(generatedDraft)) {
+        return null;
+      }
+
+      const mergedDraft = mergeInsuranceWorkspaceDrafts(existingDraft, generatedDraft);
+      const savedDraft = writeInsuranceWorkspaceDraft(activeClientId, mergedDraft) ?? mergedDraft;
+      setInsuranceWorkspaceDraft(savedDraft);
+      setInsuranceWorkspaceRefreshKey((current) => current + 1);
+
+      return body?.warning
+        ? `Prepared the insurance workspace draft with a warning: ${body.warning}`
+        : "Prepared the insurance workspace draft from the SOA intake. Review it in the insurance workspace before importing it into the SOA.";
+    } catch (error) {
+      return `SOA intake completed, but the insurance workspace draft could not be prepared: ${
+        error instanceof Error ? error.message : "unknown error"
+      }.`;
+    }
+  }
+
   function getCurrentSectionState(sectionId: SectionId) {
     if (sectionId === "scope-of-advice") {
       return {
@@ -3060,9 +3372,17 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
             }
           }
 
+          const insuranceWorkspaceNotice = await autoPrepareInsuranceWorkspaceDraft(nextAssessment);
+
           setIntakeAssessment(nextAssessment);
-          if (intakeWarning || strategyDraftResult?.warning || productDraftResult?.warning) {
-            setImpactNotice([intakeWarning, strategyDraftResult?.warning, productDraftResult?.warning].filter(Boolean).join(" "));
+          const intakeNotices = [
+            intakeWarning,
+            strategyDraftResult?.warning,
+            productDraftResult?.warning,
+            insuranceWorkspaceNotice,
+          ].filter(Boolean);
+          if (intakeNotices.length) {
+            setImpactNotice(intakeNotices.join(" "));
           }
           setAdviceCase((current) => ({
             ...(() => {
@@ -3418,7 +3738,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 };
               });
 
-              return {
+              return mergeLegacyInsuranceIntoAdvice({
                 ...current,
                 blueprint: { includedModules: nextAssessment.candidateModules },
                 objectives: nextObjectives,
@@ -3540,7 +3860,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       : current.agreements.feeAgreement,
                 },
                 metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-              };
+              });
             })(),
           }));
 
@@ -4258,18 +4578,195 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     }
   }
 
-  function updateInsurancePolicy(policyId: string, patch: Partial<InsurancePolicyRecommendationV1>) {
+  function updateInsuranceAdviceForPerson(
+    personId: string,
+    updater: (current: InsuranceAdvicePersonV1) => InsuranceAdvicePersonV1,
+  ) {
+    setAdviceCase((current) => {
+      const insuranceAdvice = getInsuranceAdvicePeople(current).map((entry) =>
+        entry.personId === personId ? updater(entry) : entry,
+      );
+
+      return {
+        ...current,
+        recommendations: syncLegacyInsuranceFieldsFromAdvice({
+          ...current.recommendations,
+          insuranceAdvice,
+        }),
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      };
+    });
+    setConfirmedSections((current) => ({ ...current, "insurance-current-cover": false, "insurance-recommendations": false }));
+  }
+
+  function openInsuranceWorkspace() {
+    if (!activeClientId) {
+      setImpactNotice("Select a client before opening the insurance workspace.");
+      return;
+    }
+
+    const params = new URLSearchParams({ clientId: activeClientId });
+    if (activeSoaId) params.set("soaId", activeSoaId);
+    window.open(`/insurance_workspace?${params.toString()}`, "_blank", "noopener,noreferrer");
+  }
+
+  function importInsuranceWorkspaceDraft() {
+    const draft = readInsuranceWorkspaceDraft(activeClientId);
+    const insuranceAdvice = draft?.insuranceAdvice;
+
+    if (!insuranceAdvice?.length) {
+      setInsuranceWorkspaceRefreshKey((current) => current + 1);
+      setImpactNotice("No insurance workspace draft was found for this client yet. Open the insurance workspace and build or import the insurance advice first.");
+      return;
+    }
+
     setAdviceCase((current) => ({
       ...current,
-      recommendations: {
+      recommendations: syncLegacyInsuranceFieldsFromAdvice({
         ...current.recommendations,
-        insurancePolicies: (current.recommendations.insurancePolicies ?? []).map((policy) =>
-          policy.policyRecommendationId === policyId ? { ...policy, ...patch } : policy,
-        ),
-      },
+        insuranceAdvice,
+      }),
       metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
     }));
-    setConfirmedSections((current) => ({ ...current, "insurance-policies": false }));
+    setConfirmedSections((current) => ({
+      ...current,
+      "insurance-current-cover": false,
+      "insurance-analysis": false,
+      "insurance-policies": false,
+      "insurance-recommendations": false,
+      "insurance-replacement": false,
+    }));
+    setActiveInsurancePersonId(insuranceAdvice[0]?.personId ?? adviceCase.clientGroup.clients[0]?.personId ?? null);
+    setPreviewVersion((current) => current + 1);
+    setInsuranceWorkspaceDraft(draft);
+    setInsuranceWorkspaceRefreshKey((current) => current + 1);
+    setImpactNotice("Imported the insurance workspace draft into the SOA insurance section.");
+  }
+
+  function renderInsuranceWorkspaceBridge() {
+    const currentPolicyCount = insuranceWorkspaceDraft?.insuranceAdvice?.reduce(
+      (total, person) => total + person.currentCoverReview.policies.length,
+      0,
+    ) ?? 0;
+    const currentBenefitCount = insuranceWorkspaceDraft?.insuranceAdvice?.reduce(
+      (total, person) => total + person.currentCoverReview.policies.reduce((policyTotal, policy) => policyTotal + policy.benefits.length, 0),
+      0,
+    ) ?? 0;
+    const recommendationCount = insuranceWorkspaceDraft?.insuranceAdvice?.reduce(
+      (total, person) => total + person.recommendations.length,
+      0,
+    ) ?? 0;
+
+    return (
+      <div className={styles.workflowDraftCard}>
+        <div className={styles.workflowDraftHeader}>
+          <div>
+            <div className={styles.workflowDraftLabel}>Insurance workspace</div>
+            <div className={styles.workflowDraftPreview}>
+              Use the standalone insurance workspace to shape current cover, needs analysis, recommendations and replacement advice, then import the draft into this SOA.
+            </div>
+          </div>
+          <div className={styles.sectionActionRow}>
+            <button type="button" className={styles.sectionActionButton} onClick={openInsuranceWorkspace}>
+              Open workspace
+            </button>
+            <button type="button" className={styles.sectionActionButton} onClick={importInsuranceWorkspaceDraft}>
+              Import workspace draft
+            </button>
+          </div>
+        </div>
+        {insuranceWorkspaceDraft?.insuranceAdvice?.length ? (
+          <div className={styles.insuranceWorkspaceSummary}>
+            <span>{currentPolicyCount} current policies</span>
+            <span>{currentBenefitCount} current benefits</span>
+            <span>{recommendationCount} recommendations</span>
+            {insuranceWorkspaceDraft.updatedAt ? <span>Updated {new Date(insuranceWorkspaceDraft.updatedAt).toLocaleString("en-AU")}</span> : null}
+          </div>
+        ) : (
+          <p className={styles.workflowDraftPreview}>No saved insurance workspace draft found for this client yet.</p>
+        )}
+      </div>
+    );
+  }
+
+  function updateCurrentInsurancePolicy(
+    personId: string,
+    policyId: string,
+    patch: Partial<InsuranceCurrentPolicyReviewV1>,
+  ) {
+    updateInsuranceAdviceForPerson(personId, (entry) => ({
+      ...entry,
+      currentCoverReview: {
+        ...entry.currentCoverReview,
+        policies: entry.currentCoverReview.policies.map((policy) =>
+          policy.policyId === policyId ? { ...policy, ...patch } : policy,
+        ),
+      },
+    }));
+  }
+
+  function updateCurrentInsuranceBenefit(
+    personId: string,
+    policyId: string,
+    benefitId: string,
+    patch: Partial<InsuranceCurrentPolicyReviewV1["benefits"][number]>,
+  ) {
+    updateInsuranceAdviceForPerson(personId, (entry) => ({
+      ...entry,
+      currentCoverReview: {
+        ...entry.currentCoverReview,
+        policies: entry.currentCoverReview.policies.map((policy) =>
+          policy.policyId === policyId
+            ? {
+                ...policy,
+                benefits: policy.benefits.map((benefit) =>
+                  benefit.benefitId === benefitId ? { ...benefit, ...patch } : benefit,
+                ),
+              }
+            : policy,
+        ),
+      },
+    }));
+  }
+
+  function updateInsurabilityAssessment(personId: string, patch: Partial<InsuranceInsurabilityAssessmentV1>) {
+    updateInsuranceAdviceForPerson(personId, (entry) => ({
+      ...entry,
+      insurabilityAssessment: {
+        ...createEmptyInsuranceInsurabilityAssessment(),
+        ...entry.insurabilityAssessment,
+        ...patch,
+      },
+    }));
+  }
+
+  function updateInsuranceProductResearchOption(
+    personId: string,
+    optionId: string,
+    patch: Partial<InsuranceProductResearchOptionV1>,
+  ) {
+    updateInsuranceAdviceForPerson(personId, (entry) => ({
+      ...entry,
+      productResearchOptions: entry.productResearchOptions.map((option) =>
+        option.optionId === optionId ? { ...option, ...patch } : option,
+      ),
+    }));
+  }
+
+  function updateInsurancePolicy(policyId: string, patch: Partial<InsurancePolicyRecommendationV1>) {
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insurancePolicies: (current.recommendations.insurancePolicies ?? []).map((policy) =>
+            policy.policyRecommendationId === policyId ? { ...policy, ...patch } : policy,
+          ),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
+    setConfirmedSections((current) => ({ ...current, "insurance-policies": false, "insurance-recommendations": false }));
   }
 
   function updateInsuranceOwnershipGroup(
@@ -4277,24 +4774,26 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     groupId: string,
     patch: Partial<InsurancePolicyOwnershipGroupV1>,
   ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insurancePolicies: (current.recommendations.insurancePolicies ?? []).map((policy) =>
-          policy.policyRecommendationId === policyId
-            ? {
-                ...policy,
-                ownershipGroups: policy.ownershipGroups.map((group) =>
-                  group.groupId === groupId ? { ...group, ...patch } : group,
-                ),
-              }
-            : policy,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
-    setConfirmedSections((current) => ({ ...current, "insurance-policies": false }));
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insurancePolicies: (current.recommendations.insurancePolicies ?? []).map((policy) =>
+            policy.policyRecommendationId === policyId
+              ? {
+                  ...policy,
+                  ownershipGroups: policy.ownershipGroups.map((group) =>
+                    group.groupId === groupId ? { ...group, ...patch } : group,
+                  ),
+                }
+              : policy,
+          ),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
+    setConfirmedSections((current) => ({ ...current, "insurance-policies": false, "insurance-recommendations": false }));
   }
 
   function updateInsuranceCover(
@@ -4303,45 +4802,49 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     coverId: string,
     patch: Partial<InsurancePolicyCoverComponentV1>,
   ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insurancePolicies: (current.recommendations.insurancePolicies ?? []).map((policy) =>
-          policy.policyRecommendationId === policyId
-            ? {
-                ...policy,
-                ownershipGroups: policy.ownershipGroups.map((group) =>
-                  group.groupId === groupId
-                    ? {
-                        ...group,
-                        covers: group.covers.map((cover) => (cover.coverId === coverId ? { ...cover, ...patch } : cover)),
-                      }
-                    : group,
-                ),
-              }
-            : policy,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
-    setConfirmedSections((current) => ({ ...current, "insurance-policies": false }));
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insurancePolicies: (current.recommendations.insurancePolicies ?? []).map((policy) =>
+            policy.policyRecommendationId === policyId
+              ? {
+                  ...policy,
+                  ownershipGroups: policy.ownershipGroups.map((group) =>
+                    group.groupId === groupId
+                      ? {
+                          ...group,
+                          covers: group.covers.map((cover) => (cover.coverId === coverId ? { ...cover, ...patch } : cover)),
+                        }
+                      : group,
+                  ),
+                }
+              : policy,
+          ),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
+    setConfirmedSections((current) => ({ ...current, "insurance-policies": false, "insurance-recommendations": false }));
   }
 
   function updateInsuranceNeedsAnalysisOutput(
     analysisId: string,
     patch: Partial<NonNullable<AdviceCaseV1["recommendations"]["insuranceNeedsAnalyses"]>[number]["outputs"]>,
   ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) =>
-          entry.analysisId === analysisId ? { ...entry, outputs: { ...entry.outputs, ...patch } } : entry,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) =>
+            entry.analysisId === analysisId ? { ...entry, outputs: { ...entry.outputs, ...patch } } : entry,
+          ),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
     setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
   }
 
@@ -4371,11 +4874,12 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     amountKey: InsuranceNeedsCoverColumnKey,
     amount: number | null,
   ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) => {
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insuranceNeedsAnalyses: (current.recommendations.insuranceNeedsAnalyses ?? []).map((entry) => {
           if (entry.analysisId !== analysisId) {
             return entry;
           }
@@ -4394,10 +4898,11 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           };
 
           return syncInsuranceNeedsAnalysisTotals(nextEntry);
-        }),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
+          }),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
     setConfirmedSections((current) => ({ ...current, "insurance-analysis": false }));
   }
 
@@ -4456,17 +4961,19 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   }
 
   function updateInsuranceReplacement(replacementId: string, patch: Partial<InsurancePolicyReplacementV1>) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insuranceReplacements: (current.recommendations.insuranceReplacements ?? []).map((replacement) =>
-          replacement.replacementId === replacementId ? { ...replacement, ...patch } : replacement,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
-    setConfirmedSections((current) => ({ ...current, "insurance-replacement": false }));
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insuranceReplacements: (current.recommendations.insuranceReplacements ?? []).map((replacement) =>
+            replacement.replacementId === replacementId ? { ...replacement, ...patch } : replacement,
+          ),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
+    setConfirmedSections((current) => ({ ...current, "insurance-replacement": false, "insurance-recommendations": false }));
   }
 
   function updateInsuranceReplacementPolicy(
@@ -4474,19 +4981,21 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     side: "currentPolicy" | "recommendedPolicy",
     patch: Partial<InsurancePolicyReplacementV1["currentPolicy"]>,
   ) {
-    setAdviceCase((current) => ({
-      ...current,
-      recommendations: {
-        ...current.recommendations,
-        insuranceReplacements: (current.recommendations.insuranceReplacements ?? []).map((replacement) =>
-          replacement.replacementId === replacementId
-            ? { ...replacement, [side]: { ...replacement[side], ...patch } }
-            : replacement,
-        ),
-      },
-      metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
-    }));
-    setConfirmedSections((current) => ({ ...current, "insurance-replacement": false }));
+    setAdviceCase((current) =>
+      mergeLegacyInsuranceIntoAdvice({
+        ...current,
+        recommendations: {
+          ...current.recommendations,
+          insuranceReplacements: (current.recommendations.insuranceReplacements ?? []).map((replacement) =>
+            replacement.replacementId === replacementId
+              ? { ...replacement, [side]: { ...replacement[side], ...patch } }
+              : replacement,
+          ),
+        },
+        metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
+      }),
+    );
+    setConfirmedSections((current) => ({ ...current, "insurance-replacement": false, "insurance-recommendations": false }));
   }
 
   function updateServiceAgreementFeeItem(
@@ -5855,6 +6364,281 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   </div>
                 </>
               ) : null}
+              {activeSectionId.startsWith("insurance-") ? renderInsuranceWorkspaceBridge() : null}
+              {activeSectionId === "insurance-current-cover" ? (
+                <>
+                  <div className={styles.personTabRow}>
+                    {adviceCase.clientGroup.clients.map((person) => (
+                      <button
+                        key={person.personId}
+                        type="button"
+                        className={`${styles.personTabButton} ${
+                          activeInsurancePersonId === person.personId ? styles.personTabButtonActive : ""
+                        }`.trim()}
+                        onClick={() => setActiveInsurancePersonId(person.personId)}
+                      >
+                        {person.role === "partner" ? "Partner" : "Client"}
+                      </button>
+                    ))}
+                  </div>
+                  {(() => {
+                    const ownerPersonId = activeInsurancePersonId ?? adviceCase.clientGroup.clients[0]?.personId;
+                    const personAdvice = getInsuranceAdvicePeople(adviceCase).find((entry) => entry.personId === ownerPersonId);
+
+                    if (!ownerPersonId || !personAdvice) return null;
+
+                    return (
+                      <div className={styles.workflowDraftStack}>
+                        <div className={styles.workflowDraftCard}>
+                          <div className={styles.workflowDraftHeader}>
+                            <div>
+                              <div className={styles.workflowDraftLabel}>Current cover review</div>
+                              <div className={styles.workflowDraftPreview}>
+                                Start with the client’s existing policies and benefits before assessing needs or recommending retain, vary, replace or new cover.
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className={styles.sectionActionButton}
+                              onClick={() =>
+                                updateInsuranceAdviceForPerson(ownerPersonId, (entry) => ({
+                                  ...entry,
+                                  currentCoverReview: {
+                                    ...entry.currentCoverReview,
+                                    policies: [...entry.currentCoverReview.policies, createCurrentInsurancePolicy(ownerPersonId)],
+                                  },
+                                }))
+                              }
+                            >
+                              Add current policy
+                            </button>
+                          </div>
+                          <div className={styles.sectionGridCompact}>
+                            <div className={styles.workflowDraftSubcard}>
+                              <div className={styles.workflowDraftLabel}>Review summary</div>
+                              <textarea
+                                className={`${finleyStyles.composerInput} ${styles.mediumTextarea}`.trim()}
+                                value={personAdvice.currentCoverReview.summary ?? ""}
+                                onChange={(event) =>
+                                  updateInsuranceAdviceForPerson(ownerPersonId, (entry) => ({
+                                    ...entry,
+                                    currentCoverReview: { ...entry.currentCoverReview, summary: event.target.value },
+                                  }))
+                                }
+                                placeholder="Summarise the current cover position"
+                              />
+                            </div>
+                            <div className={styles.workflowDraftSubcard}>
+                              <div className={styles.workflowDraftLabel}>Retainability / replacement risk notes</div>
+                              <textarea
+                                className={`${finleyStyles.composerInput} ${styles.mediumTextarea}`.trim()}
+                                value={personAdvice.currentCoverReview.reviewNotes ?? ""}
+                                onChange={(event) =>
+                                  updateInsuranceAdviceForPerson(ownerPersonId, (entry) => ({
+                                    ...entry,
+                                    currentCoverReview: { ...entry.currentCoverReview, reviewNotes: event.target.value },
+                                  }))
+                                }
+                                placeholder="Record risks of cancelling, varying or replacing existing cover"
+                              />
+                            </div>
+                          </div>
+                          {personAdvice.currentCoverReview.policies.map((policy, policyIndex) => (
+                            <div key={policy.policyId} className={styles.workflowDraftSubcard}>
+                              <div className={styles.workflowDraftHeader}>
+                                <div className={styles.workflowDraftLabel}>Current policy {policyIndex + 1}</div>
+                                <button
+                                  type="button"
+                                  className={styles.objectiveDeleteButton}
+                                  onClick={() =>
+                                    updateInsuranceAdviceForPerson(ownerPersonId, (entry) => ({
+                                      ...entry,
+                                      currentCoverReview: {
+                                        ...entry.currentCoverReview,
+                                        policies: entry.currentCoverReview.policies.filter((item) => item.policyId !== policy.policyId),
+                                      },
+                                    }))
+                                  }
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              <div className={styles.sectionGridCompact}>
+                                <input
+                                  className={finleyStyles.clientSearch}
+                                  placeholder="Insurer"
+                                  value={policy.insurerName ?? ""}
+                                  onChange={(event) => updateCurrentInsurancePolicy(ownerPersonId, policy.policyId, { insurerName: event.target.value })}
+                                />
+                                <input
+                                  className={finleyStyles.clientSearch}
+                                  placeholder="Policy / product name"
+                                  value={policy.policyName ?? policy.productName ?? ""}
+                                  onChange={(event) =>
+                                    updateCurrentInsurancePolicy(ownerPersonId, policy.policyId, {
+                                      policyName: event.target.value,
+                                      productName: event.target.value,
+                                    })
+                                  }
+                                />
+                                <input
+                                  className={finleyStyles.clientSearch}
+                                  placeholder="Policy number"
+                                  value={policy.policyNumber ?? ""}
+                                  onChange={(event) => updateCurrentInsurancePolicy(ownerPersonId, policy.policyId, { policyNumber: event.target.value })}
+                                />
+                                <select
+                                  className={finleyStyles.clientSearch}
+                                  value={policy.ownership ?? "unknown"}
+                                  onChange={(event) =>
+                                    updateCurrentInsurancePolicy(ownerPersonId, policy.policyId, {
+                                      ownership: event.target.value as NonNullable<InsuranceCurrentPolicyReviewV1["ownership"]>,
+                                    })
+                                  }
+                                >
+                                  {INSURANCE_OWNERSHIP_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className={styles.dataTableWrap}>
+                                <table className={styles.dataTable}>
+                                  <thead>
+                                    <tr>
+                                      <th>Benefit</th>
+                                      <th>Sum / monthly benefit</th>
+                                      <th>Premium</th>
+                                      <th>Waiting / benefit period</th>
+                                      <th>Action</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {policy.benefits.map((benefit) => (
+                                      <tr key={benefit.benefitId}>
+                                        <td>
+                                          <select
+                                            className={finleyStyles.clientSearch}
+                                            value={benefit.coverType}
+                                            onChange={(event) =>
+                                              updateCurrentInsuranceBenefit(ownerPersonId, policy.policyId, benefit.benefitId, {
+                                                coverType: event.target.value as InsurancePolicyCoverComponentV1["coverType"],
+                                              })
+                                            }
+                                          >
+                                            {INSURANCE_COVER_TYPE_OPTIONS.map((option) => (
+                                              <option key={option.value} value={option.value}>{option.label}</option>
+                                            ))}
+                                          </select>
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={finleyStyles.clientSearch}
+                                            inputMode="decimal"
+                                            placeholder="$0.00"
+                                            value={(benefit.coverType === "income-protection" ? benefit.monthlyBenefit : benefit.sumInsured) ?? ""}
+                                            onChange={(event) =>
+                                              updateCurrentInsuranceBenefit(ownerPersonId, policy.policyId, benefit.benefitId, {
+                                                [benefit.coverType === "income-protection" ? "monthlyBenefit" : "sumInsured"]: parseCurrencyInput(event.target.value),
+                                              })
+                                            }
+                                          />
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={finleyStyles.clientSearch}
+                                            inputMode="decimal"
+                                            placeholder="$0.00"
+                                            value={benefit.premiumAmount ?? ""}
+                                            onChange={(event) =>
+                                              updateCurrentInsuranceBenefit(ownerPersonId, policy.policyId, benefit.benefitId, {
+                                                premiumAmount: parseCurrencyInput(event.target.value),
+                                              })
+                                            }
+                                          />
+                                        </td>
+                                        <td>
+                                          <input
+                                            className={finleyStyles.clientSearch}
+                                            value={[benefit.waitingPeriod, benefit.benefitPeriod].filter(Boolean).join(" / ")}
+                                            onChange={(event) => {
+                                              const [waitingPeriod, benefitPeriod] = event.target.value.split("/").map((part) => part.trim());
+                                              updateCurrentInsuranceBenefit(ownerPersonId, policy.policyId, benefit.benefitId, {
+                                                waitingPeriod: waitingPeriod || null,
+                                                benefitPeriod: benefitPeriod || null,
+                                              });
+                                            }}
+                                          />
+                                        </td>
+                                        <td>
+                                          <button
+                                            type="button"
+                                            className={styles.objectiveDeleteButton}
+                                            onClick={() =>
+                                              updateCurrentInsurancePolicy(ownerPersonId, policy.policyId, {
+                                                benefits: policy.benefits.filter((item) => item.benefitId !== benefit.benefitId),
+                                              })
+                                            }
+                                          >
+                                            Delete
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <button
+                                type="button"
+                                className={styles.sectionActionButton}
+                                onClick={() =>
+                                  updateCurrentInsurancePolicy(ownerPersonId, policy.policyId, {
+                                    benefits: [
+                                      ...policy.benefits,
+                                      {
+                                        benefitId: makeId("current-insurance-benefit"),
+                                        coverType: "life",
+                                        sumInsured: null,
+                                        monthlyBenefit: null,
+                                        premiumAmount: null,
+                                        premiumFrequency: "monthly",
+                                      },
+                                    ],
+                                  })
+                                }
+                              >
+                                Add benefit
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <div className={styles.workflowDraftCard}>
+                          <div className={styles.workflowDraftLabel}>Insurability assessment</div>
+                          <div className={styles.sectionGridCompact}>
+                            <div className={styles.workflowDraftSubcard}>
+                              <div className={styles.workflowDraftLabel}>Health / underwriting notes</div>
+                              <textarea
+                                className={`${finleyStyles.composerInput} ${styles.mediumTextarea}`.trim()}
+                                value={personAdvice.insurabilityAssessment.healthNotes ?? ""}
+                                onChange={(event) => updateInsurabilityAssessment(ownerPersonId, { healthNotes: event.target.value })}
+                                placeholder="Health disclosures, underwriting concerns, loadings, exclusions or ability to obtain cover"
+                              />
+                            </div>
+                            <div className={styles.workflowDraftSubcard}>
+                              <div className={styles.workflowDraftLabel}>Adviser assessment</div>
+                              <textarea
+                                className={`${finleyStyles.composerInput} ${styles.mediumTextarea}`.trim()}
+                                value={personAdvice.insurabilityAssessment.adviserAssessment ?? ""}
+                                onChange={(event) => updateInsurabilityAssessment(ownerPersonId, { adviserAssessment: event.target.value })}
+                                placeholder="Record whether new or additional cover appears obtainable before recommending replacement or variation"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </>
+              ) : null}
               {activeSectionId === "insurance-analysis" ? (
                 <>
                   <div className={styles.personTabRow}>
@@ -6072,7 +6856,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   })()}
                 </>
               ) : null}
-              {activeSectionId === "insurance-policies" ? (
+              {activeSectionId === "insurance-recommendations" || activeSectionId === "insurance-policies" ? (
                 <>
                   <div className={styles.personTabRow}>
                     {adviceCase.clientGroup.clients.map((person) => (
@@ -6088,6 +6872,125 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       </button>
                     ))}
                   </div>
+                  {(() => {
+                    const ownerPersonId = activeInsurancePersonId ?? adviceCase.clientGroup.clients[0]?.personId;
+                    const personAdvice = getInsuranceAdvicePeople(adviceCase).find((entry) => entry.personId === ownerPersonId);
+
+                    if (!ownerPersonId || !personAdvice) return null;
+
+                    return (
+                      <div className={styles.workflowDraftCard}>
+                        <div className={styles.workflowDraftHeader}>
+                          <div>
+                            <div className={styles.workflowDraftLabel}>Product research options</div>
+                            <div className={styles.workflowDraftPreview}>
+                              Record products considered before the final retain, vary, replace or apply-new recommendation.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className={styles.sectionActionButton}
+                            onClick={() =>
+                              updateInsuranceAdviceForPerson(ownerPersonId, (entry) => ({
+                                ...entry,
+                                productResearchOptions: [...entry.productResearchOptions, createInsuranceProductResearchOption()],
+                              }))
+                            }
+                          >
+                            Add option
+                          </button>
+                        </div>
+                        {personAdvice.productResearchOptions.length ? (
+                          <div className={styles.dataTableWrap}>
+                            <table className={styles.dataTable}>
+                              <thead>
+                                <tr>
+                                  <th>Insurer / product</th>
+                                  <th>Status</th>
+                                  <th>Premium</th>
+                                  <th>Rationale</th>
+                                  <th>Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {personAdvice.productResearchOptions.map((option) => (
+                                  <tr key={option.optionId}>
+                                    <td>
+                                      <input
+                                        className={finleyStyles.clientSearch}
+                                        placeholder="Insurer"
+                                        value={option.insurerName ?? ""}
+                                        onChange={(event) => updateInsuranceProductResearchOption(ownerPersonId, option.optionId, { insurerName: event.target.value })}
+                                      />
+                                      <input
+                                        className={finleyStyles.clientSearch}
+                                        placeholder="Product"
+                                        value={option.productName ?? ""}
+                                        onChange={(event) => updateInsuranceProductResearchOption(ownerPersonId, option.optionId, { productName: event.target.value })}
+                                      />
+                                    </td>
+                                    <td>
+                                      <select
+                                        className={finleyStyles.clientSearch}
+                                        value={option.status ?? "alternative"}
+                                        onChange={(event) =>
+                                          updateInsuranceProductResearchOption(ownerPersonId, option.optionId, {
+                                            status: event.target.value as NonNullable<InsuranceProductResearchOptionV1["status"]>,
+                                          })
+                                        }
+                                      >
+                                        <option value="recommended">Recommended</option>
+                                        <option value="alternative">Alternative</option>
+                                        <option value="rejected">Rejected</option>
+                                        <option value="current">Current</option>
+                                        <option value="unknown">Unknown</option>
+                                      </select>
+                                    </td>
+                                    <td>
+                                      <input
+                                        className={finleyStyles.clientSearch}
+                                        inputMode="decimal"
+                                        placeholder="$0.00"
+                                        value={option.annualisedPremium ?? option.premiumAmount ?? ""}
+                                        onChange={(event) =>
+                                          updateInsuranceProductResearchOption(ownerPersonId, option.optionId, {
+                                            annualisedPremium: parseCurrencyInput(event.target.value),
+                                          })
+                                        }
+                                      />
+                                    </td>
+                                    <td>
+                                      <textarea
+                                        className={`${finleyStyles.composerInput} ${styles.smallTextarea}`.trim()}
+                                        value={option.rationale ?? ""}
+                                        onChange={(event) => updateInsuranceProductResearchOption(ownerPersonId, option.optionId, { rationale: event.target.value })}
+                                      />
+                                    </td>
+                                    <td>
+                                      <button
+                                        type="button"
+                                        className={styles.objectiveDeleteButton}
+                                        onClick={() =>
+                                          updateInsuranceAdviceForPerson(ownerPersonId, (entry) => ({
+                                            ...entry,
+                                            productResearchOptions: entry.productResearchOptions.filter((item) => item.optionId !== option.optionId),
+                                          }))
+                                        }
+                                      >
+                                        Delete
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <p className={styles.workflowDraftPreview}>No product research options recorded yet.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className={styles.workflowDraftStack}>
                     <div className={styles.workflowDraftHeader}>
                       <div>
@@ -6430,7 +7333,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                   </div>
                 </>
               ) : null}
-              {activeSectionId === "insurance-replacement" ? (
+              {activeSectionId === "insurance-recommendations" || activeSectionId === "insurance-replacement" ? (
                 <>
                   <div className={styles.workflowDraftStack}>
                     <div className={styles.workflowDraftHeader}>
@@ -7546,9 +8449,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 "strategy-recommendations",
                 "product-recommendations",
                 "replacement-analysis",
+                "insurance-current-cover",
                 "insurance-analysis",
-                "insurance-policies",
-                "insurance-replacement",
+                "insurance-recommendations",
                 "disclosure",
                 "service-agreement",
                 "projections",

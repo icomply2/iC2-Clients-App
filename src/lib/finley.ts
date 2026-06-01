@@ -152,53 +152,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim() ?? "";
 const OPENAI_BASE_URL = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
 const OPENAI_DOCUMENT_REVIEW_MODEL = process.env.OPENAI_SOA_INTAKE_MODEL?.trim() || "gpt-5.2";
 
-type UploadedDocumentReview = {
-  title: string;
-  documentType: string;
-  purpose: string;
-  keyParties: string[];
-  importantDates: string[];
-  adviserActionsRequired: string[];
-  clientImpact: string[];
-  risksAndChecks: string[];
-  suggestedNextWorkflow: string[];
-  evidenceNotes: string[];
-  warning?: string | null;
-};
-
-const uploadedDocumentReviewSchema = {
-  name: "finley_uploaded_document_review",
-  strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      title: { type: "string" },
-      documentType: { type: "string" },
-      purpose: { type: "string" },
-      keyParties: { type: "array", items: { type: "string" } },
-      importantDates: { type: "array", items: { type: "string" } },
-      adviserActionsRequired: { type: "array", items: { type: "string" } },
-      clientImpact: { type: "array", items: { type: "string" } },
-      risksAndChecks: { type: "array", items: { type: "string" } },
-      suggestedNextWorkflow: { type: "array", items: { type: "string" } },
-      evidenceNotes: { type: "array", items: { type: "string" } },
-    },
-    required: [
-      "title",
-      "documentType",
-      "purpose",
-      "keyParties",
-      "importantDates",
-      "adviserActionsRequired",
-      "clientImpact",
-      "risksAndChecks",
-      "suggestedNextWorkflow",
-      "evidenceNotes",
-    ],
-  },
-};
-
 type CollectionIntentResult = {
   kind: "assets" | "liabilities" | "income" | "expenses" | "superannuation" | "retirement-income" | "insurance" | "entities" | "dependants";
   toolName: StoredPlan["toolName"];
@@ -220,22 +173,6 @@ type BatchAssetRow = {
     currentValue: string;
   };
 };
-
-function normalizeFileNoteText(message: string) {
-  const trimmed = message.trim();
-  if (/^(create|add)\s+a\s+file\s+note$/i.test(trimmed) || /^(new)\s+file\s+note$/i.test(trimmed)) {
-    return "";
-  }
-  const cleaned = trimmed
-    .replace(/^create\s+a\s+file\s+note\s+(saying|that)\s+/i, "")
-    .replace(/^create\s+a\s+file\s+note\s+/i, "")
-    .replace(/^add\s+a\s+file\s+note\s+(saying|that)\s+/i, "")
-    .replace(/^add\s+a\s+file\s+note\s+/i, "")
-    .replace(/^note\s+(that|saying)\s+/i, "")
-    .trim();
-
-  return cleaned || trimmed;
-}
 
 function normalizeAssistPrompt(message: string) {
   return message.replace(/^finley:\s*/i, "").trim();
@@ -312,24 +249,6 @@ export async function assistFinleyFileNoteField(input: {
       ...(input.fieldKey === "subject" ? { subject: suggestedSubject } : { content: nextBody, subject: suggestedSubject }),
     },
   };
-}
-
-function getFinleyFileNoteType(message: string) {
-  const lower = message.toLowerCase();
-
-  if (lower.includes("called") || lower.includes("phone")) {
-    return { type: "Phone Call", subType: "Follow Up" };
-  }
-
-  if (lower.includes("email")) {
-    return { type: "Email", subType: "Client Email" };
-  }
-
-  if (lower.includes("review")) {
-    return { type: "Review", subType: "Annual Review" };
-  }
-
-  return { type: "Administration", subType: "Task Update" };
 }
 
 function hasRealPartner(person: PersonRecord | null | undefined) {
@@ -2587,6 +2506,7 @@ function extractDependantIntent(message: string, context: LiveContext): Collecti
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for future explicit add-record workflow wiring; idle chat no longer auto-creates records.
 function extractCollectionIntent(message: string, context: LiveContext): CollectionIntentResult | null {
   const lower = message.toLowerCase();
   const isCreate = lower.includes("add") || lower.includes("create") || lower.includes("new ");
@@ -3277,6 +3197,7 @@ function buildCollectionUpdateIntentFromRecord(
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for future explicit update workflow wiring; row-level edits use the record-based builder.
 function extractCollectionUpdateIntent(message: string, context: LiveContext) {
   const lower = message.toLowerCase();
   const isUpdate = lower.includes("update") || lower.includes("change");
@@ -3443,6 +3364,7 @@ function extractCollectionUpdateIntent(message: string, context: LiveContext) {
   return null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for workflow clarification paths that are no longer reached from idle chat.
 function getRecentRelevantUserMessage(recentMessages?: FinleyChatRequest["recentMessages"]) {
   const isClarificationPrompt = (text: string) => {
     const lower = text.toLowerCase();
@@ -3532,6 +3454,7 @@ function inferContextField(message: string, recentMessages?: FinleyChatRequest["
   return null;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- retained for future profile-update workflow wiring; idle chat now points users to explicit workflows.
 function extractClientUpdatePayload(
   message: string,
   recentMessages?: FinleyChatRequest["recentMessages"],
@@ -3732,22 +3655,6 @@ function buildBaseResponse(
   };
 }
 
-function buildPlanStep(
-  toolName: string,
-  description: string,
-  status: "pending" | "approved" | "succeeded" | "failed" | "skipped" = "pending",
-  inputsPreview?: Record<string, unknown>,
-) {
-  return {
-    stepId: makeId("step"),
-    toolName,
-    kind: toolName.startsWith("get_") || toolName.startsWith("find_") || toolName.startsWith("list_") ? ("read" as const) : ("write" as const),
-    status,
-    description,
-    inputsPreview,
-  };
-}
-
 function isFinleyCapabilityQuestion(message: string) {
   const lower = message.toLowerCase().trim();
 
@@ -3810,9 +3717,9 @@ function buildFinleyCapabilityMessage(clientName: string, hasClient: boolean, cu
     greeting,
     userContext,
     clientContext,
-    "I can help with everyday adviser tasks like updating a fact find, checking missing client information, creating file notes, summarising uploaded documents or meeting transcripts, preparing engagement letters, preparing Records of Advice, drafting service agreements, and creating invoices.",
-    "When you upload files, I can detect documents such as fact finds, meeting transcripts, insurance quotes, ProductRex reports, strategy papers, and service agreements, then suggest the most useful next step.",
-    "For anything that changes a client record or creates a document record, I'll show you the proposed update first so you can review and approve it.",
+    "In chat, I can answer questions, read selected-client profile data, summarise uploaded documents or meeting transcripts, draft file-note wording, prepare emails, and structure adviser notes in Markdown.",
+    "When you want to create or change saved client records, map fact-find data, generate client documents, prepare invoices, or open advice workflows, use the workflow buttons in the Finley console.",
+    "For anything that changes a client record or creates a document record, the workflow path will show you the proposed update first so you can review and approve it.",
   ].join("\n\n");
 }
 
@@ -3831,7 +3738,7 @@ function buildFinleyCasualMessage(message: string, clientName: string, hasClient
   }
 
   if (/^(?:how are you|how's it going|how are you going|you there|are you there)/.test(lower)) {
-    return `I’m here and ready to help${greetingName}. ${clientContext} You can ask me naturally, like “create a file note”, “prepare an engagement letter”, or “check what’s missing for this client”.`;
+    return `I’m here and ready to help${greetingName}. ${clientContext} Ask me questions, get document summaries, or draft wording in chat. Use the workflow buttons when you want to create or update saved records.`;
   }
 
   return `Hi${greetingName}, I’m here. ${clientContext} You can ask me naturally, or upload documents and I’ll help work out the next step.`;
@@ -3897,6 +3804,158 @@ function buildCollectionUpdatePlanResponse(
     suggestedActions: [
       { label: "Approve and run", action: "approve_plan" as const, planId },
       { label: "Cancel", action: "cancel_plan" as const, planId },
+    ],
+  };
+}
+
+function buildCreateFileNoteWorkflowResponse(
+  base: Omit<FinleyChatResponse, "status" | "responseMode" | "assistantMessage" | "plan" | "results" | "missingInformation" | "warnings" | "errors" | "suggestedActions">,
+  liveContext: LiveContext,
+): FinleyChatResponse {
+  const clientId = liveContext.profile?.id ?? liveContext.resolvedClientId ?? "";
+  const clientName =
+    [liveContext.profile?.client?.name, liveContext.profile?.partner?.name]
+      .map((name) => name?.trim())
+      .filter(Boolean)
+      .join(" & ") ||
+    liveContext.resolvedClientName ||
+    "the selected client";
+  const ownerOptions = getPersonOwnerOptions(liveContext.profile, { useProfileClientFallback: true });
+  const fallbackOwner =
+    !ownerOptions.length && clientId && liveContext.resolvedClientName
+      ? { label: liveContext.resolvedClientName, value: clientId }
+      : null;
+  const finalOwnerOptions = ownerOptions.length ? ownerOptions : fallbackOwner ? [fallbackOwner] : getOwnerOptions(liveContext.profile);
+  const defaultOwner = finalOwnerOptions[0] ?? null;
+  const defaultType = FINLEY_FILE_NOTE_TYPE_OPTIONS[0] ?? "";
+  const defaultSubType = FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[defaultType]?.[0] ?? "";
+  const serviceDate = new Date().toISOString().slice(0, 10);
+  const planId = makeId("plan");
+  const stepId = makeId("step");
+  const summary = `Create a file note for ${clientName}`;
+  const description = "Create a file note on the selected client profile.";
+  const inputsPreview = {
+    clientId,
+    ownerId: defaultOwner?.value ?? "",
+    ownerName: defaultOwner?.label ?? "",
+    subject: "",
+    serviceDate,
+    type: defaultType,
+    subType: defaultSubType,
+  };
+  const payload = {
+    clientId,
+    owner: defaultOwner ? { id: defaultOwner.value, name: defaultOwner.label } : null,
+    adviser: {
+      name: liveContext.currentUser?.name ?? null,
+      email: liveContext.currentUser?.email ?? null,
+    },
+    licensee: liveContext.currentUser?.licensee?.name ?? null,
+    practice: liveContext.currentUser?.practice?.name ?? null,
+    subject: "",
+    content: "",
+    serviceDate,
+    type: defaultType,
+    subType: defaultSubType,
+    attachment: [],
+    joint: false,
+  };
+
+  persistPlan({
+    planId,
+    threadId: base.threadId,
+    createdAt: base.timestamp,
+    clientId,
+    clientName,
+    profileId: liveContext.profile?.id ?? undefined,
+    userId: liveContext.currentUser?.id ?? null,
+    userRole: liveContext.currentUser?.userRole ?? null,
+    status: "pending",
+    summary,
+    toolName: "create_file_note",
+    stepId,
+    description,
+    inputsPreview,
+    execution: {
+      kind: "file_note",
+      payload,
+    },
+  });
+
+  return {
+    ...base,
+    status: "awaiting_approval",
+    responseMode: "plan",
+    assistantMessage: `I’ve opened the Create File Note workflow for ${clientName}. Add the subject, service date, and note body, then approve it when you’re ready to save it to the client record.`,
+    plan: {
+      planId,
+      summary,
+      requiresApproval: true,
+      steps: [
+        {
+          stepId,
+          toolName: "create_file_note",
+          kind: "write",
+          status: "pending",
+          description,
+          inputsPreview,
+        },
+      ],
+    },
+    results: [],
+    missingInformation: [],
+    warnings: [],
+    errors: [],
+    displayCard: null,
+    editorCard: {
+      kind: "collection_form",
+      title: "New File Note",
+      toolName: "create_file_note",
+      fields: [
+        {
+          key: "ownerId",
+          label: "Owner",
+          input: "select",
+          value: defaultOwner?.value ?? "",
+          options: finalOwnerOptions,
+        },
+        {
+          key: "subject",
+          label: "Subject",
+          input: "text",
+          value: "",
+        },
+        {
+          key: "serviceDate",
+          label: "Service Date",
+          input: "text",
+          value: serviceDate,
+        },
+        {
+          key: "type",
+          label: "Type",
+          input: "select",
+          value: defaultType,
+          options: toCardOptions(FINLEY_FILE_NOTE_TYPE_OPTIONS),
+        },
+        {
+          key: "subType",
+          label: "Sub Type",
+          input: "select",
+          value: defaultSubType,
+          options: toCardOptions(FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[defaultType] ?? []),
+        },
+        {
+          key: "content",
+          label: "Note",
+          input: "textarea",
+          value: "",
+        },
+      ],
+    },
+    suggestedActions: [
+      { label: "Approve and run", action: "approve_plan", planId },
+      { label: "Cancel", action: "cancel_plan", planId },
     ],
   };
 }
@@ -4001,7 +4060,7 @@ function buildFactFindCollectionStep(
     description,
     guidance: answer.displayCard?.rows?.length
       ? "Use the row-level edit button on any record that needs to change."
-      : "No records were found in this section yet. You can still add new records through chat.",
+      : "No records were found in this section yet. Use the relevant profile workflow or editor when you need to add saved records.",
     displayCard: answer.displayCard ?? null,
     editorCard: null,
   };
@@ -4755,280 +4814,11 @@ function isAzureOpenAiBaseUrl(baseUrl: string) {
   return /(?:\.openai\.azure\.com|\.services\.ai\.azure\.com)/i.test(baseUrl);
 }
 
-function normalizeStringArray(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((entry): entry is string => typeof entry === "string")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function normalizeDocumentReview(value: unknown, uploads: ReturnType<typeof normalizeUploadedFiles>): UploadedDocumentReview {
-  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const fallback = buildFallbackUploadedDocumentReview(uploads, null);
-
-  return {
-    title: typeof record.title === "string" && record.title.trim() ? record.title.trim() : fallback.title,
-    documentType: typeof record.documentType === "string" && record.documentType.trim() ? record.documentType.trim() : fallback.documentType,
-    purpose: typeof record.purpose === "string" && record.purpose.trim() ? record.purpose.trim() : fallback.purpose,
-    keyParties: normalizeStringArray(record.keyParties),
-    importantDates: normalizeStringArray(record.importantDates),
-    adviserActionsRequired: normalizeStringArray(record.adviserActionsRequired),
-    clientImpact: normalizeStringArray(record.clientImpact),
-    risksAndChecks: normalizeStringArray(record.risksAndChecks),
-    suggestedNextWorkflow: normalizeStringArray(record.suggestedNextWorkflow),
-    evidenceNotes: normalizeStringArray(record.evidenceNotes),
-    warning: null,
-  };
-}
-
-function inferUploadedDocumentType(upload: ReturnType<typeof normalizeUploadedFiles>[number]) {
-  const tags = upload.tags.map((tag) => tag.toLowerCase());
-  const name = upload.name.toLowerCase();
-  const text = upload.extractedText.toLowerCase();
-
-  if (tags.includes("fact-find") || /fact[-\s]?find|client data form/.test(name) || text.includes("fact find")) {
-    return "Fact find / client profile evidence";
-  }
-  if (tags.includes("meeting-transcript") || /transcript|meeting/.test(name)) {
-    return "Meeting transcript / adviser notes";
-  }
-  if (tags.includes("productrex") || /productrex|product report/.test(name) || text.includes("productrex")) {
-    return "Product research report";
-  }
-  if (tags.includes("engagement-letter") || /engagement letter/.test(name)) {
-    return "Engagement letter evidence";
-  }
-  if (tags.includes("record-of-advice") || /\broa\b|record of advice/.test(name)) {
-    return "Record of Advice";
-  }
-  if (tags.includes("service-agreement") || /service agreement|ongoing agreement|annual agreement/.test(name)) {
-    return "Service agreement";
-  }
-  if (tags.includes("invoice") || /invoice/.test(name)) {
-    return "Invoice / fee evidence";
-  }
-  if (/release|authority|transfer|servicing rights|ongoing revenue/.test(`${name}\n${text}`)) {
-    return "Release authority / servicing transfer letter";
-  }
-  if (/\bsoa\b|statement of advice|client pack|advice pack/.test(`${name}\n${text}`)) {
-    return "SOA client pack / advice evidence";
-  }
-  return "Uploaded advice document";
-}
-
-function extractDistinctMatches(text: string, pattern: RegExp, limit: number) {
-  const matches = new Set<string>();
-  for (const match of text.matchAll(pattern)) {
-    const value = (match[1] ?? match[0]).replace(/\s+/g, " ").trim();
-    if (value.length > 1 && value.length < 120) {
-      matches.add(value);
-    }
-    if (matches.size >= limit) break;
-  }
-  return Array.from(matches);
-}
-
-function joinList(items: string[], fallback: string) {
-  const clean = items.map((item) => item.trim()).filter(Boolean);
-  return clean.length ? clean.join("; ") : fallback;
-}
-
-function buildFallbackUploadedDocumentReview(
-  uploads: ReturnType<typeof normalizeUploadedFiles>,
-  warning: string | null,
-): UploadedDocumentReview {
-  const combinedText = uploads.map((upload) => upload.extractedText).join("\n\n");
-  const combinedSearchText = `${uploads.map((upload) => upload.name).join("\n")}\n${combinedText}`;
-  const documentTypes = Array.from(new Set(uploads.map(inferUploadedDocumentType)));
-  const moneyAmounts = extractDistinctMatches(combinedSearchText, /\$[\d,]+(?:\.\d{2})?/g, 8);
-  const dates = extractDistinctMatches(
-    combinedSearchText,
-    /\b(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}|(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})\b/gi,
-    8,
-  );
-  const possibleParties = extractDistinctMatches(
-    combinedSearchText,
-    /\b(?:client|adviser|advisor|representative|practice|licensee|trustee|provider|insurer|fund|company|partner|spouse)\s*[:-]\s*([A-Z][A-Za-z0-9&,' -]{2,80})/gi,
-    8,
-  );
-  const lower = combinedSearchText.toLowerCase();
-  const suggestedNextWorkflow = [
-    lower.includes("fact find") || lower.includes("personal details") ? "Review and apply fact find data" : null,
-    lower.includes("transcript") || lower.includes("meeting") ? "Create file note" : null,
-    lower.includes("engagement") || lower.includes("scope") ? "Draft engagement letter" : null,
-    lower.includes("invoice") || lower.includes("fee") ? "Prepare invoice or fee disclosure" : null,
-    lower.includes("ongoing") || lower.includes("annual agreement") || lower.includes("service agreement") ? "Prepare service agreement" : null,
-    lower.includes("statement of advice") || lower.includes("strategy") || lower.includes("recommendation") ? "Start SOA workflow" : null,
-    "Check missing information",
-  ].filter((entry): entry is string => Boolean(entry));
-
-  return {
-    title: "Uploaded Document Review",
-    documentType: joinList(documentTypes, "Uploaded advice document"),
-    purpose:
-      "Finley has treated the upload as adviser evidence for the current client/session and prepared a reviewable workspace summary.",
-    keyParties: possibleParties,
-    importantDates: dates,
-    adviserActionsRequired: [
-      "Confirm the document belongs to the selected client and current advice matter.",
-      "Review extracted facts before using them to update records or generate documents.",
-      "Choose the relevant workflow card for the next controlled action.",
-    ],
-    clientImpact: moneyAmounts.length
-      ? [`The document includes financial values that may affect advice scope or client records: ${moneyAmounts.join(", ")}.`]
-      : ["Client impact should be confirmed against the advice scope before any record or document is updated."],
-    risksAndChecks: [
-      "Check whether the upload contains adviser instructions, client facts, assumptions, or unconfirmed information.",
-      "Do not save profile changes or produce client-facing output until the adviser has reviewed the evidence.",
-    ],
-    suggestedNextWorkflow,
-    evidenceNotes: uploads
-      .map((upload) => {
-        const lines = upload.extractedText
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter((line) => line.length > 16 && line.length < 220)
-          .slice(0, 2);
-        return [upload.name, ...lines].join(": ");
-      })
-      .slice(0, 5),
-    warning,
-  };
-}
-
-function buildUploadedDocumentReviewCard(review: UploadedDocumentReview): FinleyDisplayCard {
-  const rows = [
-    ["Document type", review.documentType],
-    ["Purpose", review.purpose],
-    ["Key parties", joinList(review.keyParties, "No key parties confidently extracted yet.")],
-    ["Important dates", joinList(review.importantDates, "No important dates confidently extracted yet.")],
-    ["Adviser actions required", joinList(review.adviserActionsRequired, "Review evidence and confirm the next workflow.")],
-    ["Client impact", joinList(review.clientImpact, "Client impact needs adviser confirmation.")],
-    ["Risks / checks", joinList(review.risksAndChecks, "Review assumptions and missing confirmations.")],
-    ["Suggested next workflow", joinList(review.suggestedNextWorkflow, "Choose a workflow card when ready.")],
-    ["Evidence notes", joinList(review.evidenceNotes, "No evidence notes available.")],
-  ];
-
-  return {
-    kind: "collection_summary",
-    title: review.title || "Uploaded Document Review",
-    columns: ["Review area", "Finley's read"],
-    rows: rows.map(([label, value], index) => ({
-      id: `document-review-${index}`,
-      cells: [label, value],
-    })),
-    footer: review.warning ?? null,
-  };
-}
-
-async function buildUploadedDocumentReview(files?: FinleyChatRequest["uploadedFiles"], clientName?: string | null) {
-  const uploads = normalizeUploadedFiles(files);
-  if (!uploads.length) return null;
-
-  if (!OPENAI_API_KEY) {
-    return buildFallbackUploadedDocumentReview(
-      uploads,
-      "Finley used the local evidence review because OPENAI_API_KEY is not configured. Configure the SOA intake model to enable LLM-backed document understanding.",
-    );
-  }
-
-  try {
-    const isAzure = isAzureOpenAiBaseUrl(OPENAI_BASE_URL);
-    const response = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(isAzure ? { "api-key": OPENAI_API_KEY } : { authorization: `Bearer ${OPENAI_API_KEY}` }),
-      },
-      body: JSON.stringify({
-        model: OPENAI_DOCUMENT_REVIEW_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "You are Finley, an intelligent paraplanner for an Australian financial advice practice.",
-              "Review uploaded evidence broadly, but return a concise adviser workspace card for the requested document summary.",
-              "Do not push every fact into a rigid client-profile schema. Treat this as flexible evidence memory.",
-              "Separate document understanding from workflow output. Suggest relevant workflow cards, but do not claim changes have been saved.",
-              "Preserve uncertainty. Do not invent parties, dates, fees, strategies, or client facts.",
-              "Return only JSON that matches the provided schema.",
-            ].join(" "),
-          },
-          {
-            role: "user",
-            content: JSON.stringify({
-              task: "Prepare an adviser-grade document understanding summary for the uploaded evidence.",
-              clientName: clientName ?? null,
-              uploadedFiles: uploads.map((upload) => ({
-                name: upload.name,
-                tags: upload.tags,
-                extractedText: upload.extractedText.slice(0, 10000),
-              })),
-              requiredWorkspaceSections: [
-                "Document type",
-                "Purpose",
-                "Key parties",
-                "Important dates",
-                "Adviser actions required",
-                "Client impact",
-                "Risks / checks",
-                "Suggested next workflow",
-              ],
-            }),
-          },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: uploadedDocumentReviewSchema,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Document review request failed with status ${response.status}.`);
-    }
-
-    const body = (await response.json().catch(() => null)) as
-      | {
-          choices?: Array<{
-            message?: {
-              content?: string | null;
-            } | null;
-          }>;
-        }
-      | null;
-    const content = body?.choices?.[0]?.message?.content;
-
-    if (!content) {
-      throw new Error("Document review response did not include message content.");
-    }
-
-    return normalizeDocumentReview(JSON.parse(content), uploads);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to run the LLM document review.";
-    return buildFallbackUploadedDocumentReview(
-      uploads,
-      `Finley could not reach the configured document understanding model (${message}), so it used the local evidence review.`,
-    );
-  }
-}
-
-function isUploadedDocumentReviewRequest(message: string, uploads: ReturnType<typeof normalizeUploadedFiles>) {
-  if (!uploads.length) return false;
-
-  const lower = message.toLowerCase();
-  return (
-    /\b(?:summari[sz]e|review|read|analyse|analyze|what(?:'s| is) in|tell me about)\b/.test(lower) &&
-    /\b(?:upload|uploaded|document|documents|file|files|this|these)\b/.test(lower)
-  );
-}
-
 function isNoClientClientScopedRequest(message: string) {
   const lower = normaliseConversationalMessage(message);
   const writeWorkflow =
-    /\b(?:update|change|set|apply|map|save|create|prepare|generate|draft|issue|record)\b/.test(lower) &&
-    /\b(?:client|profile|fact find|file note|engagement|letter|invoice|agreement|record of advice|statement of advice|soa|roa|income|asset|liability|expense|super|pension|insurance|dependant|entity|dob|date of birth|address|email|phone)\b/.test(lower);
+    /\b(?:update|change|set|apply|map|save|create|issue|record)\b/.test(lower) &&
+    /\b(?:client|profile|fact find|engagement|letter|invoice|agreement|record of advice|statement of advice|soa|roa|income|asset|liability|expense|super|pension|insurance|dependant|entity|dob|date of birth|address|email|phone)\b/.test(lower);
   const readQuestion =
     /\b(?:what is|what's|show|tell me|get|list|summarise|summarize|who is|do they|does he|does she|does the client)\b/.test(lower);
   const personalField =
@@ -5041,9 +4831,141 @@ function isNoClientClientScopedRequest(message: string) {
 
   return (
     writeWorkflow ||
-    /\b(?:map to profile|client profile|fact find|file note|record of advice|statement of advice)\b/.test(lower) ||
+    /\b(?:map to profile|client profile|fact find|record of advice|statement of advice)\b/.test(lower) ||
     (readQuestion && (personalField || collectionField) && targetMarker)
   );
+}
+
+function getIdleWorkflowBoundary(message: string) {
+  const lower = normaliseConversationalMessage(message);
+
+  const matchers: Array<{ workflow: string; pattern: RegExp; copy?: string }> = [
+    {
+      workflow: "Update Fact Find",
+      pattern: /\b(?:update|map|apply|review|save)\b.*\bfact[-\s]?find\b|\bfact[-\s]?find\b.*\b(?:map|apply|profile)\b/,
+      copy: "Use **Update Fact Find** when you want to map or apply fact-find data to the selected client profile.",
+    },
+    {
+      workflow: "Create File Note",
+      pattern: /\b(?:save|add)\b.*\b(?:file note|client note|note)\b.*\b(?:client record|profile|file|crm|i ?c2)\b|\b(?:file note|client note|note)\b.*\b(?:save|add)\b.*\b(?:client record|profile|file|crm|i ?c2)\b/,
+      copy: "Use **Create File Note** when you want to save a note to the client record. I can still draft the wording here for you to copy.",
+    },
+    {
+      workflow: "Create Invoice",
+      pattern: /\b(?:create|prepare|generate|issue)\b.*\binvoice\b/,
+      copy: "Use **Create Invoice** when you want Finley to prepare an invoice workflow for the selected client.",
+    },
+    {
+      workflow: "Prepare Engagement Letter",
+      pattern: /\b(?:create|prepare|generate)\b.*\bengagement letter\b/,
+      copy: "Use **Prepare Engagement Letter** when you want a live engagement letter workspace and export.",
+    },
+    {
+      workflow: "Ongoing Agreement",
+      pattern: /\b(?:create|prepare|generate)\b.*\bongoing agreement\b/,
+      copy: "Use **Ongoing Agreement** when you want a live ongoing agreement workspace and export.",
+    },
+    {
+      workflow: "Annual Agreement",
+      pattern: /\b(?:create|prepare|generate)\b.*\bannual agreement\b/,
+      copy: "Use **Annual Agreement** when you want a live annual agreement workspace and export.",
+    },
+    {
+      workflow: "Record of Advice",
+      pattern: /\b(?:create|prepare|generate|start)\b.*\b(?:record of advice|roa)\b/,
+      copy: "Use **Record of Advice** when you want Finley to open the ROA drafting workspace.",
+    },
+    {
+      workflow: "Statement of Advice",
+      pattern: /\b(?:create|prepare|generate|start)\b.*\b(?:statement of advice|soa)\b/,
+      copy: "Use **Prepare Statement of Advice** when you want Finley to open the SOA workflow.",
+    },
+    {
+      workflow: "Client Profile Update",
+      pattern: /\b(?:update|change|set|apply|save|add|remove|delete)\b.*\b(?:client|profile|dob|date of birth|address|email|phone|income|asset|liability|expense|super|superannuation|pension|insurance|employment|dependant|entity|risk profile)\b/,
+      copy: "Use the relevant workflow or client profile editor when you want to change saved client data. I can answer questions and draft text here without saving anything.",
+    },
+  ];
+
+  return matchers.find((matcher) => matcher.pattern.test(lower)) ?? null;
+}
+
+function buildIdleWorkflowBoundaryAnswer(workflow: string, copy?: string) {
+  return [
+    "**Use The Workflow Button**",
+    copy ?? `Use **${workflow}** when you want Finley to create or change saved client records.`,
+    "",
+    "**What I Can Do Here**",
+    "- Draft wording, summaries, emails, file-note text, or paraplanning instructions in chat.",
+    "- Review uploaded documents and answer questions using the selected client context.",
+    "- Keep the response copyable without saving anything to the client record.",
+  ].join("\n");
+}
+
+function buildClientChatContext(context: LiveContext) {
+  const profile = context.profile;
+  const client = profile?.client ?? null;
+  const partner = profile?.partner ?? null;
+  const clientAddress = client ? readPersonAddress(client) : null;
+  const partnerAddress = partner ? readPersonAddress(partner) : null;
+
+  return {
+    clientName: context.resolvedClientName ?? null,
+    client: client
+      ? {
+          name: client.name ?? null,
+          title: client.title ?? null,
+          dateOfBirth: client.dob ? formatDateForDisplay(client.dob) : null,
+          email: client.email ?? null,
+          phone: readPersonPhone(client) ?? null,
+          address: clientAddress
+            ? [clientAddress.street, clientAddress.suburb, [clientAddress.state, clientAddress.postCode].filter(Boolean).join(" ")]
+                .filter(Boolean)
+                .join(", ")
+            : null,
+          status: client.status ?? null,
+          category: client.clientCategory ?? null,
+          maritalStatus: client.maritalStatus ?? null,
+          residency: client.residentStatus ?? null,
+          riskProfile: client.riskProfileResponse?.resultDisplay ?? null,
+        }
+      : null,
+    partner: partner
+      ? {
+          name: partner.name ?? null,
+          title: partner.title ?? null,
+          dateOfBirth: partner.dob ? formatDateForDisplay(partner.dob) : null,
+          email: partner.email ?? null,
+          phone: readPersonPhone(partner) ?? null,
+          address: partnerAddress
+            ? [partnerAddress.street, partnerAddress.suburb, [partnerAddress.state, partnerAddress.postCode].filter(Boolean).join(" ")]
+                .filter(Boolean)
+                .join(", ")
+            : null,
+          status: partner.status ?? null,
+          category: partner.clientCategory ?? null,
+          maritalStatus: partner.maritalStatus ?? null,
+          residency: partner.residentStatus ?? null,
+          riskProfile: partner.riskProfileResponse?.resultDisplay ?? null,
+        }
+      : null,
+    adviser: profile?.adviser?.name ?? null,
+    practice: profile?.practice ?? null,
+    licensee: profile?.licensee ?? null,
+    collectionCounts: {
+      assets: profile?.assets?.length ?? 0,
+      liabilities: profile?.liabilities?.length ?? 0,
+      income: profile?.income?.length ?? 0,
+      expenses: profile?.expense?.length ?? 0,
+      superannuation: profile?.superannuation?.length ?? 0,
+      pensions: profile?.pension?.length ?? 0,
+      insurance: profile?.insurance?.length ?? 0,
+      dependants: profile?.dependants?.length ?? 0,
+      entities: profile?.entities?.length ?? 0,
+      employment: profile?.employment?.length ?? 0,
+      recentFileNotes: context.fileNotes.length,
+    },
+  };
 }
 
 function buildNoClientFallbackAnswer(message: string, uploads: ReturnType<typeof normalizeUploadedFiles>) {
@@ -5067,16 +4989,39 @@ function buildNoClientFallbackAnswer(message: string, uploads: ReturnType<typeof
   ].join("\n\n");
 }
 
+function buildClientGeneralFallbackAnswer(
+  message: string,
+  uploads: ReturnType<typeof normalizeUploadedFiles>,
+  clientContext: ReturnType<typeof buildClientChatContext>,
+) {
+  const fileLine = uploads.length
+    ? `- I can see ${uploads.length} uploaded file${uploads.length === 1 ? "" : "s"} in this chat context.`
+    : "- No uploaded document text is available in this chat context.";
+
+  return [
+    "**Finley Chat**",
+    `- Selected client: ${clientContext.clientName ?? "current client"}.`,
+    fileLine,
+    "- I can answer read-only questions, draft wording, and summarise uploaded documents here.",
+    "- Use the workflow buttons when you want to create, save, map, or update a client record.",
+    "",
+    `You asked: "${message}". The chat model is not configured right now, so I cannot prepare a full general answer from the available context.`,
+  ].join("\n");
+}
+
 async function buildGlobalFinleyAnswer(
   message: string,
   uploads: ReturnType<typeof normalizeUploadedFiles>,
   currentUser?: UserSummary | null,
+  clientContext?: ReturnType<typeof buildClientChatContext> | null,
 ) {
   if (!OPENAI_API_KEY) {
     return {
-      assistantMessage: buildNoClientFallbackAnswer(message, uploads),
+      assistantMessage: clientContext
+        ? buildClientGeneralFallbackAnswer(message, uploads, clientContext)
+        : buildNoClientFallbackAnswer(message, uploads),
       warnings: [
-        "Finley used the local no-client fallback because OPENAI_API_KEY is not configured. Configure the chat model to enable LLM-backed general answers.",
+        "Finley used the local chat fallback because OPENAI_API_KEY is not configured. Configure the chat model to enable LLM-backed general answers.",
       ],
     };
   }
@@ -5096,9 +5041,13 @@ async function buildGlobalFinleyAnswer(
             role: "system",
             content: [
               "You are Finley, an advice practice concierge inside iC2.",
-              "No client is currently selected. You may answer general adviser-assistant questions and use uploaded document text as temporary workspace context.",
-              "Do not infer, read, or update any client profile. Do not claim that any record has been saved.",
-              "If the user asks for profile reads, profile writes, fact-find mapping, file notes, invoices, agreements, or client document generation, tell them to select or create a client first.",
+              clientContext
+                ? "A client is selected. You may use the supplied client profile summary as read-only context for general adviser-assistant answers."
+                : "No client is currently selected. You may answer general adviser-assistant questions and use uploaded document text as temporary workspace context.",
+              "Do not update any client profile. Do not claim that any record has been saved.",
+              clientContext
+                ? "If the user asks to save, create, update, map, generate, or apply a client record or client document, tell them to use the relevant Finley workflow button."
+                : "If the user asks for profile reads, profile writes, fact-find mapping, file notes, invoices, agreements, or client document generation, tell them to select or create a client first.",
               "Return structured Markdown. Prefer short bold section headings, bullet lists, and Markdown tables where they improve scanning.",
               "When answering from uploaded document text, group extracted facts under clear headings such as Objectives, Preferences, Constraints, Advice areas, and Next steps when relevant.",
               "For calculation questions, show the source values used, the formula or calculation steps, a Markdown table of the result, and an Assumptions section. Label model-derived calculations as estimates unless a deterministic system calculator was used.",
@@ -5118,6 +5067,7 @@ async function buildGlobalFinleyAnswer(
                     licensee: currentUser.licensee?.name ?? null,
                   }
                 : null,
+              selectedClient: clientContext ?? null,
               uploadedFiles: uploads.map((upload) => ({
                 name: upload.name,
                 tags: upload.tags,
@@ -5151,32 +5101,12 @@ async function buildGlobalFinleyAnswer(
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Unable to run no-client chat.";
     return {
-      assistantMessage: buildNoClientFallbackAnswer(message, uploads),
-      warnings: [`Finley could not reach the configured chat model (${reason}), so it used the local no-client fallback.`],
+      assistantMessage: clientContext
+        ? buildClientGeneralFallbackAnswer(message, uploads, clientContext)
+        : buildNoClientFallbackAnswer(message, uploads),
+      warnings: [`Finley could not reach the configured chat model (${reason}), so it used the local chat fallback.`],
     };
   }
-}
-
-function buildFileNoteTextFromUploadedFiles(message: string, files?: FinleyChatRequest["uploadedFiles"]) {
-  const uploads = normalizeUploadedFiles(files);
-  if (!uploads.length) return normalizeFileNoteText(message);
-
-  const lower = message.toLowerCase();
-  const relevantUploads = lower.includes("transcript") || lower.includes("meeting")
-    ? uploads.filter((upload) => upload.tags.includes("meeting-transcript") || /transcript|meeting/i.test(upload.name))
-    : uploads;
-  const selectedUploads = relevantUploads.length ? relevantUploads : uploads;
-
-  return selectedUploads
-    .map((upload) => {
-      const lines = upload.extractedText
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 10)
-        .slice(0, 45);
-      return [`Source: ${upload.name}`, ...lines].join("\n");
-    })
-    .join("\n\n");
 }
 
 export async function handleFinleyChat(request: FinleyChatRequest): Promise<FinleyChatResponse> {
@@ -5199,6 +5129,27 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
       errors: [{ code: "EMPTY_MESSAGE", message: "A chat message is required.", retryable: true }],
       suggestedActions: [],
     };
+  }
+
+  if (request.workflowAction === "create_file_note") {
+    if (!liveContext.resolvedClientId) {
+      return {
+        ...base,
+        status: "needs_clarification",
+        responseMode: "clarification",
+        assistantMessage: "Select a client before starting the Create File Note workflow.",
+        plan: null,
+        results: [],
+        missingInformation: [{ field: "activeClientId", question: "Which client should this file note be saved against?" }],
+        warnings: [],
+        errors: [],
+        displayCard: null,
+        editorCard: null,
+        suggestedActions: [],
+      };
+    }
+
+    return buildCreateFileNoteWorkflowResponse(base, liveContext);
   }
 
   if (isFinleyCapabilityQuestion(message)) {
@@ -5240,25 +5191,6 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
   if (!liveContext.resolvedClientId) {
     const uploads = normalizeUploadedFiles(request.uploadedFiles);
 
-    if (isUploadedDocumentReviewRequest(message, uploads)) {
-      const documentReview = await buildUploadedDocumentReview(request.uploadedFiles, null);
-
-      return {
-        ...base,
-        status: "completed",
-        responseMode: "inform",
-        assistantMessage: "I've summarised the uploaded document and prepared a review card in the workspace.",
-        plan: null,
-        results: [],
-        missingInformation: [],
-        warnings: documentReview?.warning ? [documentReview.warning] : [],
-        errors: [],
-        displayCard: documentReview ? buildUploadedDocumentReviewCard(documentReview) : null,
-        editorCard: null,
-        suggestedActions: [],
-      };
-    }
-
     if (isNoClientClientScopedRequest(message)) {
       return {
         ...base,
@@ -5295,6 +5227,11 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
     };
   }
 
+  const uploads = normalizeUploadedFiles(request.uploadedFiles);
+  const looksLikeUploadedDocumentQuestion =
+    uploads.length > 0 &&
+    /\b(?:upload|uploaded|document|documents|file|files|transcript|meeting|these|this)\b/.test(lower) &&
+    /\b(?:summari[sz]e|review|read|analyse|analyze|draft|write|extract|prepare|what|tell me)\b/.test(lower);
   const looksLikeReadQuestion =
     lower.includes("what is") ||
     lower.includes("what's") ||
@@ -5309,26 +5246,7 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
     lower.startsWith("who is") ||
     lower.startsWith("get ");
 
-  if (looksLikeReadQuestion) {
-    if ((lower.includes("uploaded") || lower.includes("document")) && normalizeUploadedFiles(request.uploadedFiles).length) {
-      const documentReview = await buildUploadedDocumentReview(request.uploadedFiles, clientName);
-
-      return {
-        ...base,
-        status: "completed",
-        responseMode: "inform",
-        assistantMessage: "I've summarised the document and prepared a review card in the workspace.",
-        plan: null,
-        results: [],
-        missingInformation: [],
-        warnings: documentReview?.warning ? [documentReview.warning] : [],
-        errors: [],
-        displayCard: documentReview ? buildUploadedDocumentReviewCard(documentReview) : null,
-        editorCard: null,
-        suggestedActions: [],
-      };
-    }
-
+  if (looksLikeReadQuestion && !looksLikeUploadedDocumentQuestion) {
     const readAnswer = buildProfileReadAnswer(message, liveContext);
 
     if (readAnswer.matched) {
@@ -5368,290 +5286,6 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
     }
   }
 
-  if (lower.includes("file note") || lower.includes("note")) {
-    const planId = makeId("plan");
-    const stepId = makeId("step");
-    const noteText = buildFileNoteTextFromUploadedFiles(message, request.uploadedFiles);
-    const subject = noteText.slice(0, 80);
-    const noteKind = getFinleyFileNoteType(message);
-    const fileNoteClientId = liveContext.profile?.id ?? liveContext.resolvedClientId ?? request.activeClientId ?? "";
-    const fileNoteClientName =
-      [liveContext.profile?.client?.name, liveContext.profile?.partner?.name].filter(Boolean).join(" & ")
-      || liveContext.resolvedClientName
-      || clientName;
-    const fileNotePersonOptions = getPersonOwnerOptions(liveContext.profile, { useProfileClientFallback: true });
-    const fallbackClientOption =
-      fileNoteClientId && clientName
-        ? {
-            label: liveContext.profile?.client?.name ?? clientName,
-            value: fileNoteClientId,
-          }
-        : null;
-    const ownerOptions =
-      fileNotePersonOptions.length
-        ? fileNotePersonOptions
-        : fallbackClientOption
-          ? [fallbackClientOption]
-          : getOwnerOptions(liveContext.profile);
-    const defaultOwner = ownerOptions[0] ?? null;
-    const payload = {
-      id: null,
-      clientId: fileNoteClientId,
-      owner: defaultOwner
-        ? {
-            id: defaultOwner.value,
-            name: defaultOwner.label,
-          }
-        : null,
-      joint: false,
-      licensee: liveContext.profile?.licensee ?? null,
-      practice: liveContext.profile?.practice ?? null,
-      adviser: liveContext.profile?.adviser
-        ? {
-            name: liveContext.profile.adviser.name ?? null,
-            email: liveContext.profile.adviser.email ?? null,
-          }
-        : null,
-      content: noteText,
-      serviceDate: new Date().toISOString().slice(0, 10),
-      type: noteKind.type,
-      subType: noteKind.subType,
-      subject,
-      attachment: [],
-    };
-
-    persistPlan({
-      planId,
-      threadId: base.threadId,
-      createdAt: base.timestamp,
-      clientId: liveContext.resolvedClientId,
-      clientName,
-      profileId: liveContext.profile?.id ?? undefined,
-      userId: liveContext.currentUser?.id ?? null,
-      userRole: liveContext.currentUser?.userRole ?? null,
-      status: "pending",
-      summary: `Create a file note for ${clientName}`,
-      toolName: "create_file_note",
-      stepId,
-      description: "Save a new file note on the selected client record with the supplied meeting summary.",
-      inputsPreview: {
-        clientId: fileNoteClientId,
-        clientName: fileNoteClientName,
-        ownerId: defaultOwner?.value ?? "",
-        ownerName: defaultOwner?.label ?? "",
-        subject,
-        content: noteText,
-        serviceDate: payload.serviceDate,
-        type: noteKind.type,
-        subType: noteKind.subType,
-      },
-      execution: {
-        kind: "file_note",
-        payload,
-      },
-    });
-
-    return {
-      ...base,
-      status: "awaiting_approval",
-      responseMode: "plan",
-      assistantMessage: `I am ready to create a file note for ${clientName}. I will save the note subject, service date, and content against the selected client record after approval.`,
-      editorCard: {
-        kind: "collection_form",
-        title: "New File Note",
-        toolName: "create_file_note",
-        fields: [
-          {
-            key: "ownerId",
-            label: "Client",
-            input: "select",
-            value: defaultOwner?.value ?? "",
-            options: ownerOptions,
-          },
-          {
-            key: "serviceDate",
-            label: "Service Date",
-            input: "text",
-            value: payload.serviceDate,
-          },
-          {
-            key: "type",
-            label: "Type",
-            input: "select",
-            value: noteKind.type,
-            options: toCardOptions(FINLEY_FILE_NOTE_TYPE_OPTIONS),
-          },
-          {
-            key: "subType",
-            label: "Subtype",
-            input: "select",
-            value: noteKind.subType,
-            options: toCardOptions(FINLEY_FILE_NOTE_SUBTYPE_OPTIONS[noteKind.type] ?? []),
-          },
-          {
-            key: "subject",
-            label: "Subject",
-            input: "text",
-            value: subject,
-          },
-          {
-            key: "content",
-            label: "Body",
-            input: "textarea",
-            value: noteText,
-          },
-        ],
-      },
-      plan: {
-        planId,
-        summary: `Create a file note for ${clientName}`,
-        requiresApproval: true,
-        steps: [
-          {
-            stepId,
-            toolName: "create_file_note",
-            kind: "write",
-            status: "pending",
-            description: "Save a new file note on the selected client record with the supplied meeting summary.",
-            inputsPreview: {
-              clientId: fileNoteClientId,
-              clientName: fileNoteClientName,
-              ownerId: defaultOwner?.value ?? "",
-              ownerName: defaultOwner?.label ?? "",
-              subject,
-              content: noteText,
-              serviceDate: payload.serviceDate,
-              type: noteKind.type,
-              subType: noteKind.subType,
-            },
-          },
-        ],
-      },
-      results: [],
-      missingInformation: [],
-      warnings: [],
-      errors: [],
-      suggestedActions: [
-        { label: "Approve and run", action: "approve_plan", planId },
-        { label: "Cancel", action: "cancel_plan", planId },
-      ],
-    };
-  }
-
-  const collectionIntent = extractCollectionIntent(message, liveContext);
-  const collectionUpdateIntent = extractCollectionUpdateIntent(message, liveContext);
-
-  if (collectionIntent) {
-    if (collectionIntent.missingInformation.length > 0) {
-      return {
-        ...base,
-        status: "needs_clarification",
-        responseMode: "clarification",
-        assistantMessage: `I can create that ${collectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"} for ${clientName}, but I still need a bit more detail first.`,
-        plan: null,
-        results: [],
-        missingInformation: collectionIntent.missingInformation.map((field) => ({
-          field,
-          question: `Please provide the ${field} for this new ${collectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"}.`,
-        })),
-        warnings: [],
-        errors: [],
-        displayCard: null,
-        editorCard: collectionIntent.editorCard ?? null,
-        suggestedActions: [],
-      };
-    }
-
-    const planId = makeId("plan");
-    const stepId = makeId("step");
-
-    persistPlan({
-      planId,
-      threadId: base.threadId,
-      createdAt: base.timestamp,
-      clientId: liveContext.resolvedClientId,
-      clientName,
-      profileId: liveContext.profile?.id ?? undefined,
-      userId: liveContext.currentUser?.id ?? null,
-      userRole: liveContext.currentUser?.userRole ?? null,
-      status: "pending",
-      summary: collectionIntent.summary,
-      toolName: collectionIntent.toolName,
-      stepId,
-      description: collectionIntent.description,
-      inputsPreview: collectionIntent.inputsPreview,
-      execution: {
-        kind: "profile_collection",
-        payload: collectionIntent.payload,
-      },
-    });
-
-    return {
-      ...base,
-      status: "awaiting_approval",
-      responseMode: "plan",
-      assistantMessage: `I am ready to create this ${collectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"} for ${clientName}. I will save it to the selected client profile after approval.`,
-      plan: {
-        planId,
-        summary: collectionIntent.summary,
-        requiresApproval: true,
-        steps: [
-          {
-            stepId,
-            toolName: collectionIntent.toolName,
-            kind: "write",
-            status: "pending",
-            description: collectionIntent.description,
-            inputsPreview: collectionIntent.inputsPreview,
-          },
-        ],
-      },
-      results: [],
-      missingInformation: [],
-      warnings: [],
-      errors: [],
-      displayCard: null,
-      editorCard: collectionIntent.editorCard ?? null,
-      suggestedActions: [
-        { label: "Approve and run", action: "approve_plan", planId },
-        { label: "Cancel", action: "cancel_plan", planId },
-      ],
-    };
-  }
-
-  if (collectionUpdateIntent) {
-    return buildCollectionUpdatePlanResponse(base, liveContext, collectionUpdateIntent);
-  }
-
-  const wantsClarificationHelp =
-    lower.includes("what else do you need") ||
-    lower.includes("what do you need") ||
-    lower.includes("what details do you need") ||
-    lower.includes("what information do you need");
-
-  if (wantsClarificationHelp) {
-    const recentUserMessage = getRecentRelevantUserMessage(request.recentMessages);
-    const recentCollectionIntent = recentUserMessage ? extractCollectionIntent(recentUserMessage, liveContext) : null;
-
-    if (recentCollectionIntent?.missingInformation.length) {
-      return {
-        ...base,
-        status: "needs_clarification",
-        responseMode: "clarification",
-        assistantMessage: `To create this ${recentCollectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"} for ${clientName}, I still need: ${recentCollectionIntent.missingInformation.join(", ")}.`,
-        plan: null,
-        results: [],
-        missingInformation: recentCollectionIntent.missingInformation.map((field) => ({
-          field,
-          question: `Provide the ${field} for this new ${recentCollectionIntent.inputsPreview.section?.toString().toLowerCase() ?? "record"}.`,
-        })),
-        warnings: [],
-        errors: [],
-        suggestedActions: [],
-      };
-    }
-  }
-
   const looksLikeMissingInfoReview =
     lower.includes("missing") ||
     lower.includes("missing information") ||
@@ -5664,29 +5298,23 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
   if (looksLikeMissingInfoReview) {
     const missing = countMissingFields(liveContext.profile);
     const recentNotes = liveContext.fileNotes.length;
-    const summary =
-      missing.length > 0
-        ? `${clientName} is missing ${missing.join(", ")}. I also found ${recentNotes} recent file note${recentNotes === 1 ? "" : "s"} to review before annual review preparation.`
-        : `${clientName} has the main core details populated. I found ${recentNotes} recent file note${recentNotes === 1 ? "" : "s"} to check before annual review preparation.`;
+    const missingLine = missing.length
+      ? `I found these missing or incomplete profile items for ${clientName}: ${missing.join(", ")}.`
+      : `The main profile details I check are populated for ${clientName}.`;
 
     return {
       ...base,
       status: "completed",
       responseMode: "inform",
-      assistantMessage: summary,
-      plan: {
-        planId: makeId("plan"),
-        summary: `Review ${clientName} for missing information`,
-        requiresApproval: false,
-        steps: [
-          buildPlanStep("get_client_summary", "Load the selected client's profile, adviser context, and recent activity."),
-          buildPlanStep("find_missing_client_fields", "Check for missing data needed before annual review preparation."),
-          buildPlanStep("list_client_file_notes", "Inspect recent client file notes for follow-up items.", "pending", {
-            clientId: liveContext.resolvedClientId,
-            noteCount: recentNotes,
-          }),
-        ],
-      },
+      assistantMessage: [
+        "**Missing Information Check**",
+        missingLine,
+        `I also found ${recentNotes} recent file note${recentNotes === 1 ? "" : "s"} to review before any advice preparation.`,
+        "",
+        "**Next Step**",
+        "Use the relevant workflow button if you want Finley to update records or prepare a client document.",
+      ].join("\n\n"),
+      plan: null,
       results: [],
       missingInformation: missing.map((field) => ({
         field,
@@ -5694,107 +5322,47 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
       })),
       warnings: liveContext.profile ? [] : ["Live client profile was not available, so this checklist may be incomplete."],
       errors: [],
+      displayCard: null,
+      editorCard: null,
       suggestedActions: [],
     };
   }
 
-  if (lower.includes("update") || lower.includes("change") || lower.includes("mobile") || lower.includes("email") || lower.includes("address")) {
-    const planId = makeId("plan");
-    const stepId = makeId("step");
-    const extracted = extractClientUpdatePayload(message, request.recentMessages);
-    const extractedFields = Object.keys(extracted.changes);
-    const isPartner = extracted.target === "partner";
-    const personId = isPartner ? liveContext.profile?.partner?.id ?? null : liveContext.profile?.client?.id ?? null;
-    const toolName = isPartner ? "update_partner_person_details" : "update_client_person_details";
+  const workflowBoundary = getIdleWorkflowBoundary(message);
 
-    persistPlan({
-      planId,
-      threadId: base.threadId,
-      createdAt: base.timestamp,
-      clientId: liveContext.resolvedClientId,
-      clientName,
-      profileId: liveContext.profile?.id ?? undefined,
-      userId: liveContext.currentUser?.id ?? null,
-      userRole: liveContext.currentUser?.userRole ?? null,
-      status: "pending",
-      summary: `Update ${isPartner ? "partner" : "client"} details for ${clientName}`,
-      toolName,
-      stepId,
-      description: `Prepare a patch for the selected ${isPartner ? "partner" : "client"}'s contact and profile changes.`,
-      inputsPreview: {
-        clientId: liveContext.resolvedClientId,
-        requestedChange: message,
-        extractedFields,
-        target: extracted.target,
-      },
-      execution: {
-        kind: "client_update",
-        payload: {
-          requestedChange: message,
-          target: extracted.target,
-          personId,
-          changes: extracted.changes,
-        },
-      },
-    });
-
+  if (workflowBoundary) {
     return {
       ...base,
-      status: "awaiting_approval",
-      responseMode: "plan",
-      assistantMessage: `I can prepare an update plan for ${clientName}. The next step is to confirm the exact ${isPartner ? "partner" : "client"} field changes, then apply them through the profile update tool.`,
-      plan: {
-        planId,
-        summary: `Update ${isPartner ? "partner" : "client"} details for ${clientName}`,
-        requiresApproval: true,
-        steps: [
-          buildPlanStep("get_client_summary", "Load the latest client profile before preparing the field changes.", "pending", {
-            profileId: liveContext.profile?.id ?? null,
-          }),
-          {
-            stepId,
-            toolName,
-            kind: "write",
-            status: "pending",
-            description: `Prepare a patch for the selected ${isPartner ? "partner" : "client"}'s contact and profile changes.`,
-            inputsPreview: {
-              clientId: liveContext.resolvedClientId,
-              requestedChange: message,
-              extractedFields,
-              target: extracted.target,
-            },
-          },
-        ],
-      },
+      status: "completed",
+      responseMode: "inform",
+      assistantMessage: buildIdleWorkflowBoundaryAnswer(workflowBoundary.workflow, workflowBoundary.copy),
+      plan: null,
       results: [],
       missingInformation: [],
-      warnings:
-        extractedFields.length > 0
-          ? [`Finley extracted these update fields for execution: ${extractedFields.join(", ")}.`]
-          : ["Finley could not safely extract concrete fields from this request yet, so use the editor below to confirm the details before approval."],
+      warnings: [],
       errors: [],
-      editorCard: buildClientUpdateEditorCard(toolName, extracted.target, extracted.changes),
-      suggestedActions: [
-        { label: "Approve and run", action: "approve_plan", planId },
-        { label: "Cancel", action: "cancel_plan", planId },
-      ],
+      displayCard: null,
+      editorCard: null,
+      suggestedActions: [],
     };
   }
 
+  const clientGeneralAnswer = await buildGlobalFinleyAnswer(
+    message,
+    uploads,
+    liveContext.currentUser,
+    buildClientChatContext(liveContext),
+  );
+
   return {
     ...base,
-    status: "needs_clarification",
-    responseMode: "clarification",
-    assistantMessage: `I understand the request for ${clientName}, but I need a little more specificity before I map it to the correct client workflow.`,
+    status: "completed",
+    responseMode: "inform",
+    assistantMessage: clientGeneralAnswer.assistantMessage,
     plan: null,
     results: [],
-    missingInformation: [
-      {
-        field: "intent",
-        question: "Do you want Finley to update client details, create a note, review missing information, or handle a document workflow?",
-      },
-    ],
-    warnings: [],
+    missingInformation: [],
+    warnings: clientGeneralAnswer.warnings,
     errors: [],
     displayCard: null,
     editorCard: null,

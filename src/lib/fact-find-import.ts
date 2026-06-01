@@ -55,11 +55,29 @@ export type FactFindDependantCandidate = {
 
 export type FactFindInsuranceCandidate = FactFindOwnerRecord & {
   insurer?: string | null;
+  policyNumber?: string | null;
+  linkedSuperFund?: string | null;
   coverRequired?: string | null;
   sumInsured?: string | null;
   premiumAmount?: string | null;
   premiumFrequency?: string | null;
   status?: string | null;
+};
+
+export type FactFindInsuranceCoverCandidate = {
+  coverType?: string | null;
+  sumInsured?: string | null;
+  premiumAmount?: string | null;
+  premiumFrequency?: string | null;
+  notes?: string | null;
+};
+
+export type FactFindInsurancePolicyCandidate = FactFindOwnerRecord & {
+  insurer?: string | null;
+  policyNumber?: string | null;
+  status?: string | null;
+  linkedSuperFund?: string | null;
+  covers: FactFindInsuranceCoverCandidate[];
 };
 
 export type FactFindImportCandidate = {
@@ -75,6 +93,7 @@ export type FactFindImportCandidate = {
   superannuation: FactFindOwnerRecord[];
   pensions: FactFindOwnerRecord[];
   insurance: FactFindInsuranceCandidate[];
+  insurancePolicies?: FactFindInsurancePolicyCandidate[];
   confirmationsRequired: string[];
   warnings: string[];
 };
@@ -93,6 +112,8 @@ export type FactFindImportCounts = {
 };
 
 export function getFactFindImportCounts(candidate: FactFindImportCandidate): FactFindImportCounts {
+  const insurancePolicyCount = getFactFindInsurancePolicies(candidate).length;
+
   return {
     people: candidate.people.length,
     dependants: candidate.dependants.length,
@@ -103,8 +124,68 @@ export function getFactFindImportCounts(candidate: FactFindImportCandidate): Fac
     liabilities: candidate.liabilities.length,
     superannuation: candidate.superannuation.length,
     pensions: candidate.pensions.length,
-    insurance: candidate.insurance.length,
+    insurance: insurancePolicyCount || candidate.insurance.length,
   };
+}
+
+function candidateTextKey(value?: string | null) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
+export function groupInsuranceCandidatesIntoPolicies(records: FactFindInsuranceCandidate[]): FactFindInsurancePolicyCandidate[] {
+  const policies = new Map<string, FactFindInsurancePolicyCandidate>();
+
+  for (const record of records) {
+    const insurer = record.insurer ?? record.provider ?? null;
+    const policyNumber = record.policyNumber ?? record.accountNumber ?? null;
+    const linkedSuperFund = record.linkedSuperFund ?? null;
+    const status = record.status ?? null;
+    const policyKey = [
+      candidateTextKey(record.ownerName),
+      candidateTextKey(insurer),
+      candidateTextKey(policyNumber),
+      candidateTextKey(linkedSuperFund),
+      candidateTextKey(status),
+    ].join("|");
+    const existing = policies.get(policyKey);
+    const policy =
+      existing ??
+      {
+        ownerName: record.ownerName ?? null,
+        description: record.description ?? insurer ?? record.type ?? null,
+        type: "Insurance policy",
+        amount: null,
+        frequency: null,
+        provider: insurer,
+        accountNumber: policyNumber,
+        notes: record.notes ?? null,
+        insurer,
+        policyNumber,
+        status,
+        linkedSuperFund,
+        covers: [],
+      };
+
+    const coverType = record.coverRequired ?? record.type ?? record.description ?? null;
+    if (coverType || record.sumInsured || record.amount || record.premiumAmount) {
+      policy.covers.push({
+        coverType,
+        sumInsured: record.sumInsured ?? record.amount ?? null,
+        premiumAmount: record.premiumAmount ?? null,
+        premiumFrequency: record.premiumFrequency ?? record.frequency ?? null,
+        notes: record.notes ?? null,
+      });
+    }
+
+    policies.set(policyKey, policy);
+  }
+
+  return [...policies.values()].filter((policy) => policy.insurer || policy.policyNumber || policy.covers.length);
+}
+
+export function getFactFindInsurancePolicies(candidate: FactFindImportCandidate): FactFindInsurancePolicyCandidate[] {
+  const explicitPolicies = candidate.insurancePolicies?.filter((policy) => policy.insurer || policy.policyNumber || policy.covers?.length) ?? [];
+  return explicitPolicies.length ? explicitPolicies : groupInsuranceCandidatesIntoPolicies(candidate.insurance);
 }
 
 function parseCandidateMoneyValue(value?: string | null) {
@@ -195,6 +276,7 @@ export function createEmptyFactFindImportCandidate(sourceFileName: string): Fact
     superannuation: [],
     pensions: [],
     insurance: [],
+    insurancePolicies: [],
     confirmationsRequired: ["Confirm whether this file contains a standard fact find or a scanned/unsupported document."],
     warnings: [],
   };

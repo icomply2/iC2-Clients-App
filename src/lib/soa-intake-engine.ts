@@ -147,6 +147,16 @@ function buildFallbackReadiness(input: {
       confirmationsRequired: input.modules.includes("product-advice") ? ["Confirm whether product advice is required."] : [],
     },
     {
+      sectionId: "insurance-current-cover",
+      label: "Current Cover Review",
+      status: input.modules.includes("insurance-advice") ? "needs-confirmation" : "out-of-scope",
+      summary: input.modules.includes("insurance-advice")
+        ? "Review existing cover, ownership, funding, premiums, exclusions, loadings, and retainability first."
+        : "Insurance advice is not clearly in scope.",
+      missingInformation: input.modules.includes("insurance-advice") ? ["Confirm current policies, benefits, premium funding, exclusions/loadings, and replacement risk considerations."] : [],
+      confirmationsRequired: input.modules.includes("insurance-advice") ? ["Confirm current cover before needs analysis and recommendations."] : [],
+    },
+    {
       sectionId: "insurance-analysis",
       label: "Insurance Needs Analysis",
       status: input.modules.includes("insurance-advice") ? "needs-confirmation" : "out-of-scope",
@@ -157,24 +167,14 @@ function buildFallbackReadiness(input: {
       confirmationsRequired: input.modules.includes("insurance-advice") ? ["Confirm the insurance needs analysis assumptions and outcomes."] : [],
     },
     {
-      sectionId: "insurance-policies",
-      label: "Recommended Insurance Policies",
+      sectionId: "insurance-recommendations",
+      label: "Insurance Recommendations",
       status: input.modules.includes("insurance-advice") ? "needs-confirmation" : "out-of-scope",
       summary: input.modules.includes("insurance-advice")
-        ? "Insurance quote and policy recommendations should be confirmed."
+        ? "Insurance quote research, final recommendations, and replacement details should be confirmed."
         : "Insurance policy recommendations are not clearly in scope.",
-      missingInformation: input.modules.includes("insurance-advice") ? ["Confirm insurer, product, cover levels, premiums, ownership, optional benefits, and underwriting notes."] : [],
-      confirmationsRequired: input.modules.includes("insurance-advice") ? ["Confirm the recommended policy structure before generating the SOA."] : [],
-    },
-    {
-      sectionId: "insurance-replacement",
-      label: "Insurance Replacement",
-      status: input.modules.includes("insurance-advice") ? "needs-confirmation" : "out-of-scope",
-      summary: input.modules.includes("insurance-advice")
-        ? "Confirm whether any existing insurance policies are being replaced."
-        : "Insurance replacement is not clearly in scope.",
-      missingInformation: input.modules.includes("insurance-advice") ? ["Confirm current versus recommended cover, premiums, replacement costs, and benefits gained or lost."] : [],
-      confirmationsRequired: input.modules.includes("insurance-advice") ? ["Confirm whether insurance replacement disclosure is required."] : [],
+      missingInformation: input.modules.includes("insurance-advice") ? ["Confirm insurer, product, cover levels, premiums, ownership, optional benefits, underwriting notes, and replacement costs/benefits where relevant."] : [],
+      confirmationsRequired: input.modules.includes("insurance-advice") ? ["Confirm the recommended policy structure and replacement disclosure before generating the SOA."] : [],
     },
     {
       sectionId: "disclosure",
@@ -355,6 +355,7 @@ export function generateIntakeAssessment(input: IntakeEngineInput): IntakeAssess
     candidateInsuranceReviewNotes: normalizedModules.includes("insurance-advice")
       ? ["Review existing cover and determine whether current levels and structure remain suitable."]
       : [],
+    candidateInsuranceAdvice: [],
     candidateInsuranceNeedsAnalyses: [],
     candidateInsurancePolicyRecommendations: [],
     candidateInsurancePolicyReplacements: [],
@@ -438,6 +439,10 @@ export function refineIntakeAssessment(
     ],
     candidateInsuranceReviewNotes: [
       ...new Set([...current.candidateInsuranceReviewNotes, ...next.candidateInsuranceReviewNotes]),
+    ],
+    candidateInsuranceAdvice: [
+      ...(current.candidateInsuranceAdvice ?? []),
+      ...(next.candidateInsuranceAdvice ?? []),
     ],
     candidateInsuranceNeedsAnalyses: [
       ...(current.candidateInsuranceNeedsAnalyses ?? []),

@@ -1,6 +1,8 @@
 import JSZip from "jszip";
 import {
   createEmptyFactFindImportCandidate,
+  getFactFindInsurancePolicies,
+  groupInsuranceCandidatesIntoPolicies,
   sanitizeFactFindImportCandidate,
   type FactFindImportCandidate,
 } from "@/lib/fact-find-import";
@@ -41,6 +43,54 @@ const ownerRecordSchema = {
     notes: nullableString,
   },
   required: ["ownerName", "description", "type", "amount", "frequency", "provider", "accountNumber", "notes"],
+};
+
+const insuranceCoverSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    coverType: nullableString,
+    sumInsured: nullableString,
+    premiumAmount: nullableString,
+    premiumFrequency: nullableString,
+    notes: nullableString,
+  },
+  required: ["coverType", "sumInsured", "premiumAmount", "premiumFrequency", "notes"],
+};
+
+const insurancePolicySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    ownerName: nullableString,
+    description: nullableString,
+    type: nullableString,
+    amount: nullableString,
+    frequency: nullableString,
+    provider: nullableString,
+    accountNumber: nullableString,
+    notes: nullableString,
+    insurer: nullableString,
+    policyNumber: nullableString,
+    status: nullableString,
+    linkedSuperFund: nullableString,
+    covers: { type: "array", items: insuranceCoverSchema },
+  },
+  required: [
+    "ownerName",
+    "description",
+    "type",
+    "amount",
+    "frequency",
+    "provider",
+    "accountNumber",
+    "notes",
+    "insurer",
+    "policyNumber",
+    "status",
+    "linkedSuperFund",
+    "covers",
+  ],
 };
 
 const factFindImportCandidateSchema = {
@@ -184,6 +234,8 @@ const factFindImportCandidateSchema = {
           accountNumber: nullableString,
           notes: nullableString,
           insurer: nullableString,
+          policyNumber: nullableString,
+          linkedSuperFund: nullableString,
           coverRequired: nullableString,
           sumInsured: nullableString,
           premiumAmount: nullableString,
@@ -200,6 +252,8 @@ const factFindImportCandidateSchema = {
           "accountNumber",
           "notes",
           "insurer",
+          "policyNumber",
+          "linkedSuperFund",
           "coverRequired",
           "sumInsured",
           "premiumAmount",
@@ -207,6 +261,10 @@ const factFindImportCandidateSchema = {
           "status",
         ],
       },
+    },
+    insurancePolicies: {
+      type: "array",
+      items: insurancePolicySchema,
     },
     confirmationsRequired: { type: "array", items: { type: "string" } },
     warnings: { type: "array", items: { type: "string" } },
@@ -224,6 +282,7 @@ const factFindImportCandidateSchema = {
     "superannuation",
     "pensions",
     "insurance",
+    "insurancePolicies",
     "confirmationsRequired",
     "warnings",
   ],
@@ -713,11 +772,33 @@ export function normalizeFactFindCandidate(value: unknown, sourceFileName: strin
       return {
         ...normalizeOwnerRecord(insurance),
         insurer: normalizeString(insurance.insurer),
+        policyNumber: normalizeString(insurance.policyNumber),
+        linkedSuperFund: normalizeString(insurance.linkedSuperFund),
         coverRequired: normalizeString(insurance.coverRequired),
         sumInsured: normalizeString(insurance.sumInsured),
         premiumAmount: normalizeString(insurance.premiumAmount),
         premiumFrequency: normalizeString(insurance.premiumFrequency),
         status: normalizeString(insurance.status),
+      };
+    }),
+    insurancePolicies: normalizeRecordArray(record.insurancePolicies).map((entry) => {
+      const policy = entry as Record<string, unknown>;
+      return {
+        ...normalizeOwnerRecord(policy),
+        insurer: normalizeString(policy.insurer),
+        policyNumber: normalizeString(policy.policyNumber),
+        status: normalizeString(policy.status),
+        linkedSuperFund: normalizeString(policy.linkedSuperFund),
+        covers: normalizeRecordArray(policy.covers).map((coverEntry) => {
+          const cover = coverEntry as Record<string, unknown>;
+          return {
+            coverType: normalizeString(cover.coverType),
+            sumInsured: normalizeString(cover.sumInsured),
+            premiumAmount: normalizeString(cover.premiumAmount),
+            premiumFrequency: normalizeString(cover.premiumFrequency),
+            notes: normalizeString(cover.notes),
+          };
+        }),
       };
     }),
     confirmationsRequired: Array.isArray(record.confirmationsRequired)
@@ -988,6 +1069,8 @@ function fallbackCandidate(sourceFileName: string, extractedText: string): FactF
     accountNumber: null,
     notes: row[4] ?? null,
     insurer: row[3] ?? null,
+    policyNumber: null,
+    linkedSuperFund: null,
     coverRequired: row[1] ?? null,
     sumInsured: row[2] ?? null,
     premiumAmount: null,
@@ -1014,6 +1097,8 @@ function fallbackCandidate(sourceFileName: string, extractedText: string): FactF
             accountNumber: null,
             notes: "Mapped from insurance quote illustration.",
             insurer: quoteInsurer,
+            policyNumber: null,
+            linkedSuperFund: null,
             coverRequired: "Income Protection",
             sumInsured: quoteMonthlyBenefit,
             premiumAmount: quotePremium,
@@ -1023,6 +1108,7 @@ function fallbackCandidate(sourceFileName: string, extractedText: string): FactF
         ]
       : []),
   ];
+  candidate.insurancePolicies = groupInsuranceCandidatesIntoPolicies(candidate.insurance);
   if (candidate.assets.length || candidate.liabilities.length || candidate.superannuation.length || candidate.insurance.length) {
     candidate.summary = "Finley extracted structured fact find records from the uploaded client pack for adviser review.";
   }
@@ -1195,8 +1281,16 @@ function evidenceFacts(candidate: FactFindImportCandidate, scenario: ProjectionS
       ["Liability", liability.ownerName, liability.description ?? liability.type, liability.outstandingBalance ?? liability.amount].filter(Boolean).join(": "),
     ),
     ...candidate.superannuation.slice(0, 4).map((account) => ["Super", account.ownerName, account.provider ?? account.description, account.amount].filter(Boolean).join(": ")),
-    ...candidate.insurance.slice(0, 4).map((policy) =>
-      ["Insurance", policy.ownerName, policy.insurer ?? policy.provider, policy.coverRequired ?? policy.type, policy.sumInsured ?? policy.amount].filter(Boolean).join(": "),
+    ...getFactFindInsurancePolicies(candidate).slice(0, 4).map((policy) =>
+      [
+        "Insurance policy",
+        policy.ownerName,
+        policy.insurer ?? policy.provider,
+        policy.policyNumber,
+        policy.covers.map((cover) => cover.coverType).filter(Boolean).join(", "),
+      ]
+        .filter(Boolean)
+        .join(": "),
     ),
     scenario.cashflowItems.length ? `Projection cashflow inputs mapped: ${scenario.cashflowItems.length}` : null,
   ].filter((fact): fact is string => Boolean(fact));
@@ -1291,7 +1385,7 @@ async function mapWithOpenAi(sourceFileName: string, extractedText: string, clie
         {
           role: "system",
           content:
-            "You are Finley, mapping an Australian financial advice fact find into shared evidence for a client profile, an SOA intake, and a deterministic projection engine. Extract only facts supported by the document. Do not invent balances, dates, owners, drawdowns, expenses, homeownership, relationship status, product details, policy status, or contact details. Separate client and partner data. Preserve ownership, product names, providers, account numbers, dates, frequencies, dollar amounts, interest rates, repayment amounts, premiums, cover amounts, risk profiles, employment details, dependants, entities, estate-planning notes, and uncertainties. For projection scenario data: employment income must be taxable employment-income cashflow items; asset income such as rent or distributions belongs on the asset annualIncome; Age Pension must not be mapped as income unless the document says the client receives it; mortgage repayments must be annual amounts; interest rates must be decimal annual rates; offset accounts are cash assets with growthRateKey none; non-super ETF/share portfolios are investment assets with a mapped investment profile. Do not include proposed/recommended future insurance premiums, education savings, or implementation actions as current cashflow unless they already exist. Use conservative defaults only where the schema requires a value, and explain uncertainty in confirmationsRequired or warnings.",
+            "You are Finley, mapping an Australian financial advice fact find into shared evidence for a client profile, an SOA intake, and a deterministic projection engine. Extract only facts supported by the document. Do not invent balances, dates, owners, drawdowns, expenses, homeownership, relationship status, product details, policy status, or contact details. Separate client and partner data. Preserve ownership, product names, providers, account numbers, dates, frequencies, dollar amounts, interest rates, repayment amounts, premiums, cover amounts, risk profiles, employment details, dependants, entities, estate-planning notes, and uncertainties. Map insurance as grouped policies in insurancePolicies: policy owner, insurer, policy number/status/linked super fund at policy level, with life/TPD/trauma/income protection as nested covers. Keep the legacy flat insurance array only as supporting compatibility data. For projection scenario data: employment income must be taxable employment-income cashflow items; asset income such as rent or distributions belongs on the asset annualIncome; Age Pension must not be mapped as income unless the document says the client receives it; mortgage repayments must be annual amounts; interest rates must be decimal annual rates; offset accounts are cash assets with growthRateKey none; non-super ETF/share portfolios are investment assets with a mapped investment profile. Do not include proposed/recommended future insurance premiums, education savings, or implementation actions as current cashflow unless they already exist. Use conservative defaults only where the schema requires a value, and explain uncertainty in confirmationsRequired or warnings.",
         },
         {
           role: "user",

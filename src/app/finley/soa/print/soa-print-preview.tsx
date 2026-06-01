@@ -39,6 +39,14 @@ import {
   INSURANCE_NEEDS_REQUIREMENT_ITEMS,
   normalizeInsuranceNeedsLineItems,
 } from "@/lib/soa-insurance-needs";
+import {
+  flattenInsuranceNeedsAnalysesFromAdvice,
+  flattenInsuranceRecommendationsFromAdvice,
+  flattenInsuranceReplacementsFromAdvice,
+  getInsuranceAdvicePeople,
+  hasCurrentCoverReviewContent,
+  hasInsuranceRecommendationsContent,
+} from "@/lib/soa-insurance-advice";
 import { parseRecommendationMarkdown } from "@/lib/recommendation-markdown";
 import { sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
 import { getProductFeeTypeLabel } from "@/lib/soa-fee-types";
@@ -156,9 +164,12 @@ function getPreviewSectionAnchorId(sectionId?: string | null) {
       return "soa-preview-section-portfolio-allocation";
     case "projections":
       return "soa-preview-section-projections";
+    case "insurance-current-cover":
+      return "soa-preview-section-insurance-current-cover";
     case "insurance-analysis":
       return "soa-preview-section-insurance-needs-analysis";
     case "insurance-policies":
+    case "insurance-recommendations":
       return "soa-preview-section-insurance-analysis";
     case "insurance-replacement":
       return "soa-preview-section-insurance-replacement";
@@ -227,6 +238,21 @@ function formatInsuranceOwnership(value?: InsurancePolicyOwnershipGroupV1["owner
     case "unknown":
     default:
       return "Ownership to be confirmed";
+  }
+}
+
+function formatInsuranceCoverType(value?: string | null) {
+  switch (value) {
+    case "life":
+      return "Life";
+    case "tpd":
+      return "TPD";
+    case "trauma":
+      return "Trauma";
+    case "income-protection":
+      return "Income protection";
+    default:
+      return "Cover";
   }
 }
 
@@ -945,12 +971,13 @@ export function SoaPrintPreview() {
     })),
   ];
   const includesInsuranceAdvice = adviceCase.blueprint.includedModules.includes("insurance-advice");
-  const hasInsurancePolicyRecommendations =
-    includesInsuranceAdvice && Boolean(adviceCase.recommendations.insurancePolicies?.length);
-  const hasInsuranceNeedsAnalysis =
-    includesInsuranceAdvice && Boolean(adviceCase.recommendations.insuranceNeedsAnalyses?.length);
-  const hasInsuranceReplacement =
-    includesInsuranceAdvice && Boolean(adviceCase.recommendations.insuranceReplacements?.length);
+  const insuranceAdvicePeople = getInsuranceAdvicePeople(adviceCase);
+  const insuranceNeedsAnalyses = flattenInsuranceNeedsAnalysesFromAdvice(insuranceAdvicePeople);
+  const insurancePolicies = flattenInsuranceRecommendationsFromAdvice(insuranceAdvicePeople);
+  const insuranceReplacements = flattenInsuranceReplacementsFromAdvice(insuranceAdvicePeople);
+  const hasInsuranceCurrentCoverReview = includesInsuranceAdvice && hasCurrentCoverReviewContent(insuranceAdvicePeople);
+  const hasInsuranceNeedsAnalysis = includesInsuranceAdvice && Boolean(insuranceNeedsAnalyses.length);
+  const hasInsurancePolicyRecommendations = includesInsuranceAdvice && hasInsuranceRecommendationsContent(insuranceAdvicePeople);
   const contentsItems = [
     "Statement of Advice",
     "Executive Summary",
@@ -962,9 +989,9 @@ export function SoaPrintPreview() {
     "Investment Portfolio Recommendations",
     "Portfolio Allocation",
     ...(hasReplacementAnalysis ? ["Replacement Analysis"] : []),
+    ...(hasInsuranceCurrentCoverReview ? ["Current Cover Review"] : []),
     ...(hasInsuranceNeedsAnalysis ? ["Insurance Needs Analysis"] : []),
-    ...(hasInsurancePolicyRecommendations ? ["Recommended Insurance Policies"] : []),
-    ...(hasInsuranceReplacement ? ["Insurance Product Replacement"] : []),
+    ...(hasInsurancePolicyRecommendations ? ["Insurance Recommendations"] : []),
     "Projections",
     "Fees and Disclosures",
     "Actions Required by You",
@@ -975,9 +1002,9 @@ export function SoaPrintPreview() {
   ];
   const strategyPageCount = Math.max(adviceCase.recommendations.strategic.length, 1);
   const productPageCount = Math.max(adviceCase.recommendations.product.length, 1);
+  const insuranceCurrentCoverPageCount = hasInsuranceCurrentCoverReview ? 1 : 0;
   const insuranceNeedsPageCount = hasInsuranceNeedsAnalysis ? 1 : 0;
   const insurancePolicyPageCount = hasInsurancePolicyRecommendations ? 1 : 0;
-  const insuranceReplacementPageCount = hasInsuranceReplacement ? 1 : 0;
   const executiveSummaryPageNumber = 4;
   const aboutThisAdvicePageNumber = executiveSummaryPageNumber + 1;
   const personalAndFinancialPositionPageNumber = aboutThisAdvicePageNumber + 1;
@@ -988,10 +1015,12 @@ export function SoaPrintPreview() {
   const investmentPortfolioPageNumber = productStartPageNumber + productPageCount;
   const assetAllocationPageNumber = investmentPortfolioPageNumber + 1;
   const replacementAnalysisPageNumber = assetAllocationPageNumber + 1;
-  const insuranceNeedsPageNumber = replacementAnalysisPageNumber + (hasReplacementAnalysis ? 1 : 0);
+  const insuranceCurrentCoverPageNumber = replacementAnalysisPageNumber + (hasReplacementAnalysis ? 1 : 0);
+  const insuranceNeedsPageNumber = insuranceCurrentCoverPageNumber + insuranceCurrentCoverPageCount;
   const insurancePoliciesPageNumber = insuranceNeedsPageNumber + insuranceNeedsPageCount;
-  const insuranceReplacementPageNumber = insurancePoliciesPageNumber + insurancePolicyPageCount;
-  const projectionsPageNumber = insuranceReplacementPageNumber + insuranceReplacementPageCount;
+  const insuranceReplacementPageNumber = insurancePoliciesPageNumber;
+  const projectionsPageNumber = insurancePoliciesPageNumber + insurancePolicyPageCount;
+  const renderSeparateInsuranceReplacementSection = false;
   const feesPageNumber = projectionsPageNumber + 1;
   const actionsRequiredPageNumber = feesPageNumber + 1;
   const authorityToProceedPageNumber = actionsRequiredPageNumber + 1;
@@ -2171,6 +2200,65 @@ export function SoaPrintPreview() {
           </section>
         )}
 
+        {hasInsuranceCurrentCoverReview ? (
+          <section
+            id="soa-preview-section-insurance-current-cover"
+            className={styles.page}
+            style={{ order: previewSectionOrder.insuranceNeeds - 1 }}
+          >
+            <h2 className={styles.sectionHeading}>Current Cover Review</h2>
+            <p className={styles.sectionIntro}>
+              We have reviewed your current insurance cover before assessing your needs and making recommendations.
+            </p>
+            {insuranceAdvicePeople.map((personAdvice) => {
+              const person = adviceCase.clientGroup.clients.find((entry) => entry.personId === personAdvice.personId);
+              if (!personAdvice.currentCoverReview.policies.length && !personAdvice.currentCoverReview.reviewNotes && !personAdvice.insurabilityAssessment.adviserAssessment) {
+                return null;
+              }
+
+              return (
+                <div key={personAdvice.adviceId} className={styles.recommendationBlock}>
+                  <h3>{person?.fullName ?? "Client"}</h3>
+                  {personAdvice.currentCoverReview.summary ? <p>{personAdvice.currentCoverReview.summary}</p> : null}
+                  {personAdvice.currentCoverReview.policies.length ? (
+                    <table className={styles.soaTable}>
+                      <thead>
+                        <tr>
+                          <th>Policy</th>
+                          <th>Insurer</th>
+                          <th>Benefits</th>
+                          <th>Premium</th>
+                          <th>Review notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {personAdvice.currentCoverReview.policies.map((policy) => (
+                          <tr key={policy.policyId}>
+                            <td>{policy.policyName || policy.productName || "Current policy"}</td>
+                            <td>{policy.insurerName || "To be confirmed"}</td>
+                            <td>
+                              {policy.benefits.map((benefit) => `${formatInsuranceCoverType(benefit.coverType)} ${formatCurrency(benefit.sumInsured ?? benefit.monthlyBenefit)}`).join(", ") || "To be confirmed"}
+                            </td>
+                            <td>{formatCurrency(policy.annualisedPremium ?? policy.premiumAmount)}</td>
+                            <td>{policy.replacementRiskNotes || policy.retainabilityNotes || policy.exclusionsOrLoadings || "To be confirmed"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : null}
+                  {personAdvice.insurabilityAssessment.adviserAssessment || personAdvice.insurabilityAssessment.healthNotes ? (
+                    <div className={styles.card}>
+                      <h4>Insurability considerations</h4>
+                      <p>{personAdvice.insurabilityAssessment.adviserAssessment || personAdvice.insurabilityAssessment.healthNotes}</p>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {renderPageNumber(insuranceCurrentCoverPageNumber)}
+          </section>
+        ) : null}
+
         {hasInsuranceNeedsAnalysis ? (
           <section
             id="soa-preview-section-insurance-needs-analysis"
@@ -2182,7 +2270,7 @@ export function SoaPrintPreview() {
             <div className={styles.recommendationDetailStack}>
               {adviceCase.clientGroup.clients
                 .map((person) => {
-                  const analyses = (adviceCase.recommendations.insuranceNeedsAnalyses ?? []).filter((analysis) =>
+                  const analyses = insuranceNeedsAnalyses.filter((analysis) =>
                     analysis.ownerPersonIds.includes(person.personId),
                   );
                   if (!analyses.length) {
@@ -2316,10 +2404,10 @@ export function SoaPrintPreview() {
             className={styles.page}
             style={{ order: previewSectionOrder.insurancePolicies }}
           >
-            <h2 className={styles.sectionHeading}>Recommended Insurance Policies</h2>
+            <h2 className={styles.sectionHeading}>Insurance Recommendations</h2>
             <p className={styles.sectionIntro}>{INSURANCE_RECOMMENDATIONS_INTRO}</p>
             <div className={styles.recommendationDetailStack}>
-              {(adviceCase.recommendations.insurancePolicies ?? []).map((policy) => {
+              {insurancePolicies.map((policy) => {
                 const insuredPerson = adviceCase.clientGroup.clients.find((person) => person.personId === policy.insuredPersonId);
                 const insuredName = insuredPerson?.fullName || "Insured person to be confirmed";
 
@@ -2389,12 +2477,49 @@ export function SoaPrintPreview() {
                   </div>
                 );
               })}
+              {insuranceReplacements.length ? (
+                <div className={styles.card}>
+                  <h3>Replacement analysis</h3>
+                  <p>Where a recommendation replaces existing cover, we have compared the current and recommended position below.</p>
+                  {insuranceReplacements.map((replacement) => {
+                    const owner = adviceCase.clientGroup.clients.find((person) => person.personId === replacement.ownerPersonId);
+                    const premiumDifference =
+                      replacement.premiumDifference ??
+                      ((replacement.recommendedPolicy.totalAnnualPremium ?? 0) - (replacement.currentPolicy.totalAnnualPremium ?? 0));
+
+                    return (
+                      <div key={replacement.replacementId} className={styles.insurancePolicyGroup}>
+                        <h4>{owner?.fullName || "Policy owner to be confirmed"}</h4>
+                        <table className={styles.table}>
+                          <thead>
+                            <tr>
+                              <th />
+                              <th>Current</th>
+                              <th>Recommended</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr><td>Insurer</td><td>{replacement.currentPolicy.insurer || "—"}</td><td>{replacement.recommendedPolicy.insurer || "—"}</td></tr>
+                            <tr><td>Life</td><td>{formatCurrency(replacement.currentPolicy.totalLifeCover)}</td><td>{formatCurrency(replacement.recommendedPolicy.totalLifeCover)}</td></tr>
+                            <tr><td>TPD</td><td>{formatCurrency(replacement.currentPolicy.totalTpdCover)}</td><td>{formatCurrency(replacement.recommendedPolicy.totalTpdCover)}</td></tr>
+                            <tr><td>Income protection</td><td>{formatCurrency(replacement.currentPolicy.totalIncomeProtectionCover)}</td><td>{formatCurrency(replacement.recommendedPolicy.totalIncomeProtectionCover)}</td></tr>
+                            <tr><td>Trauma</td><td>{formatCurrency(replacement.currentPolicy.totalTraumaCover)}</td><td>{formatCurrency(replacement.recommendedPolicy.totalTraumaCover)}</td></tr>
+                            <tr><td>Annual premium</td><td>{formatCurrency(replacement.currentPolicy.totalAnnualPremium)}</td><td>{formatCurrency(replacement.recommendedPolicy.totalAnnualPremium)}</td></tr>
+                            <tr className={styles.totalRow}><td>Premium difference</td><td colSpan={2}>{formatCurrency(premiumDifference)}</td></tr>
+                          </tbody>
+                        </table>
+                        {renderBulletList(replacement.reasons, "Replacement reasons have not been drafted yet.")}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
             {renderPageNumber(insurancePoliciesPageNumber)}
           </section>
         ) : null}
 
-        {hasInsuranceReplacement ? (
+        {renderSeparateInsuranceReplacementSection ? (
           <section
             id="soa-preview-section-insurance-replacement"
             className={styles.page}
@@ -2403,7 +2528,7 @@ export function SoaPrintPreview() {
             <h2 className={styles.sectionHeading}>Insurance Product Replacement</h2>
             <p className={styles.sectionIntro}>The table below shows a direct cost comparison of your current cover against the recommended replacements.</p>
             <div className={styles.recommendationDetailStack}>
-              {(adviceCase.recommendations.insuranceReplacements ?? []).map((replacement) => {
+              {insuranceReplacements.map((replacement) => {
                 const owner = adviceCase.clientGroup.clients.find((person) => person.personId === replacement.ownerPersonId);
                 const premiumDifference =
                   replacement.premiumDifference ??
