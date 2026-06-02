@@ -1,7 +1,7 @@
 import type { UserSummary } from "@/lib/api/types";
 import { getApiBaseUrl } from "@/lib/server-runtime";
 
-export function decodeJwtPayload(token: string) {
+export function decodeJwtPayload(token: string): Record<string, unknown> | null {
   const parts = token.split(".");
 
   if (parts.length < 2) {
@@ -13,7 +13,7 @@ export function decodeJwtPayload(token: string) {
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
     const payload = Buffer.from(padded, "base64").toString("utf8");
 
-    return JSON.parse(payload);
+    return JSON.parse(payload) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -42,31 +42,54 @@ function userMatchesClaims(user: UserSummary | null | undefined, payload: Record
   const name = readStringClaim(payload, ["name", "given_name"]);
   const id = readStringClaim(payload, ["Id", "id", "sub", "nameid"]);
 
-  return Boolean(
-    (email && normalizeText(user.email) === normalizeText(email)) ||
-      (id && (normalizeText(user.id) === normalizeText(id) || normalizeText(user.entityId) === normalizeText(id))) ||
-      (name && normalizeText(user.name) === normalizeText(name)),
-  );
-}
-
-function findUserByClaims(users: UserSummary[], payload: Record<string, unknown> | null) {
-  if (!payload) return null;
-
-  const email = readStringClaim(payload, ["email", "emails", "preferred_username", "unique_name", "upn"]);
-  const name = readStringClaim(payload, ["name", "given_name"]);
-  const ids = ["Id", "id", "sub", "nameid"]
-    .map((claimName) => readStringClaim(payload, [claimName]))
-    .filter((value): value is string => Boolean(value));
-
   return (
-    users.find((user) => email && normalizeText(user.email) === normalizeText(email)) ??
-    users.find((user) => ids.some((id) => normalizeText(user.id) === normalizeText(id) || normalizeText(user.entityId) === normalizeText(id))) ??
-    users.find((user) => name && normalizeText(user.name) === normalizeText(name)) ??
-    null
+    (!!id && normalizeText(user.id) === normalizeText(id)) ||
+    (!!email && normalizeText(user.email) === normalizeText(email)) ||
+    (!!name && normalizeText(user.name) === normalizeText(name))
   );
 }
 
-async function fetchUserList(apiBaseUrl: string, token: string) {
+export async function resolveCurrentUserFromApi(token: string) {
+  const apiBaseUrl = getApiBaseUrl();
+
+  if (!apiBaseUrl) {
+    return null;
+  }
+
+  const payload = decodeJwtPayload(token);
+  const userId = payload
+    ? readStringClaim(payload, [
+        "Id",
+        "nameid",
+        "sub",
+        "uid",
+        "userId",
+        "id",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier",
+      ])
+    : null;
+
+  if (userId) {
+    const response = await fetch(new URL(`/api/Users/${encodeURIComponent(userId)}`, apiBaseUrl), {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    const body = (await response.json().catch(() => null)) as
+      | {
+          data?: UserSummary | null;
+        }
+      | null;
+
+    if (response.ok && body?.data) {
+      return body.data;
+    }
+  }
+
   const response = await fetch(new URL("/api/Users", apiBaseUrl), {
     method: "GET",
     headers: {
@@ -83,47 +106,8 @@ async function fetchUserList(apiBaseUrl: string, token: string) {
     | null;
 
   if (!response.ok) {
-    return [] as UserSummary[];
-  }
-
-  return body?.data ?? [];
-}
-
-export async function resolveCurrentUserFromApi(token: string) {
-
-  const apiBaseUrl = getApiBaseUrl();
-
-  if (!apiBaseUrl) {
     return null;
   }
 
-  const payload = decodeJwtPayload(token);
-  const primaryId = payload && typeof payload === "object" ? readStringClaim(payload, ["Id", "id", "sub", "nameid"]) : null;
-  let directUser: UserSummary | null = null;
-
-  if (primaryId) {
-    const response = await fetch(new URL(`/api/Users/${encodeURIComponent(primaryId)}`, apiBaseUrl), {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
-
-    const body = (await response.json().catch(() => null)) as
-      | {
-          data?: UserSummary | null;
-        }
-      | null;
-
-    if (response.ok) {
-      directUser = body?.data ?? null;
-    }
-  }
-
-  const users = await fetchUserList(apiBaseUrl, token);
-  const listUser = findUserByClaims(users, payload && typeof payload === "object" ? payload : null);
-
-  return listUser ?? (userMatchesClaims(directUser, payload && typeof payload === "object" ? payload : null) ? directUser : null);
+  return body?.data?.find((user) => userMatchesClaims(user, payload)) ?? null;
 }

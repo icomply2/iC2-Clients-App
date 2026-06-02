@@ -237,7 +237,7 @@ export function LoginPage() {
             />
           </div>
 
-          {!needsTwoFactor && mode !== "reset" ? (
+          {mode !== "reset" && !needsTwoFactor ? (
             <div className={styles.field}>
               <input
                 className={styles.input}
@@ -249,7 +249,9 @@ export function LoginPage() {
                 required
               />
             </div>
-          ) : (
+          ) : null}
+
+          {mode !== "reset" && needsTwoFactor ? (
             <div className={styles.field}>
               <input
                 className={styles.input}
@@ -262,7 +264,7 @@ export function LoginPage() {
               />
               <p className={styles.hint}>Two-factor verification is enabled for this account.</p>
             </div>
-          )}
+          ) : null}
 
           {mode === "reset" ? (
             <>
