@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   deleteEmploymentRecord,
   updateClientDetails,
@@ -11,6 +11,13 @@ import {
   upsertEmploymentRecords,
 } from "@/lib/services/client-updates";
 import type { AdviserSummary, ClientAdviserRecord, ClientEmploymentRecord, ClientProfile, PersonRecord } from "@/lib/api/types";
+import { listAdminLicensees } from "@/lib/api/admin";
+import {
+  DEFAULT_RISK_PROFILE_OPTIONS,
+  resolveRiskProfileOptions,
+  withCurrentRiskProfileOption,
+  type SelectOption,
+} from "@/lib/risk-profile-options";
 import { useCurrentUserScope } from "@/hooks/use-current-user-scope";
 import styles from "./page.module.css";
 
@@ -90,7 +97,6 @@ const EDIT_STEPS: { key: EditStepKey; label: string }[] = [
 const TITLE_OPTIONS = ["Mr", "Mrs", "Ms", "Miss", "Dr", "Prof"];
 const STATUS_OPTIONS = ["Prospect", "Client", "Archived", "Deceased"];
 const CLIENT_CATEGORY_OPTIONS = ["Annual Agreement", "Fee For Service", "Ongoing", "Risk Only", "Whoesale"];
-const RISK_PROFILE_OPTIONS = ["Cash", "Defensive", "Moderate", "Balanced", "Growth", "High Growth"];
 const AGREEMENT_TYPE_OPTIONS = ["Fixed-Term Agreement", "Ongoing Agreement"];
 const EMPLOYMENT_STATUS_OPTIONS = ["Full-time", "Part-time", "Casual", "Contract", "Self-employed", "Retired", "Unemployed"];
 const FREQUENCY_OPTIONS = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"];
@@ -563,10 +569,40 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
   const [removedEmploymentIds, setRemovedEmploymentIds] = useState<string[]>([]);
   const [adviserName, setAdviserName] = useState(profile.adviser?.name ?? "");
   const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; entityId: string; name: string; email: string }>>([]);
+  const [riskProfileOptions, setRiskProfileOptions] = useState<SelectOption[]>(DEFAULT_RISK_PROFILE_OPTIONS);
   const hasPartner = hasMeaningfulPerson(partner);
 
   const activePerson = selectedPerson === "partner" && hasPartner ? partner : client;
   const activeSections = buildProfileSections(activePerson, profile, adviserName);
+  const riskProfileSelectOptions = useMemo(
+    () => withCurrentRiskProfileOption(riskProfileOptions, draft.riskProfile),
+    [draft.riskProfile, riskProfileOptions],
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRiskProfileOptions() {
+      try {
+        const response = await listAdminLicensees();
+        if (!isMounted) return;
+        setRiskProfileOptions(resolveRiskProfileOptions(response?.data ?? [], profile, currentUserScope));
+      } catch {
+        if (isMounted) {
+          setRiskProfileOptions(DEFAULT_RISK_PROFILE_OPTIONS);
+        }
+      }
+    }
+
+    void loadRiskProfileOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    currentUserScope,
+    profile,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1026,9 +1062,9 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
                   <span>Risk Profile</span>
                   <select value={draft.riskProfile} onChange={(event) => setDraft({ ...draft, riskProfile: event.target.value })}>
                     <option value="">Select risk profile</option>
-                    {RISK_PROFILE_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
+                    {riskProfileSelectOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
