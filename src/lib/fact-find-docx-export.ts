@@ -209,6 +209,22 @@ function cellXml(value: string, options: { header?: boolean; width?: number } = 
   return `<w:tc><w:tcPr>${width}${fill}<w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tcMar></w:tcPr><w:p><w:r><w:rPr><w:rFonts w:ascii="${activeFontFamily()}" w:hAnsi="${activeFontFamily()}"/>${bold}<w:color w:val="${color}"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr><w:t xml:space="preserve">${escapeXml(value)}</w:t></w:r></w:p></w:tc>`;
 }
 
+function cellParagraphsXml(
+  paragraphs: string[],
+  options: { header?: boolean; width?: number } = {},
+) {
+  const fill = options.header ? `<w:shd w:fill="${activeTableHeaderFill()}"/>` : "";
+  const bold = options.header ? "<w:b/>" : "";
+  const color = options.header ? "FFFFFF" : activeBodyColor();
+  const width = options.width ? `<w:tcW w:w="${options.width}" w:type="pct"/>` : "";
+  const paragraphNodes = (paragraphs.length ? paragraphs : [""]).map(
+    (paragraph) =>
+      `<w:p><w:r><w:rPr><w:rFonts w:ascii="${activeFontFamily()}" w:hAnsi="${activeFontFamily()}"/>${bold}<w:color w:val="${color}"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr><w:t xml:space="preserve">${escapeXml(paragraph)}</w:t></w:r></w:p>`,
+  );
+
+  return `<w:tc><w:tcPr>${width}${fill}<w:tcMar><w:top w:w="90" w:type="dxa"/><w:left w:w="110" w:type="dxa"/><w:bottom w:w="90" w:type="dxa"/><w:right w:w="110" w:type="dxa"/></w:tcMar></w:tcPr>${paragraphNodes.join("")}</w:tc>`;
+}
+
 function tableXml(headers: string[], rows: string[][]) {
   if (!rows.length) {
     return paragraphXml("No records recorded.", { spacingAfter: 160 });
@@ -233,10 +249,10 @@ function detailTable(title: string, rows: Array<[string, string]>) {
   ].join("");
 }
 
-function personDetailsXml(title: string, person?: PersonRecord | null) {
-  if (!person) return "";
+function personDetailRows(person?: PersonRecord | null): Array<[string, string]> {
+  if (!person) return [];
 
-  return detailTable(title, [
+  return [
     ["Name", text(person.name)],
     ["Email", text(person.email)],
     ["Preferred Phone", preferredPhone(person)],
@@ -252,7 +268,64 @@ function personDetailsXml(title: string, person?: PersonRecord | null) {
     ["Health Status", firstText(person.healthStatus, person.health_status)],
     ["Smoker", text(person.smoker)],
     ["Health Insurance", firstText(person.healthInsurance, person.health_insurance)],
-  ]);
+  ];
+}
+
+function clientPartnerDetailsXml(profile: ClientProfile) {
+  const clientRows = personDetailRows(profile.client);
+  const partnerRows = personDetailRows(profile.partner);
+  const labels = Array.from(new Set([...clientRows, ...partnerRows].map(([label]) => label)));
+  const clientMap = new Map(clientRows);
+  const partnerMap = new Map(partnerRows);
+
+  if (!labels.length) return "";
+
+  return [
+    headingXml("Client and Partner Details", 2),
+    tableXml(
+      profile.partner ? ["Field", "Client", "Partner"] : ["Field", "Client"],
+      labels.map((label) =>
+        profile.partner
+          ? [label, clientMap.get(label) ?? "", partnerMap.get(label) ?? ""]
+          : [label, clientMap.get(label) ?? ""],
+      ),
+    ),
+  ].join("");
+}
+
+function acknowledgementXml(profile: ClientProfile) {
+  const people = [
+    { label: "Client", name: text(profile.client?.name) || "Client" },
+    ...(profile.partner ? [{ label: "Partner", name: text(profile.partner.name) || "Partner" }] : []),
+  ];
+  const width = Math.floor(5000 / Math.max(people.length, 1));
+  const headerXml = `<w:tr>${people.map((person) => cellXml(person.label, { header: true, width })).join("")}</w:tr>`;
+  const signatureXml = `<w:tr><w:trPr><w:trHeight w:val="1300" w:hRule="atLeast"/></w:trPr>${people
+    .map((person) =>
+      cellParagraphsXml(
+        [
+          "Signed:",
+          "",
+          "",
+          person.name,
+          "",
+          "Date:",
+          "",
+        ],
+        { width },
+      ),
+    )
+    .join("")}</w:tr>`;
+
+  return [
+    headingXml("Your Acknowledgement", 2),
+    paragraphXml("- I/we have read and checked the information contained in this Fact Find document and confirm that it is accurate."),
+    paragraphXml("- I/we acknowledge that if we have chosen not to disclose any information, or the information provided is incorrect, it could seriously affect the suitability of any recommendations provided."),
+    paragraphXml("- The information set out in this form accurately represents my/our investment objectives, financial situation, and particular needs. I/we are not aware of any other information which may be relevant to the preparation of my/our financial plan."),
+    paragraphXml("- I/we understand that a financial plan/investment recommendation will be based solely on the information supplied in this fact find, and should be implemented within a period of one month."),
+    paragraphXml("- I/we understand that if we do not proceed with the implementation of the financial plan within a month, it will be necessary to review the information, which has been supplied before proceeding with the financial plan."),
+    `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D7DEE7"/><w:left w:val="single" w:sz="4" w:color="D7DEE7"/><w:bottom w:val="single" w:sz="4" w:color="D7DEE7"/><w:right w:val="single" w:sz="4" w:color="D7DEE7"/><w:insideH w:val="single" w:sz="4" w:color="E5EAF0"/><w:insideV w:val="single" w:sz="4" w:color="E5EAF0"/></w:tblBorders></w:tblPr>${headerXml}${signatureXml}</w:tbl>`,
+  ].join("");
 }
 
 function compareRiskProfileAnswerIndex(left: string, right: string, leftFallback: number, rightFallback: number) {
@@ -362,8 +435,7 @@ function buildDocumentXml(profile: ClientProfile) {
       ["Practice", firstText(profile.practice, profile.adviser?.practice?.name)],
       ["Licensee", firstText(profile.licensee, profile.adviser?.licensee?.name)],
     ]),
-    personDetailsXml("Client Details", profile.client),
-    personDetailsXml("Partner Details", profile.partner),
+    clientPartnerDetailsXml(profile),
     headingXml("Dependants", 2),
     tableXml(
       ["Owner", "Name", "Type", "Date of Birth"],
@@ -457,6 +529,7 @@ function buildDocumentXml(profile: ClientProfile) {
       ]),
     ),
     riskProfileXml(profile),
+    acknowledgementXml(profile),
   ].join("");
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError } from "@/lib/api/client";
 import { getClientProfile, getClientProfileId } from "@/lib/api/clients";
-import { readAuthTokenFromCookies } from "@/lib/auth";
+import { readAuthTokenFromCookies, readCurrentUserFromCookies } from "@/lib/auth";
 import {
   buildFactFindOutputName,
   renderFactFindDocx,
 } from "@/lib/fact-find-docx-export";
+import { readUserProfileOverride } from "@/lib/user-profile-overrides-store";
 
 async function loadProfile(clientId: string) {
   const token = await readAuthTokenFromCookies();
@@ -40,8 +41,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const profile = await loadProfile(clientId);
+    const currentUser = await readCurrentUserFromCookies();
+    const profileOverride = await readUserProfileOverride(currentUser?.id);
     const outputName = buildFactFindOutputName(profile);
-    const buffer = await renderFactFindDocx(profile);
+    const buffer = await renderFactFindDocx(profile, {
+      documentStyleProfile: profileOverride?.documentStyleProfile ?? null,
+    });
 
     return new NextResponse(buffer, {
       status: 200,

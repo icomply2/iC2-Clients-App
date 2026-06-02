@@ -18,6 +18,14 @@ import type {
 } from "@/lib/api/types";
 import type { FinancialCollectionKind, ProfileCollectionRecord } from "@/lib/api/contracts/profile-collections";
 import type { FinleyDisplayCard, FinleyEditorCard, FinleyFactFindWorkflow, FinleyTableEditorCard } from "@/lib/finley-shared";
+import { listAdminLicensees } from "@/lib/api/admin";
+import {
+  DEFAULT_RISK_PROFILE_OPTIONS,
+  isRiskProfileFieldKey,
+  resolveRiskProfileOptions,
+  withCurrentRiskProfileOption,
+  type SelectOption,
+} from "@/lib/risk-profile-options";
 import { updateClientDetails, updatePartnerDetails, updatePersonRiskProfile, upsertEmploymentRecords } from "@/lib/services/client-updates";
 import {
   deleteDependantCollectionItem,
@@ -711,7 +719,13 @@ function isPersonDetailsEditorCard(editorCard: FinleyEditorCard) {
 function renderEditorField(
   field: FinleyEditorCard["fields"][number],
   onFieldChange: (fieldKey: string, value: string, rowId?: string) => void,
+  riskProfileOptions: SelectOption[] = DEFAULT_RISK_PROFILE_OPTIONS,
 ) {
+  const selectOptions =
+    field.input === "select" && isRiskProfileFieldKey(field.key)
+      ? withCurrentRiskProfileOption(riskProfileOptions, field.value)
+      : field.options ?? [];
+
   return (
     <label
       key={field.key}
@@ -725,7 +739,7 @@ function renderEditorField(
           onChange={(event) => onFieldChange(field.key, event.target.value)}
         >
           <option value="">Select...</option>
-          {(field.options ?? []).map((option) => (
+          {selectOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -896,6 +910,7 @@ function renderDisplayCard(
 function renderEditorCard(
   editorCard: FinleyEditorCard | FinleyTableEditorCard,
   onFieldChange: (fieldKey: string, value: string, rowId?: string) => void,
+  riskProfileOptions: SelectOption[] = DEFAULT_RISK_PROFILE_OPTIONS,
 ) {
   if (editorCard.kind === "collection_table") {
     return (
@@ -962,7 +977,7 @@ function renderEditorCard(
               <section key={section.title} className={styles.factFindDetailSection}>
                 <div className={styles.factFindDetailSectionTitle}>{section.title}</div>
                 <div className={styles.factFindEditorGrid}>
-                  {fields.map((field) => renderEditorField(field, onFieldChange))}
+                  {fields.map((field) => renderEditorField(field, onFieldChange, riskProfileOptions))}
                 </div>
               </section>
             );
@@ -970,7 +985,7 @@ function renderEditorCard(
         </div>
       ) : (
         <div className={styles.factFindEditorGrid}>
-          {editorCard.fields.map((field) => renderEditorField(field, onFieldChange))}
+          {editorCard.fields.map((field) => renderEditorField(field, onFieldChange, riskProfileOptions))}
         </div>
       )}
     </div>
@@ -998,6 +1013,7 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
   const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [riskProfileOptions, setRiskProfileOptions] = useState<SelectOption[]>(DEFAULT_RISK_PROFILE_OPTIONS);
   const clientName = useMemo(() => buildClientName(profileState), [profileState]);
   const currentStep = workflow?.steps?.[stepIndex] ?? null;
   const currentStepPopupSection = isFactFindPopupSection(currentStep?.id) ? currentStep.id : null;
@@ -1012,6 +1028,28 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
   useEffect(() => {
     setProfileState(profile);
   }, [profile]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRiskProfileOptions() {
+      try {
+        const response = await listAdminLicensees();
+        if (!isMounted) return;
+        setRiskProfileOptions(resolveRiskProfileOptions(response?.data ?? [], profileState));
+      } catch {
+        if (isMounted) {
+          setRiskProfileOptions(DEFAULT_RISK_PROFILE_OPTIONS);
+        }
+      }
+    }
+
+    void loadRiskProfileOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [profileState]);
 
   const loadInsurancePolicies = useCallback(
     async (profileId?: string | null) => {
@@ -2003,7 +2041,7 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
               ))}
             </div>
 
-            {currentStep.editorCard ? renderEditorCard(currentStep.editorCard, updateStepField) : null}
+            {currentStep.editorCard ? renderEditorCard(currentStep.editorCard, updateStepField, riskProfileOptions) : null}
             {bulkDeleteError ? <p className={styles.modalError}>{bulkDeleteError}</p> : null}
             {currentDisplayCard
               ? renderDisplayCard(
