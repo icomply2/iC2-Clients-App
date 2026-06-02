@@ -1,5 +1,9 @@
 import type { AdviceModuleV1 } from "@/lib/soa-types";
-import type { IntakeAssessmentV1, IntakeInsuranceNeedsAnalysisLineItemV1 } from "@/lib/soa-output-contracts";
+import type {
+  IntakeAssessmentV1,
+  IntakeInsuranceAdvicePersonV1,
+  IntakeInsuranceNeedsAnalysisLineItemV1,
+} from "@/lib/soa-output-contracts";
 import {
   generateIntakeAssessment,
   refineIntakeAssessment,
@@ -111,9 +115,11 @@ const intakeAssessmentJsonSchema = {
                 "strategy-recommendations",
                 "product-recommendations",
                 "replacement-analysis",
+                "insurance-current-cover",
                 "insurance-analysis",
                 "insurance-policies",
                 "insurance-replacement",
+                "insurance-recommendations",
                 "portfolio-allocation",
                 "projections",
                 "disclosure",
@@ -202,6 +208,578 @@ const intakeAssessmentJsonSchema = {
       candidateInsuranceReviewNotes: {
         type: "array",
         items: { type: "string" },
+      },
+      candidateInsuranceAdvice: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            insuredName: { anyOf: [{ type: "string" }, { type: "null" }] },
+            currentCoverReview: {
+              anyOf: [
+                {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    summary: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    reviewNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    policies: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        additionalProperties: false,
+                        properties: {
+                          ownerName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          insuredName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          insurerName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          productName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          policyName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          policyNumber: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          ownership: {
+                            anyOf: [
+                              {
+                                type: "string",
+                                enum: ["inside-super", "outside-super", "flexi-linked", "smsf", "employer", "other", "unknown"],
+                              },
+                              { type: "null" },
+                            ],
+                          },
+                          fundingSource: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          linkedSuperFund: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          status: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          premiumAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          premiumFrequency: {
+                            anyOf: [
+                              {
+                                type: "string",
+                                enum: ["weekly", "fortnightly", "monthly", "quarterly", "half-yearly", "annually", "unknown"],
+                              },
+                              { type: "null" },
+                            ],
+                          },
+                          annualisedPremium: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          benefits: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              additionalProperties: false,
+                              properties: {
+                                coverType: {
+                                  anyOf: [
+                                    { type: "string", enum: ["life", "tpd", "trauma", "income-protection", "other"] },
+                                    { type: "null" },
+                                  ],
+                                },
+                                details: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                sumInsured: { anyOf: [{ type: "number" }, { type: "null" }] },
+                                monthlyBenefit: { anyOf: [{ type: "number" }, { type: "null" }] },
+                                premiumAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                                premiumFrequency: {
+                                  anyOf: [
+                                    {
+                                      type: "string",
+                                      enum: ["weekly", "fortnightly", "monthly", "quarterly", "half-yearly", "annually", "unknown"],
+                                    },
+                                    { type: "null" },
+                                  ],
+                                },
+                                waitingPeriod: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                benefitPeriod: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                status: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                exclusionsOrLoadings: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                notes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                              },
+                              required: [
+                                "coverType",
+                                "details",
+                                "sumInsured",
+                                "monthlyBenefit",
+                                "premiumAmount",
+                                "premiumFrequency",
+                                "waitingPeriod",
+                                "benefitPeriod",
+                                "status",
+                                "exclusionsOrLoadings",
+                                "notes",
+                              ],
+                            },
+                          },
+                          exclusionsOrLoadings: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          retainabilityNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          variationOptions: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          replacementRiskNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                          sourceNote: { anyOf: [{ type: "string" }, { type: "null" }] },
+                        },
+                        required: [
+                          "ownerName",
+                          "insuredName",
+                          "insurerName",
+                          "productName",
+                          "policyName",
+                          "policyNumber",
+                          "ownership",
+                          "fundingSource",
+                          "linkedSuperFund",
+                          "status",
+                          "premiumAmount",
+                          "premiumFrequency",
+                          "annualisedPremium",
+                          "benefits",
+                          "exclusionsOrLoadings",
+                          "retainabilityNotes",
+                          "variationOptions",
+                          "replacementRiskNotes",
+                          "sourceNote",
+                        ],
+                      },
+                    },
+                  },
+                  required: ["summary", "reviewNotes", "policies"],
+                },
+                { type: "null" },
+              ],
+            },
+            insurabilityAssessment: {
+              anyOf: [
+                {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    healthDisclosureStatus: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          enum: ["not-discussed", "no-concerns-disclosed", "concerns-disclosed", "requires-underwriting", "unknown"],
+                        },
+                        { type: "null" },
+                      ],
+                    },
+                    abilityToObtainCover: {
+                      anyOf: [
+                        { type: "string", enum: ["likely", "needs-underwriting", "restricted", "unlikely", "unknown"] },
+                        { type: "null" },
+                      ],
+                    },
+                    healthNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    occupationNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    hazardousPursuitsNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    claimsHistoryNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    underwritingConcerns: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    replacementRiskNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    adviserAssessment: { anyOf: [{ type: "string" }, { type: "null" }] },
+                  },
+                  required: [
+                    "healthDisclosureStatus",
+                    "abilityToObtainCover",
+                    "healthNotes",
+                    "occupationNotes",
+                    "hazardousPursuitsNotes",
+                    "claimsHistoryNotes",
+                    "underwritingConcerns",
+                    "replacementRiskNotes",
+                    "adviserAssessment",
+                  ],
+                },
+                { type: "null" },
+              ],
+            },
+            needsAnalyses: {
+              anyOf: [
+                {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ownerName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      policyType: {
+                        anyOf: [
+                          { type: "string", enum: ["life", "tpd", "trauma", "income-protection", "other"] },
+                          { type: "null" },
+                        ],
+                      },
+                      methodology: {
+                        anyOf: [
+                          { type: "string", enum: ["needs-analysis", "multiple-of-income", "expense-replacement", "debt-clearance", "other"] },
+                          { type: "null" },
+                        ],
+                      },
+                      purpose: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      annualIncome: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      annualLivingExpenses: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      liabilitiesToRepay: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      dependantsCount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      dependantSupportYears: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      educationCosts: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      existingCoverAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      superannuationBalance: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      otherAssetsAvailable: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      targetCoverAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      coverGapAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      suggestedWaitingPeriod: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      suggestedBenefitPeriod: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      suggestedPolicyOwnership: {
+                        anyOf: [{ type: "string", enum: ["super", "retail", "either", "unknown"] }, { type: "null" }],
+                      },
+                      requirements: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            key: {
+                              anyOf: [
+                                {
+                                  type: "string",
+                                  enum: [
+                                    "debt-repayment",
+                                    "income-replacement",
+                                    "education-costs",
+                                    "funeral-final-expenses",
+                                    "emergency-reserve",
+                                  ],
+                                },
+                                { type: "null" },
+                              ],
+                            },
+                            title: { type: "string" },
+                            category: { anyOf: [{ type: "string", enum: ["requirement"] }, { type: "null" }] },
+                            life: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            tpd: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            trauma: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            incomeProtection: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          },
+                          required: ["key", "title", "category", "life", "tpd", "trauma", "incomeProtection"],
+                        },
+                      },
+                      provisions: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            key: {
+                              anyOf: [
+                                { type: "string", enum: ["existing-cover", "superannuation-balance", "available-assets"] },
+                                { type: "null" },
+                              ],
+                            },
+                            title: { type: "string" },
+                            category: { anyOf: [{ type: "string", enum: ["provision"] }, { type: "null" }] },
+                            life: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            tpd: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            trauma: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            incomeProtection: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          },
+                          required: ["key", "title", "category", "life", "tpd", "trauma", "incomeProtection"],
+                        },
+                      },
+                      rationale: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      sourceNote: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    },
+                    required: [
+                      "ownerName",
+                      "policyType",
+                      "methodology",
+                      "purpose",
+                      "annualIncome",
+                      "annualLivingExpenses",
+                      "liabilitiesToRepay",
+                      "dependantsCount",
+                      "dependantSupportYears",
+                      "educationCosts",
+                      "existingCoverAmount",
+                      "superannuationBalance",
+                      "otherAssetsAvailable",
+                      "targetCoverAmount",
+                      "coverGapAmount",
+                      "suggestedWaitingPeriod",
+                      "suggestedBenefitPeriod",
+                      "suggestedPolicyOwnership",
+                      "requirements",
+                      "provisions",
+                      "rationale",
+                      "sourceNote",
+                    ],
+                  },
+                },
+                { type: "null" },
+              ],
+            },
+            productResearchOptions: {
+              anyOf: [
+                {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      insurerName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      productName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      ownership: {
+                        anyOf: [
+                          {
+                            type: "string",
+                            enum: ["inside-super", "outside-super", "flexi-linked", "smsf", "employer", "other", "unknown"],
+                          },
+                          { type: "null" },
+                        ],
+                      },
+                      actionConsidered: {
+                        anyOf: [
+                          {
+                            type: "string",
+                            enum: ["apply-new", "retain-existing", "replace-existing", "vary-existing", "cancel", "not-recommended"],
+                          },
+                          { type: "null" },
+                        ],
+                      },
+                      coverSummary: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      premiumAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      premiumFrequency: {
+                        anyOf: [
+                          {
+                            type: "string",
+                            enum: ["weekly", "fortnightly", "monthly", "quarterly", "half-yearly", "annually", "unknown"],
+                          },
+                          { type: "null" },
+                        ],
+                      },
+                      annualisedPremium: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      keyFeatures: { anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }] },
+                      limitations: { anyOf: [{ type: "array", items: { type: "string" } }, { type: "null" }] },
+                      underwritingAssumptions: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      status: {
+                        anyOf: [
+                          { type: "string", enum: ["recommended", "alternative", "rejected", "current", "unknown"] },
+                          { type: "null" },
+                        ],
+                      },
+                      rationale: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      sourceNote: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    },
+                    required: [
+                      "insurerName",
+                      "productName",
+                      "ownership",
+                      "actionConsidered",
+                      "coverSummary",
+                      "premiumAmount",
+                      "premiumFrequency",
+                      "annualisedPremium",
+                      "keyFeatures",
+                      "limitations",
+                      "underwritingAssumptions",
+                      "status",
+                      "rationale",
+                      "sourceNote",
+                    ],
+                  },
+                },
+                { type: "null" },
+              ],
+            },
+            recommendations: {
+              anyOf: [
+                {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      insuredName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      action: {
+                        anyOf: [
+                          {
+                            type: "string",
+                            enum: ["apply-new", "retain-existing", "replace-existing", "vary-existing", "cancel", "not-recommended"],
+                          },
+                          { type: "null" },
+                        ],
+                      },
+                      insurerName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      productName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      policyName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      recommendationText: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      ownershipGroups: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            ownership: {
+                              anyOf: [
+                                {
+                                  type: "string",
+                                  enum: ["inside-super", "outside-super", "flexi-linked", "smsf", "employer", "other", "unknown"],
+                                },
+                                { type: "null" },
+                              ],
+                            },
+                            fundingSource: { anyOf: [{ type: "string" }, { type: "null" }] },
+                            premiumFrequency: {
+                              anyOf: [
+                                {
+                                  type: "string",
+                                  enum: ["weekly", "fortnightly", "monthly", "quarterly", "half-yearly", "annually", "unknown"],
+                                },
+                                { type: "null" },
+                              ],
+                            },
+                            premiumAmount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            annualisedPremium: { anyOf: [{ type: "number" }, { type: "null" }] },
+                            covers: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                additionalProperties: false,
+                                properties: {
+                                  coverType: {
+                                    anyOf: [
+                                      { type: "string", enum: ["life", "tpd", "trauma", "income-protection", "other"] },
+                                      { type: "null" },
+                                    ],
+                                  },
+                                  details: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                  premiumType: {
+                                    anyOf: [
+                                      { type: "string", enum: ["variable-age-stepped", "stepped", "level", "hybrid", "unknown"] },
+                                      { type: "null" },
+                                    ],
+                                  },
+                                  sumInsured: { anyOf: [{ type: "number" }, { type: "null" }] },
+                                  monthlyBenefit: { anyOf: [{ type: "number" }, { type: "null" }] },
+                                  waitingPeriod: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                  benefitPeriod: { anyOf: [{ type: "string" }, { type: "null" }] },
+                                },
+                                required: [
+                                  "coverType",
+                                  "details",
+                                  "premiumType",
+                                  "sumInsured",
+                                  "monthlyBenefit",
+                                  "waitingPeriod",
+                                  "benefitPeriod",
+                                ],
+                              },
+                            },
+                          },
+                          required: ["ownership", "fundingSource", "premiumFrequency", "premiumAmount", "annualisedPremium", "covers"],
+                        },
+                      },
+                      optionalBenefits: { type: "array", items: { type: "string" } },
+                      premiumBreakdown: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          additionalProperties: false,
+                          properties: {
+                            ownership: {
+                              anyOf: [
+                                {
+                                  type: "string",
+                                  enum: ["inside-super", "outside-super", "flexi-linked", "smsf", "employer", "other", "unknown"],
+                                },
+                                { type: "null" },
+                              ],
+                            },
+                            label: { type: "string" },
+                            amount: { anyOf: [{ type: "number" }, { type: "null" }] },
+                          },
+                          required: ["ownership", "label", "amount"],
+                        },
+                      },
+                      underwritingNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      replacementNotes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      sourceNote: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    },
+                    required: [
+                      "insuredName",
+                      "action",
+                      "insurerName",
+                      "productName",
+                      "policyName",
+                      "recommendationText",
+                      "ownershipGroups",
+                      "optionalBenefits",
+                      "premiumBreakdown",
+                      "underwritingNotes",
+                      "replacementNotes",
+                      "sourceNote",
+                    ],
+                  },
+                },
+                { type: "null" },
+              ],
+            },
+            replacementAnalyses: {
+              anyOf: [
+                {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      ownerName: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      currentInsurer: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      recommendedInsurer: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      currentLifeCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      recommendedLifeCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      currentTpdCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      recommendedTpdCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      currentIncomeProtectionCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      recommendedIncomeProtectionCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      currentTraumaCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      recommendedTraumaCover: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      currentAnnualPremium: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      recommendedAnnualPremium: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      premiumDifference: { anyOf: [{ type: "number" }, { type: "null" }] },
+                      reasons: { type: "array", items: { type: "string" } },
+                      costs: { type: "array", items: { type: "string" } },
+                      benefitsGained: { type: "array", items: { type: "string" } },
+                      benefitsLost: { type: "array", items: { type: "string" } },
+                      notes: { anyOf: [{ type: "string" }, { type: "null" }] },
+                      sourceNote: { anyOf: [{ type: "string" }, { type: "null" }] },
+                    },
+                    required: [
+                      "ownerName",
+                      "currentInsurer",
+                      "recommendedInsurer",
+                      "currentLifeCover",
+                      "recommendedLifeCover",
+                      "currentTpdCover",
+                      "recommendedTpdCover",
+                      "currentIncomeProtectionCover",
+                      "recommendedIncomeProtectionCover",
+                      "currentTraumaCover",
+                      "recommendedTraumaCover",
+                      "currentAnnualPremium",
+                      "recommendedAnnualPremium",
+                      "premiumDifference",
+                      "reasons",
+                      "costs",
+                      "benefitsGained",
+                      "benefitsLost",
+                      "notes",
+                      "sourceNote",
+                    ],
+                  },
+                },
+                { type: "null" },
+              ],
+            },
+          },
+          required: [
+            "insuredName",
+            "currentCoverReview",
+            "insurabilityAssessment",
+            "needsAnalyses",
+            "productResearchOptions",
+            "recommendations",
+            "replacementAnalyses",
+          ],
+        },
       },
       candidateInsuranceNeedsAnalyses: {
         type: "array",
@@ -613,6 +1191,7 @@ const intakeAssessmentJsonSchema = {
       "candidateStrategyRecommendations",
       "candidateProductReviewNotes",
       "candidateInsuranceReviewNotes",
+      "candidateInsuranceAdvice",
       "candidateInsuranceNeedsAnalyses",
       "candidateInsurancePolicyRecommendations",
       "candidateInsurancePolicyReplacements",
@@ -772,9 +1351,11 @@ function normalizeReadinessSectionId(value: unknown): IntakeAssessmentV1["readin
     value === "strategy-recommendations" ||
     value === "product-recommendations" ||
     value === "replacement-analysis" ||
+    value === "insurance-current-cover" ||
     value === "insurance-analysis" ||
     value === "insurance-policies" ||
     value === "insurance-replacement" ||
+    value === "insurance-recommendations" ||
     value === "portfolio-allocation" ||
     value === "projections" ||
     value === "disclosure" ||
@@ -1059,6 +1640,78 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
           sourceNote: normalizeNullableString(entry.sourceNote),
         }))
     : [];
+  const normalizeInsurancePolicyCandidate = (
+    entry: Record<string, unknown>,
+  ): IntakeInsuranceAdvicePersonV1["recommendations"] extends Array<infer T> | null | undefined ? T : never => ({
+    insuredName: normalizeNullableString(entry.insuredName),
+    action: normalizeInsurancePolicyAction(entry.action),
+    insurerName: normalizeNullableString(entry.insurerName),
+    productName: normalizeNullableString(entry.productName),
+    policyName: normalizeNullableString(entry.policyName),
+    recommendationText: normalizeNullableString(entry.recommendationText),
+    ownershipGroups: Array.isArray(entry.ownershipGroups)
+      ? entry.ownershipGroups
+          .filter((group): group is Record<string, unknown> => Boolean(group) && typeof group === "object")
+          .map((group) => ({
+            ownership: normalizeInsuranceOwnership(group.ownership),
+            fundingSource: normalizeNullableString(group.fundingSource),
+            premiumFrequency: normalizeInsurancePremiumFrequency(group.premiumFrequency),
+            premiumAmount: normalizeNullableNumber(group.premiumAmount),
+            annualisedPremium: normalizeNullableNumber(group.annualisedPremium),
+            covers: Array.isArray(group.covers)
+              ? group.covers
+                  .filter((cover): cover is Record<string, unknown> => Boolean(cover) && typeof cover === "object")
+                  .map((cover) => ({
+                    coverType: normalizeInsuranceCoverType(cover.coverType),
+                    details: normalizeNullableString(cover.details),
+                    premiumType: normalizeInsurancePremiumType(cover.premiumType),
+                    sumInsured: normalizeNullableNumber(cover.sumInsured),
+                    monthlyBenefit: normalizeNullableNumber(cover.monthlyBenefit),
+                    waitingPeriod: normalizeNullableString(cover.waitingPeriod),
+                    benefitPeriod: normalizeNullableString(cover.benefitPeriod),
+                  }))
+              : [],
+          }))
+      : [],
+    optionalBenefits: normalizeStringArray(entry.optionalBenefits),
+    premiumBreakdown: Array.isArray(entry.premiumBreakdown)
+      ? entry.premiumBreakdown
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+          .map((item) => ({
+            ownership: normalizeInsuranceOwnership(item.ownership),
+            label: normalizeNullableString(item.label) ?? "",
+            amount: normalizeNullableNumber(item.amount),
+          }))
+          .filter((item) => item.label)
+      : [],
+    underwritingNotes: normalizeNullableString(entry.underwritingNotes),
+    replacementNotes: normalizeNullableString(entry.replacementNotes),
+    sourceNote: normalizeNullableString(entry.sourceNote),
+  });
+  const normalizeInsuranceReplacementCandidate = (
+    entry: Record<string, unknown>,
+  ): IntakeInsuranceAdvicePersonV1["replacementAnalyses"] extends Array<infer T> | null | undefined ? T : never => ({
+    ownerName: normalizeNullableString(entry.ownerName),
+    currentInsurer: normalizeNullableString(entry.currentInsurer),
+    recommendedInsurer: normalizeNullableString(entry.recommendedInsurer),
+    currentLifeCover: normalizeNullableNumber(entry.currentLifeCover),
+    recommendedLifeCover: normalizeNullableNumber(entry.recommendedLifeCover),
+    currentTpdCover: normalizeNullableNumber(entry.currentTpdCover),
+    recommendedTpdCover: normalizeNullableNumber(entry.recommendedTpdCover),
+    currentIncomeProtectionCover: normalizeNullableNumber(entry.currentIncomeProtectionCover),
+    recommendedIncomeProtectionCover: normalizeNullableNumber(entry.recommendedIncomeProtectionCover),
+    currentTraumaCover: normalizeNullableNumber(entry.currentTraumaCover),
+    recommendedTraumaCover: normalizeNullableNumber(entry.recommendedTraumaCover),
+    currentAnnualPremium: normalizeNullableNumber(entry.currentAnnualPremium),
+    recommendedAnnualPremium: normalizeNullableNumber(entry.recommendedAnnualPremium),
+    premiumDifference: normalizeNullableNumber(entry.premiumDifference),
+    reasons: normalizeStringArray(entry.reasons),
+    costs: normalizeStringArray(entry.costs),
+    benefitsGained: normalizeStringArray(entry.benefitsGained),
+    benefitsLost: normalizeStringArray(entry.benefitsLost),
+    notes: normalizeNullableString(entry.notes),
+    sourceNote: normalizeNullableString(entry.sourceNote),
+  });
   const candidateInsuranceNeedsAnalyses = Array.isArray(record.candidateInsuranceNeedsAnalyses)
     ? record.candidateInsuranceNeedsAnalyses
         .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
@@ -1150,29 +1803,154 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
   const candidateInsurancePolicyReplacements = Array.isArray(record.candidateInsurancePolicyReplacements)
     ? record.candidateInsurancePolicyReplacements
         .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-        .map((entry) => ({
-          ownerName: normalizeNullableString(entry.ownerName),
-          currentInsurer: normalizeNullableString(entry.currentInsurer),
-          recommendedInsurer: normalizeNullableString(entry.recommendedInsurer),
-          currentLifeCover: normalizeNullableNumber(entry.currentLifeCover),
-          recommendedLifeCover: normalizeNullableNumber(entry.recommendedLifeCover),
-          currentTpdCover: normalizeNullableNumber(entry.currentTpdCover),
-          recommendedTpdCover: normalizeNullableNumber(entry.recommendedTpdCover),
-          currentIncomeProtectionCover: normalizeNullableNumber(entry.currentIncomeProtectionCover),
-          recommendedIncomeProtectionCover: normalizeNullableNumber(entry.recommendedIncomeProtectionCover),
-          currentTraumaCover: normalizeNullableNumber(entry.currentTraumaCover),
-          recommendedTraumaCover: normalizeNullableNumber(entry.recommendedTraumaCover),
-          currentAnnualPremium: normalizeNullableNumber(entry.currentAnnualPremium),
-          recommendedAnnualPremium: normalizeNullableNumber(entry.recommendedAnnualPremium),
-          premiumDifference: normalizeNullableNumber(entry.premiumDifference),
-          reasons: normalizeStringArray(entry.reasons),
-          costs: normalizeStringArray(entry.costs),
-          benefitsGained: normalizeStringArray(entry.benefitsGained),
-          benefitsLost: normalizeStringArray(entry.benefitsLost),
-          notes: normalizeNullableString(entry.notes),
-          sourceNote: normalizeNullableString(entry.sourceNote),
-        }))
+        .map(normalizeInsuranceReplacementCandidate)
         .filter((entry) => entry.currentInsurer || entry.recommendedInsurer || entry.reasons.length || entry.benefitsGained.length)
+    : [];
+  const candidateInsuranceAdvice: IntakeInsuranceAdvicePersonV1[] = Array.isArray(record.candidateInsuranceAdvice)
+    ? record.candidateInsuranceAdvice
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+        .map((entry) => {
+          const currentCoverRecord =
+            entry.currentCoverReview && typeof entry.currentCoverReview === "object"
+              ? (entry.currentCoverReview as Record<string, unknown>)
+              : {};
+          const insurabilityRecord =
+            entry.insurabilityAssessment && typeof entry.insurabilityAssessment === "object"
+              ? (entry.insurabilityAssessment as Record<string, unknown>)
+              : {};
+
+          return {
+            insuredName: normalizeNullableString(entry.insuredName),
+            currentCoverReview: {
+              summary: normalizeNullableString(currentCoverRecord.summary),
+              reviewNotes: normalizeNullableString(currentCoverRecord.reviewNotes),
+              policies: Array.isArray(currentCoverRecord.policies)
+                ? currentCoverRecord.policies
+                    .filter((policy): policy is Record<string, unknown> => Boolean(policy) && typeof policy === "object")
+                    .map((policy) => ({
+                      ownerName: normalizeNullableString(policy.ownerName),
+                      insuredName: normalizeNullableString(policy.insuredName),
+                      insurerName: normalizeNullableString(policy.insurerName),
+                      productName: normalizeNullableString(policy.productName),
+                      policyName: normalizeNullableString(policy.policyName),
+                      policyNumber: normalizeNullableString(policy.policyNumber),
+                      ownership: normalizeInsuranceOwnership(policy.ownership),
+                      fundingSource: normalizeNullableString(policy.fundingSource),
+                      linkedSuperFund: normalizeNullableString(policy.linkedSuperFund),
+                      status: normalizeNullableString(policy.status),
+                      premiumAmount: normalizeNullableNumber(policy.premiumAmount),
+                      premiumFrequency: normalizeInsurancePremiumFrequency(policy.premiumFrequency),
+                      annualisedPremium: normalizeNullableNumber(policy.annualisedPremium),
+                      benefits: Array.isArray(policy.benefits)
+                        ? policy.benefits
+                            .filter((benefit): benefit is Record<string, unknown> => Boolean(benefit) && typeof benefit === "object")
+                            .map((benefit) => ({
+                              coverType: normalizeInsuranceCoverType(benefit.coverType),
+                              details: normalizeNullableString(benefit.details),
+                              sumInsured: normalizeNullableNumber(benefit.sumInsured),
+                              monthlyBenefit: normalizeNullableNumber(benefit.monthlyBenefit),
+                              premiumAmount: normalizeNullableNumber(benefit.premiumAmount),
+                              premiumFrequency: normalizeInsurancePremiumFrequency(benefit.premiumFrequency),
+                              waitingPeriod: normalizeNullableString(benefit.waitingPeriod),
+                              benefitPeriod: normalizeNullableString(benefit.benefitPeriod),
+                              status: normalizeNullableString(benefit.status),
+                              exclusionsOrLoadings: normalizeNullableString(benefit.exclusionsOrLoadings),
+                              notes: normalizeNullableString(benefit.notes),
+                            }))
+                        : [],
+                      exclusionsOrLoadings: normalizeNullableString(policy.exclusionsOrLoadings),
+                      retainabilityNotes: normalizeNullableString(policy.retainabilityNotes),
+                      variationOptions: normalizeNullableString(policy.variationOptions),
+                      replacementRiskNotes: normalizeNullableString(policy.replacementRiskNotes),
+                      sourceNote: normalizeNullableString(policy.sourceNote),
+                    }))
+                : [],
+            },
+            insurabilityAssessment: {
+              healthDisclosureStatus: normalizeNullableString(insurabilityRecord.healthDisclosureStatus) as NonNullable<
+                IntakeInsuranceAdvicePersonV1["insurabilityAssessment"]
+              >["healthDisclosureStatus"],
+              abilityToObtainCover: normalizeNullableString(insurabilityRecord.abilityToObtainCover) as NonNullable<
+                IntakeInsuranceAdvicePersonV1["insurabilityAssessment"]
+              >["abilityToObtainCover"],
+              healthNotes: normalizeNullableString(insurabilityRecord.healthNotes),
+              occupationNotes: normalizeNullableString(insurabilityRecord.occupationNotes),
+              hazardousPursuitsNotes: normalizeNullableString(insurabilityRecord.hazardousPursuitsNotes),
+              claimsHistoryNotes: normalizeNullableString(insurabilityRecord.claimsHistoryNotes),
+              underwritingConcerns: normalizeNullableString(insurabilityRecord.underwritingConcerns),
+              replacementRiskNotes: normalizeNullableString(insurabilityRecord.replacementRiskNotes),
+              adviserAssessment: normalizeNullableString(insurabilityRecord.adviserAssessment),
+            },
+            needsAnalyses: Array.isArray(entry.needsAnalyses)
+              ? entry.needsAnalyses
+                  .filter((analysis): analysis is Record<string, unknown> => Boolean(analysis) && typeof analysis === "object")
+                  .map((analysis) => ({
+                    ownerName: normalizeNullableString(analysis.ownerName) ?? normalizeNullableString(entry.insuredName),
+                    policyType: normalizeInsuranceCoverType(analysis.policyType),
+                    methodology: normalizeInsuranceNeedsMethodology(analysis.methodology),
+                    purpose: normalizeNullableString(analysis.purpose),
+                    annualIncome: normalizeNullableNumber(analysis.annualIncome),
+                    annualLivingExpenses: normalizeNullableNumber(analysis.annualLivingExpenses),
+                    liabilitiesToRepay: normalizeNullableNumber(analysis.liabilitiesToRepay),
+                    dependantsCount: normalizeNullableNumber(analysis.dependantsCount),
+                    dependantSupportYears: normalizeNullableNumber(analysis.dependantSupportYears),
+                    educationCosts: normalizeNullableNumber(analysis.educationCosts),
+                    existingCoverAmount: normalizeNullableNumber(analysis.existingCoverAmount),
+                    superannuationBalance: normalizeNullableNumber(analysis.superannuationBalance),
+                    otherAssetsAvailable: normalizeNullableNumber(analysis.otherAssetsAvailable),
+                    targetCoverAmount: normalizeNullableNumber(analysis.targetCoverAmount),
+                    coverGapAmount: normalizeNullableNumber(analysis.coverGapAmount),
+                    suggestedWaitingPeriod: normalizeNullableString(analysis.suggestedWaitingPeriod),
+                    suggestedBenefitPeriod: normalizeNullableString(analysis.suggestedBenefitPeriod),
+                    suggestedPolicyOwnership: normalizeInsuranceSuggestedOwnership(analysis.suggestedPolicyOwnership),
+                    requirements: normalizeInsuranceNeedsLineItems(analysis.requirements, "requirement"),
+                    provisions: normalizeInsuranceNeedsLineItems(analysis.provisions, "provision"),
+                    rationale: normalizeNullableString(analysis.rationale),
+                    sourceNote: normalizeNullableString(analysis.sourceNote),
+                  }))
+              : [],
+            productResearchOptions: Array.isArray(entry.productResearchOptions)
+              ? entry.productResearchOptions
+                  .filter((option): option is Record<string, unknown> => Boolean(option) && typeof option === "object")
+                  .map((option) => ({
+                    insurerName: normalizeNullableString(option.insurerName),
+                    productName: normalizeNullableString(option.productName),
+                    ownership: normalizeInsuranceOwnership(option.ownership),
+                    actionConsidered: normalizeInsurancePolicyAction(option.actionConsidered),
+                    coverSummary: normalizeNullableString(option.coverSummary),
+                    premiumAmount: normalizeNullableNumber(option.premiumAmount),
+                    premiumFrequency: normalizeInsurancePremiumFrequency(option.premiumFrequency),
+                    annualisedPremium: normalizeNullableNumber(option.annualisedPremium),
+                    keyFeatures: normalizeStringArray(option.keyFeatures),
+                    limitations: normalizeStringArray(option.limitations),
+                    underwritingAssumptions: normalizeNullableString(option.underwritingAssumptions),
+                    status: normalizeNullableString(option.status) as NonNullable<IntakeInsuranceAdvicePersonV1["productResearchOptions"]>[number]["status"],
+                    rationale: normalizeNullableString(option.rationale),
+                    sourceNote: normalizeNullableString(option.sourceNote),
+                  }))
+              : [],
+            recommendations: Array.isArray(entry.recommendations)
+              ? entry.recommendations
+                  .filter((policy): policy is Record<string, unknown> => Boolean(policy) && typeof policy === "object")
+                  .map(normalizeInsurancePolicyCandidate)
+              : [],
+            replacementAnalyses: Array.isArray(entry.replacementAnalyses)
+              ? entry.replacementAnalyses
+                  .filter((replacement): replacement is Record<string, unknown> => Boolean(replacement) && typeof replacement === "object")
+                  .map(normalizeInsuranceReplacementCandidate)
+              : [],
+          };
+        })
+        .filter(
+          (entry) =>
+            entry.insuredName ||
+            entry.currentCoverReview?.policies?.length ||
+            entry.insurabilityAssessment?.adviserAssessment ||
+            entry.needsAnalyses?.length ||
+            entry.productResearchOptions?.length ||
+            entry.recommendations?.length ||
+            entry.replacementAnalyses?.length,
+        )
     : [];
 
   if (!matterSummary) {
@@ -1212,6 +1990,7 @@ function normalizeAssessment(value: unknown, clientName?: string | null): Intake
       ...insuranceAdviceFromStrategyCandidates,
       ...insuranceAdviceFromProductCandidates,
     ],
+    candidateInsuranceAdvice,
     candidateInsuranceNeedsAnalyses,
     candidateInsurancePolicyRecommendations,
     candidateInsurancePolicyReplacements,
@@ -1266,12 +2045,13 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
               "For candidateStrategyRecommendations and candidateProductReviewNotes, use professional adviser recommendation language: write 'we recommend you ...' or, where natural, '<first name>, we recommend you ...'. Do not use 'you should', 'you need to', or 'you must'.",
               "Keep candidateStrategyRecommendations strictly non-product. Strategy recommendations are for strategy-level advice such as contribution strategy, retirement income strategy at a high level, Centrelink strategy, cashflow/reserve strategy, tax strategy, debt repayment strategy, estate planning referral, or projection/scenario analysis.",
               "Do not place product advice in candidateStrategyRecommendations. Product advice includes retaining, replacing, rolling over, consolidating, establishing, commencing, switching, disposing of, or altering superannuation, pension, investment, insurance, platform, wrap, managed account, portfolio, or other financial products.",
-              "Do not place insurance advice in candidateStrategyRecommendations. Insurance advice includes insurance needs analysis, cover adequacy or review, Life/TPD, Trauma, Income Protection, policy ownership or funding, premiums, underwriting, default cover, in-super cover, insurance review triggers, retention, cancellation, variation, replacement, or applications for cover. Put those items in candidateInsuranceReviewNotes, candidateInsuranceNeedsAnalyses, candidateInsurancePolicyRecommendations, or candidateInsurancePolicyReplacements.",
-              "Do not place insurance advice in candidateProductReviewNotes. Product review notes are only for investment, superannuation, pension, annuity, platform, wrap, managed account, portfolio, and related non-insurance product matters. All Life/TPD, Trauma, Income Protection, default cover, in-super cover, policy ownership, premiums, underwriting, insurance retention, insurance replacement, or applications for cover belong in the insurance-specific candidate fields.",
+              "Do not place insurance advice in candidateStrategyRecommendations. Insurance advice includes insurance needs analysis, cover adequacy or review, Life/TPD, Trauma, Income Protection, policy ownership or funding, premiums, underwriting, default cover, in-super cover, insurance review triggers, retention, cancellation, variation, replacement, or applications for cover. Put those items in candidateInsuranceAdvice first, or in the legacy insurance candidate fields if the evidence is already split that way.",
+              "Do not place insurance advice in candidateProductReviewNotes. Product review notes are only for investment, superannuation, pension, annuity, platform, wrap, managed account, portfolio, and related non-insurance product matters. All Life/TPD, Trauma, Income Protection, default cover, in-super cover, policy ownership, premiums, underwriting, insurance retention, insurance replacement, or applications for cover belong in candidateInsuranceAdvice or the insurance-specific legacy candidate fields.",
               "Any recommendation involving a named product, provider, platform, account, portfolio, rollover, retention, establishment, consolidation, replacement, product fee comparison, asset allocation implementation, model portfolio, or investment approach must go into candidateProductReviewNotes, candidateInsurancePolicyRecommendations, candidateInsurancePolicyReplacements, candidateProjectionNotes, portfolio/replacement sections, or another product-specific section instead.",
               "Do not turn product advice into a strategy recommendation by removing the product name if the substance remains product advice.",
               "Avoid third-person phrasing such as 'the client', 'Guy's', 'their objectives', 'he', 'she', or 'they' in candidate recommendation wording unless a name is strictly needed to identify account ownership or who takes a specific action.",
-              "For insurance needs analysis documents, populate candidateInsuranceNeedsAnalyses with one entry per insured person and cover type. Extract calculated and agreed sums insured, existing cover, cover gaps, policy ownership, waiting and benefit periods, annual income, liabilities, super balances, education or dependant support costs, living expenses, and the rationale for the recommended cover level. Preserve adviser overrides where the agreed cover differs from the calculated amount.",
+              "When insurance advice is in scope, populate candidateInsuranceAdvice in adviser workflow order: current cover review, insurability assessment, needs analysis, product research, final recommendation, then replacement analysis. Keep insurance recommendations out of Strategy Recommendations and Product Recommendations.",
+              "For insurance needs analysis documents, populate candidateInsuranceAdvice.needsAnalyses and candidateInsuranceNeedsAnalyses with one entry per insured person and cover type. Extract calculated and agreed sums insured, existing cover, cover gaps, policy ownership, waiting and benefit periods, annual income, liabilities, super balances, education or dependant support costs, living expenses, and the rationale for the recommended cover level. Preserve adviser overrides where the agreed cover differs from the calculated amount.",
               "For each candidateInsuranceNeedsAnalyses item, also populate requirements and provisions using the fixed line-item rows when evidence supports them. Requirements are debt-repayment, income-replacement, education-costs, funeral-final-expenses, and emergency-reserve. Provisions are existing-cover, superannuation-balance, and available-assets. Fill Life, TPD, Trauma, and Income Protection amounts separately; Income Protection amounts must be monthly benefit amounts, not annual amounts.",
               "For insurance quote documents, populate candidateInsurancePolicyRecommendations with one recommendation per insured person and insurer/product package where the evidence supports it. Extract insurer name, product or policy name, ownership/funding structure, cover types, sum insured or monthly benefit, premium type, waiting period, benefit period, premium amount and frequency, annualised premiums, optional benefits, premium breakdown, underwriting notes, and replacement or retention notes.",
               "For insurance replacement or comparison evidence, populate candidateInsurancePolicyReplacements with current versus recommended insurer, cover levels, annual premiums, premium difference, replacement reasons, costs/trade-offs, benefits gained, and benefits lost. If an existing insurer quote is provided as an alternative/current comparison, use it as the current policy evidence unless the adviser clearly says otherwise.",
@@ -1321,7 +2101,9 @@ async function requestOpenAiAssessment(request: SoaIntakeRequest): Promise<Intak
   });
 
   if (!response.ok) {
-    throw new Error(`OpenAI intake request failed with status ${response.status}.`);
+    const errorText = await response.text().catch(() => "");
+    const errorDetail = errorText ? ` ${errorText.slice(0, 1200)}` : "";
+    throw new Error(`OpenAI intake request failed with status ${response.status}.${errorDetail}`);
   }
 
   const body = (await response.json().catch(() => null)) as

@@ -17,6 +17,7 @@ type SelectOption = {
 
 type InsuranceCover = {
   id: string;
+  apiId: string | null;
   coverType: string;
   sumInsured: number | null;
   premiumAmount: number | null;
@@ -116,6 +117,11 @@ function createId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeApiId(value: string | null | undefined) {
+  const trimmedValue = value?.trim();
+  return trimmedValue || null;
+}
+
 function findMatchingOption(rawValue: string | null | undefined, options: SelectOption[]) {
   const normalized = rawValue?.trim().toLowerCase();
   if (!normalized) {
@@ -129,14 +135,30 @@ function findMatchingOption(rawValue: string | null | undefined, options: Select
   );
 }
 
-function normalizePolicyCover(cover: PolicyCoverRecord): InsuranceCover {
+function normalizePolicyCover(cover: PolicyCoverRecord, duplicateIdCounts?: Map<string, number>): InsuranceCover {
+  const rawApiId = normalizeApiId(cover.id);
+  const apiId = rawApiId && (duplicateIdCounts?.get(rawApiId) ?? 1) === 1 ? rawApiId : null;
+
   return {
-    id: cover.id ?? createId("cover"),
+    id: createId("cover"),
+    apiId,
     coverType: cover.coverType ?? "",
     sumInsured: typeof cover.sumInsured === "number" ? cover.sumInsured : null,
     premiumAmount: typeof cover.premiumAmount === "number" ? cover.premiumAmount : null,
     premiumFrequency: cover.premiumFrequency ?? "Monthly",
   };
+}
+
+function normalizePolicyCovers(covers: PolicyCoverRecord[] | null | undefined) {
+  const duplicateIdCounts = new Map<string, number>();
+  for (const cover of covers ?? []) {
+    const apiId = normalizeApiId(cover.id);
+    if (apiId) {
+      duplicateIdCounts.set(apiId, (duplicateIdCounts.get(apiId) ?? 0) + 1);
+    }
+  }
+
+  return (covers ?? []).map((cover) => normalizePolicyCover(cover, duplicateIdCounts));
 }
 
 function mapApiPolicyToViewModel(policy: ClientPolicyRecord, ownerOptions: SelectOption[], superOptions: SelectOption[]): InsurancePolicy {
@@ -152,7 +174,7 @@ function mapApiPolicyToViewModel(policy: ClientPolicyRecord, ownerOptions: Selec
     status: policy.status ?? "Active",
     superFundValue: matchedSuperFund?.value ?? "",
     superFundName: matchedSuperFund?.label ?? policy.linkedSuperFund ?? "",
-    covers: (policy.covers ?? []).map(normalizePolicyCover),
+    covers: normalizePolicyCovers(policy.covers),
   };
 }
 
@@ -189,7 +211,8 @@ function buildPoliciesFromLegacyRecords(records: ClientInsuranceRecord[] | null 
     }
 
     policy.covers.push({
-      id: record.id ?? createId("cover"),
+      id: createId("cover"),
+      apiId: normalizeApiId(record.id),
       coverType: record.coverRequired ?? "",
       sumInsured: record.sumInsured ? Number(record.sumInsured) : null,
       premiumAmount: record.premiumAmount ? Number(record.premiumAmount) : null,
@@ -210,7 +233,7 @@ function toPolicyPayload(policy: InsurancePolicy, clientId: string): ClientPolic
     status: policy.status || null,
     linkedSuperFund: policy.superFundName || null,
     covers: policy.covers.map((cover) => ({
-      id: cover.id.startsWith("cover-") ? null : cover.id,
+      id: cover.apiId,
       coverType: cover.coverType || null,
       sumInsured: cover.sumInsured,
       premiumAmount: cover.premiumAmount,
@@ -225,7 +248,7 @@ function calculatePolicyPremiumTotal(policy: InsurancePolicy) {
 
 function toCoverPayload(cover: InsuranceCover): PolicyCoverRecord {
   return {
-    id: cover.id.startsWith("cover-") ? null : cover.id,
+    id: cover.apiId,
     coverType: cover.coverType || null,
     sumInsured: cover.sumInsured,
     premiumAmount: cover.premiumAmount,
@@ -474,8 +497,11 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
       return;
     }
 
+    const activePolicy = policies.find((policy) => policy.id === activePolicyId);
+    const existingCover = activePolicy?.covers.find((cover) => cover.id === editingCoverId) ?? null;
     const nextCover: InsuranceCover = {
       id: editingCoverId ?? createId("cover"),
+      apiId: existingCover?.apiId ?? null,
       coverType,
       sumInsured: toNumberOrNull(coverSumInsured),
       premiumAmount: toNumberOrNull(coverPremiumAmount),
@@ -486,34 +512,66 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     setInsuranceError(null);
 
     try {
-      const response = await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(activePolicyId)}/covers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify([toCoverPayload(nextCover)]),
-      });
+      const response =
+        editingCoverId && activePolicy
+          ? await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(activePolicyId)}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(
+                toPolicyPayload(
+                  {
+                    ...activePolicy,
+                    covers: activePolicy.covers.map((cover) => (cover.id === editingCoverId ? nextCover : cover)),
+                  },
+                  clientId,
+                ),
+              ),
+            })
+          : await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(activePolicyId)}/covers`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify([toCoverPayload(nextCover)]),
+            });
 
-      const payload = (await response.json().catch(() => null)) as { data?: PolicyCoverRecord[] | null; message?: string | null } | null;
+      const payload = (await response.json().catch(() => null)) as {
+        data?: PolicyCoverRecord[] | ClientPolicyRecord | null;
+        message?: string | null;
+      } | null;
 
       if (!response.ok) {
         throw new Error(getApiErrorMessage(payload, `Unable to save insurance cover right now (status ${response.status}).`));
       }
 
-      const returnedCover = payload?.data?.[0] ? normalizePolicyCover(payload.data[0]) : nextCover;
+      if (editingCoverId && activePolicy) {
+        const returnedPolicy = payload?.data && !Array.isArray(payload.data) ? mapApiPolicyToViewModel(payload.data, ownerOptions, superOptions) : null;
 
-      setPolicies((current) =>
-        current.map((policy) => {
-          if (policy.id !== activePolicyId) {
-            return policy;
-          }
+        setPolicies((current) =>
+          current.map((policy) =>
+            policy.id === activePolicyId
+              ? returnedPolicy ?? {
+                  ...policy,
+                  covers: policy.covers.map((cover) => (cover.id === editingCoverId ? nextCover : cover)),
+                }
+              : policy,
+          ),
+        );
+      } else {
+        const returnedCovers = Array.isArray(payload?.data) ? normalizePolicyCovers(payload.data) : null;
+        const returnedCover = returnedCovers?.length === 1 ? returnedCovers[0] : nextCover;
 
-          return {
-            ...policy,
-            covers: editingCoverId
-              ? policy.covers.map((cover) => (cover.id === editingCoverId ? returnedCover : cover))
-              : [...policy.covers, returnedCover],
-          };
-        }),
-      );
+        setPolicies((current) =>
+          current.map((policy) => {
+            if (policy.id !== activePolicyId) {
+              return policy;
+            }
+
+            return {
+              ...policy,
+              covers: returnedCovers && returnedCovers.length > 1 ? returnedCovers : [...policy.covers, returnedCover],
+            };
+          }),
+        );
+      }
 
       setIsCoverModalOpen(false);
       resetCoverForm(null);
@@ -556,9 +614,49 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     setInsuranceError(null);
 
     try {
+      const activePolicy = policies.find((policy) => policy.id === coverDeleteState.policyId);
+      const activeCover = activePolicy?.covers.find((cover) => cover.id === coverDeleteState.coverId) ?? null;
+
+      if (!activePolicy || !activeCover) {
+        setCoverDeleteState(null);
+        return;
+      }
+
+      if (!activeCover.apiId) {
+        const response = await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(coverDeleteState.policyId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            toPolicyPayload(
+              {
+                ...activePolicy,
+                covers: activePolicy.covers.filter((cover) => cover.id !== coverDeleteState.coverId),
+              },
+              clientId,
+            ),
+          ),
+        });
+
+        const payload = (await response.json().catch(() => null)) as { data?: ClientPolicyRecord | null; message?: string | null } | null;
+        if (!response.ok) {
+          throw new Error(getApiErrorMessage(payload, `Unable to delete insurance cover right now (status ${response.status}).`));
+        }
+
+        const returnedPolicy = payload?.data ? mapApiPolicyToViewModel(payload.data, ownerOptions, superOptions) : null;
+        setPolicies((current) =>
+          current.map((policy) =>
+            policy.id === coverDeleteState.policyId
+              ? returnedPolicy ?? { ...policy, covers: policy.covers.filter((cover) => cover.id !== coverDeleteState.coverId) }
+              : policy,
+          ),
+        );
+        setCoverDeleteState(null);
+        return;
+      }
+
       const response = await fetch(
         `/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(coverDeleteState.policyId)}/covers/${encodeURIComponent(
-          coverDeleteState.coverId,
+          activeCover.apiId,
         )}`,
         { method: "DELETE" },
       );

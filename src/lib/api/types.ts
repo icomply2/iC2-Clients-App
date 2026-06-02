@@ -81,6 +81,24 @@ export type UserSummary = {
   modifiedDate?: string | null;
 };
 
+export type ApplicationPreference = {
+  landingPage?: string | null;
+  pageSize?: number | null;
+  useCompactListSpacing?: boolean | null;
+};
+
+export type DocumentStylePreference = {
+  fontFamily?: string | null;
+  bodyTextColor?: string | null;
+  headingColor?: string | null;
+  tableHeaderColor?: string | null;
+};
+
+export type UserPreferences = {
+  application?: ApplicationPreference | null;
+  documentStyle?: DocumentStylePreference | null;
+};
+
 export type ApiAddress = {
   street?: string | null;
   suburb?: string | null;

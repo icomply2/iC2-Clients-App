@@ -31,7 +31,7 @@ export function normalizeHexColor(value: string | null | undefined, fallback: st
 }
 
 export function normalizeDocumentStyleProfile(
-  value?: Partial<DocumentStyleProfile> | null,
+  value?: Partial<Record<keyof DocumentStyleProfile, string | null>> | null,
 ): DocumentStyleProfile {
   return {
     fontFamily:

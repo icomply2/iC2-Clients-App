@@ -76,6 +76,7 @@ export type IntakeInsurancePolicyRecommendationV1 = {
       premiumType?: "variable-age-stepped" | "stepped" | "level" | "hybrid" | "unknown" | null;
       sumInsured?: number | null;
       monthlyBenefit?: number | null;
+      premiumAmount?: number | null;
       waitingPeriod?: string | null;
       benefitPeriod?: string | null;
     }>;
@@ -158,6 +159,83 @@ export type IntakeInsurancePolicyReplacementV1 = {
   sourceNote?: string | null;
 };
 
+export type IntakeInsuranceAdvicePersonV1 = {
+  insuredName?: string | null;
+  currentCoverReview?: {
+    summary?: string | null;
+    reviewNotes?: string | null;
+    policies?: Array<{
+      ownerName?: string | null;
+      insuredName?: string | null;
+      insurerName?: string | null;
+      productName?: string | null;
+      policyName?: string | null;
+      policyNumber?: string | null;
+      ownership?: "inside-super" | "outside-super" | "flexi-linked" | "smsf" | "employer" | "other" | "unknown" | null;
+      fundingSource?: string | null;
+      linkedSuperFund?: string | null;
+      status?: string | null;
+      premiumAmount?: number | null;
+      premiumFrequency?: "weekly" | "fortnightly" | "monthly" | "quarterly" | "half-yearly" | "annually" | "unknown" | null;
+      annualisedPremium?: number | null;
+      benefits?: Array<{
+        coverType?: "life" | "tpd" | "trauma" | "income-protection" | "other" | null;
+        details?: string | null;
+        sumInsured?: number | null;
+        monthlyBenefit?: number | null;
+        premiumAmount?: number | null;
+        premiumFrequency?: "weekly" | "fortnightly" | "monthly" | "quarterly" | "half-yearly" | "annually" | "unknown" | null;
+        waitingPeriod?: string | null;
+        benefitPeriod?: string | null;
+        status?: string | null;
+        exclusionsOrLoadings?: string | null;
+        notes?: string | null;
+      }>;
+      exclusionsOrLoadings?: string | null;
+      retainabilityNotes?: string | null;
+      variationOptions?: string | null;
+      replacementRiskNotes?: string | null;
+      sourceNote?: string | null;
+    }>;
+  } | null;
+  insurabilityAssessment?: {
+    healthDisclosureStatus?:
+      | "not-discussed"
+      | "no-concerns-disclosed"
+      | "concerns-disclosed"
+      | "requires-underwriting"
+      | "unknown"
+      | null;
+    abilityToObtainCover?: "likely" | "needs-underwriting" | "restricted" | "unlikely" | "unknown" | null;
+    healthNotes?: string | null;
+    occupationNotes?: string | null;
+    hazardousPursuitsNotes?: string | null;
+    claimsHistoryNotes?: string | null;
+    underwritingConcerns?: string | null;
+    replacementRiskNotes?: string | null;
+    adviserAssessment?: string | null;
+  } | null;
+  needsAnalyses?: IntakeInsuranceNeedsAnalysisV1[] | null;
+  productResearchOptions?: Array<{
+    insurerName?: string | null;
+    productName?: string | null;
+    ownership?: "inside-super" | "outside-super" | "flexi-linked" | "smsf" | "employer" | "other" | "unknown" | null;
+    actionConsidered?: "apply-new" | "retain-existing" | "replace-existing" | "vary-existing" | "cancel" | "not-recommended" | null;
+    coverSummary?: string | null;
+    premiumAmount?: number | null;
+    premiumFrequency?: "weekly" | "fortnightly" | "monthly" | "quarterly" | "half-yearly" | "annually" | "unknown" | null;
+    annualisedPremium?: number | null;
+    keyFeatures?: string[] | null;
+    limitations?: string[] | null;
+    underwritingAssumptions?: string | null;
+    status?: "recommended" | "alternative" | "rejected" | "current" | "unknown" | null;
+    rationale?: string | null;
+    sourceNote?: string | null;
+  }> | null;
+  recommendations?: IntakeInsurancePolicyRecommendationV1[] | null;
+  replacementAnalyses?: IntakeInsurancePolicyReplacementV1[] | null;
+};
+
 export type IntakeSectionReadinessV1 = {
   sectionId:
     | "soa-introduction"
@@ -167,9 +245,11 @@ export type IntakeSectionReadinessV1 = {
     | "strategy-recommendations"
     | "product-recommendations"
     | "replacement-analysis"
+    | "insurance-current-cover"
     | "insurance-analysis"
     | "insurance-policies"
     | "insurance-replacement"
+    | "insurance-recommendations"
     | "portfolio-allocation"
     | "projections"
     | "disclosure"
@@ -195,6 +275,7 @@ export type IntakeAssessmentV1 = {
   candidateStrategyRecommendations: string[];
   candidateProductReviewNotes: string[];
   candidateInsuranceReviewNotes: string[];
+  candidateInsuranceAdvice: IntakeInsuranceAdvicePersonV1[];
   candidateInsuranceNeedsAnalyses: IntakeInsuranceNeedsAnalysisV1[];
   candidateInsurancePolicyRecommendations: IntakeInsurancePolicyRecommendationV1[];
   candidateInsurancePolicyReplacements: IntakeInsurancePolicyReplacementV1[];

@@ -53,16 +53,38 @@ async function fetchJson<T>(url: URL, token?: string | null) {
 }
 
 function dedupeAdvisers(advisers: AdviserSummary[]) {
-  return Array.from(
-    new Map(
-      advisers
-        .filter((adviser) => adviser.name?.trim())
-        .map((adviser) => [
-          `${normalizeText(adviser.email)}|${normalizeText(adviser.name)}|${normalizeText(adviser.practiceName)}`,
-          adviser,
-        ]),
-    ).values(),
-  ).sort((left, right) => (left.name ?? "").localeCompare(right.name ?? ""));
+  const merged: AdviserSummary[] = [];
+
+  for (const adviser of advisers.filter((item) => item.name?.trim())) {
+    const matchIndex = merged.findIndex((existing) => {
+      const sameEmail = normalizeText(existing.email) && normalizeText(existing.email) === normalizeText(adviser.email);
+      const sameName = normalizeText(existing.name) === normalizeText(adviser.name);
+      const samePractice = normalizeText(existing.practiceName) === normalizeText(adviser.practiceName);
+      const sameLicensee = normalizeText(existing.licenseeName) === normalizeText(adviser.licenseeName);
+
+      return Boolean(sameEmail) || (sameName && samePractice && sameLicensee);
+    });
+
+    if (matchIndex === -1) {
+      merged.push(adviser);
+      continue;
+    }
+
+    const existing = merged[matchIndex];
+    merged[matchIndex] = {
+      ...existing,
+      id: existing.id ?? adviser.id ?? null,
+      entityId: existing.entityId ?? adviser.entityId ?? null,
+      name: existing.name ?? adviser.name ?? null,
+      email: existing.email ?? adviser.email ?? null,
+      userRole: existing.userRole ?? adviser.userRole ?? null,
+      practiceName: existing.practiceName ?? adviser.practiceName ?? null,
+      licenseeName: existing.licenseeName ?? adviser.licenseeName ?? null,
+      licenseeId: existing.licenseeId ?? adviser.licenseeId ?? null,
+    };
+  }
+
+  return merged.sort((left, right) => (left.name ?? "").localeCompare(right.name ?? ""));
 }
 
 export async function GET(request: NextRequest) {

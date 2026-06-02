@@ -721,6 +721,23 @@
   gap: 0.6rem;
 }
 
+.insuranceWorkspaceSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+}
+
+.insuranceWorkspaceSummary span {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #cbdcf0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #314966;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
 .sectionNavigationRow {
   display: flex;
   justify-content: space-between;

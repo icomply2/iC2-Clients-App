@@ -7,15 +7,23 @@ import type {
   ClientEntityRecord,
   ClientExpenseRecord,
   ClientIncomeRecord,
-  ClientInsuranceRecord,
   ClientLiabilityRecord,
   ClientPensionRecord,
+  ClientPolicyRecord,
   ClientProfile,
   ClientSuperannuationRecord,
   PersonRecord,
+  PolicyCoverRecord,
 } from "@/lib/api/types";
 import { readAuthTokenFromCookies, readCurrentUserFromCookies, type CurrentUser } from "@/lib/auth";
-import { sanitizeFactFindImportCandidate, type FactFindImportCandidate, type FactFindOwnerRecord } from "@/lib/fact-find-import";
+import {
+  getFactFindInsurancePolicies,
+  sanitizeFactFindImportCandidate,
+  type FactFindImportCandidate,
+  type FactFindInsuranceCoverCandidate,
+  type FactFindOwnerRecord,
+} from "@/lib/fact-find-import";
+import { normalizeInsurancePolicyPayload } from "@/lib/insurance-policy-payload";
 import { updateClientDetails, updatePartnerDetails, updatePersonRiskProfile, upsertEmploymentRecords } from "@/lib/services/client-updates";
 import { saveDependantCollection, saveEntityCollection } from "@/lib/services/identity-relations";
 import { saveAssetCollection, saveFinancialCollection } from "@/lib/services/profile-collections";
@@ -64,6 +72,13 @@ function normalizeMoneyValue(value?: string | null) {
   }
 
   return `${negative ? "-" : ""}${cleaned}`;
+}
+
+function normalizeMoneyNumber(value?: string | null) {
+  const normalized = normalizeMoneyValue(value);
+  if (normalized === null) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizePercentValue(value?: string | null) {
@@ -144,6 +159,8 @@ function profileCollectionCounts(profile: ClientProfile | null) {
 }
 
 function candidateCollectionCounts(candidate: FactFindImportCandidate) {
+  const insurancePolicyCount = getFactFindInsurancePolicies(candidate).length;
+
   return {
     dependants: candidate.dependants.length,
     entities: candidate.entities.length,
@@ -153,7 +170,7 @@ function candidateCollectionCounts(candidate: FactFindImportCandidate) {
     liabilities: candidate.liabilities.length,
     superannuation: candidate.superannuation.length,
     pensions: candidate.pensions.length,
-    insurance: candidate.insurance.length,
+    insurance: insurancePolicyCount || candidate.insurance.length,
   };
 }
 
@@ -225,6 +242,79 @@ async function resolveCurrentUser(token: string) {
       : currentUser;
   } catch {
     return currentUser;
+  }
+}
+
+function getPolicyOwnerName(profile: ClientProfile, ownerName?: string | null) {
+  return resolveOwner(profile, ownerName)?.name ?? ownerName?.trim() ?? null;
+}
+
+function toPolicyCoverRecord(cover: FactFindInsuranceCoverCandidate): PolicyCoverRecord | null {
+  const coverType = cover.coverType?.trim();
+  const sumInsured = normalizeMoneyNumber(cover.sumInsured);
+  const premiumAmount = normalizeMoneyNumber(cover.premiumAmount);
+  const premiumFrequency = cover.premiumFrequency?.trim() || null;
+
+  if (!coverType && sumInsured === null && premiumAmount === null && !premiumFrequency) {
+    return null;
+  }
+
+  return {
+    id: null,
+    coverType: coverType ?? null,
+    sumInsured,
+    premiumAmount,
+    premiumFrequency,
+  };
+}
+
+async function createInsurancePolicy(profileId: string, policy: ClientPolicyRecord, token: string) {
+  if (!API_BASE_URL) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
+  }
+
+  const response = await fetch(new URL(`/api/Insurance/${encodeURIComponent(profileId)}/Policy`, API_BASE_URL), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(policy),
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as { data?: ClientPolicyRecord | null; message?: string | null } | ClientPolicyRecord | null;
+
+  if (!response.ok) {
+    throw new Error(
+      body && "message" in body && body.message
+        ? `Unable to create insurance policy (${response.status}): ${body.message}`
+        : `Unable to create insurance policy (${response.status}).`,
+    );
+  }
+
+  if (body && "data" in body) {
+    return body.data ?? null;
+  }
+
+  return body as ClientPolicyRecord | null;
+}
+
+async function createInsurancePolicyCovers(profileId: string, policyId: string, covers: PolicyCoverRecord[], token: string) {
+  if (!API_BASE_URL) {
+    throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
+  }
+
+  const response = await fetch(new URL(`/api/Insurance/${encodeURIComponent(profileId)}/Policy/${encodeURIComponent(policyId)}/Covers`, API_BASE_URL), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(covers),
+    cache: "no-store",
+  });
+  const body = (await response.json().catch(() => null)) as { message?: string | null } | null;
+
+  if (!response.ok) {
+    throw new Error(
+      body?.message
+        ? `Unable to create insurance policy covers (${response.status}): ${body.message}`
+        : `Unable to create insurance policy covers (${response.status}).`,
+    );
   }
 }
 
@@ -481,22 +571,43 @@ export async function POST(request: NextRequest) {
       audit.push({ section: "pensions", requested: pensions.length, before: beforeCounts.pensions });
     }
 
-    if (candidate.insurance.length) {
-      const insurance: ClientInsuranceRecord[] = candidate.insurance.map((item) => ({
-        id: null,
-        coverRequired: item.coverRequired ?? item.type ?? item.description ?? null,
-        sumInsured: normalizeMoneyValue(item.sumInsured ?? item.amount),
-        premiumAmount: normalizeMoneyValue(item.premiumAmount),
-        frequency: frequency(item.premiumFrequency ?? item.frequency),
-        joint: false,
-        insurer: item.insurer ?? item.provider ?? null,
-        status: item.status ?? "Active",
-        superFund: null,
-        owner: resolveOwner(profile, item.ownerName),
-      }));
-      await saveFinancialCollection("insurance", profileId, insurance, context);
-      applied.push(`${insurance.length} insurance records`);
-      audit.push({ section: "insurance", requested: insurance.length, before: beforeCounts.insurance });
+    const insurancePolicies = getFactFindInsurancePolicies(candidate);
+    let savedInsuranceViaPolicyEndpoint = false;
+    if (insurancePolicies.length) {
+      let coverCount = 0;
+      for (const item of insurancePolicies) {
+        const covers = item.covers.map(toPolicyCoverRecord).filter((cover): cover is PolicyCoverRecord => Boolean(cover));
+        const policy = await createInsurancePolicy(
+          profileId,
+          normalizeInsurancePolicyPayload({
+            id: null,
+            clientId: profileId,
+            policyOwner: getPolicyOwnerName(profile, item.ownerName),
+            insurer: item.insurer ?? item.provider ?? null,
+            policyNumber: item.policyNumber ?? item.accountNumber ?? null,
+            status: item.status ?? "Active",
+            linkedSuperFund: item.linkedSuperFund ?? null,
+            covers: [],
+          }),
+          token,
+        );
+        const policyId = policy?.id?.trim();
+        if (policyId && covers.length) {
+          await createInsurancePolicyCovers(profileId, policyId, covers, token);
+          coverCount += covers.length;
+        }
+      }
+      savedInsuranceViaPolicyEndpoint = true;
+      applied.push(`${insurancePolicies.length} insurance policies`);
+      if (coverCount) {
+        applied.push(`${coverCount} insurance covers`);
+      }
+      audit.push({
+        section: "insurance",
+        requested: insurancePolicies.length,
+        before: beforeCounts.insurance,
+        note: "Saved through the insurance policy and cover endpoints.",
+      });
     }
 
     const verifiedProfile = await loadProfileWithRetry(profileId, token);
@@ -505,12 +616,14 @@ export async function POST(request: NextRequest) {
       ...entry,
       after: afterCounts[entry.section as keyof typeof afterCounts] ?? null,
       note:
-        (afterCounts[entry.section as keyof typeof afterCounts] ?? 0) > entry.before
+        entry.note ??
+        ((afterCounts[entry.section as keyof typeof afterCounts] ?? 0) > entry.before
           ? "Persisted on reload"
-          : "Not present after reload",
+          : "Not present after reload"),
     }));
     const missingPersistedSections = Object.entries(expectedCounts)
       .filter(([, expected]) => expected > 0)
+      .filter(([key]) => !(key === "insurance" && savedInsuranceViaPolicyEndpoint))
       .filter(([key]) => afterCounts[key as keyof typeof afterCounts] <= beforeCounts[key as keyof typeof beforeCounts])
       .map(([key]) => key);
 

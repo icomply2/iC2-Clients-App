@@ -10,6 +10,7 @@ export const INSURANCE_NEEDS_REQUIREMENT_ITEMS = [
   { key: "debt-repayment", title: "Debt repayment" },
   { key: "income-replacement", title: "Income replacement" },
   { key: "education-costs", title: "Education costs" },
+  { key: "medical-expenses", title: "Medical expenses" },
   { key: "funeral-final-expenses", title: "Funeral/final expenses" },
   { key: "emergency-reserve", title: "Emergency reserve" },
 ] as const satisfies ReadonlyArray<{ key: InsuranceNeedsAnalysisLineItemKeyV1; title: string }>;
@@ -70,6 +71,7 @@ function normalizeLineItem(
     key: standard.key,
     category: standard.category,
     title: lineItem?.title?.trim() || standard.title,
+    sourceItems: lineItem?.sourceItems ?? null,
     life: normalizeAmount(lineItem?.life),
     tpd: normalizeAmount(lineItem?.tpd),
     trauma: normalizeAmount(lineItem?.trauma),
