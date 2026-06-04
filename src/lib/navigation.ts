@@ -59,6 +59,11 @@ export const adminNavItems: AppNavItem[] = [
     label: "Templates",
     description: "Manage Docmosis template assignments and document coverage.",
   },
+  {
+    href: "/admin/skills",
+    label: "Skills",
+    description: "Review draft-only Finley skill definitions.",
+  },
 ];
 
 export const dashboardMetrics: DashboardMetric[] = [
