@@ -13,6 +13,7 @@ import styles from "./page.module.css";
 type AssetsSectionProps = {
   profile: ClientProfile;
   useMockFallback?: boolean;
+  hideSectionTitle?: boolean;
 };
 
 const assetCategoryOptions = ["Cash", "Investment", "Property", "Superannuation", "Business", "Personal"];
@@ -146,7 +147,7 @@ function getFallbackMessage() {
   return "Live client data is temporarily unavailable. Editing is disabled while sample data is shown.";
 }
 
-export function AssetsSection({ profile, useMockFallback = false }: AssetsSectionProps) {
+export function AssetsSection({ profile, useMockFallback = false, hideSectionTitle = false }: AssetsSectionProps) {
   const router = useRouter();
   const hasPartner = Boolean(profile.partner?.id);
   const [isOpen, setIsOpen] = useState(false);
@@ -375,8 +376,8 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
 
   return (
     <>
-      <div className={styles.sectionHeader}>
-        <h1 className={styles.title}>Assets</h1>
+      <div className={`${styles.sectionHeader} ${hideSectionTitle ? styles.addActionBar : ""}`.trim()}>
+        {hideSectionTitle ? null : <h1 className={styles.title}>Assets</h1>}
         <button
           type="button"
           className={styles.plusButton}
@@ -445,6 +446,8 @@ export function AssetsSection({ profile, useMockFallback = false }: AssetsSectio
             </div>
           </div>
         ))}
+
+        {!displayAssets.length ? <p className={styles.emptyTableMessage}>No assets have been added yet.</p> : null}
 
         {displayAssets.length ? (
           <div className={`${styles.assetSummaryRow} ${styles.summaryRow}`.trim()}>

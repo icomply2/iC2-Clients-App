@@ -870,7 +870,8 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         annualAgreementStatus: draft.agreementType,
         agreementType: draft.agreementType,
         nextAnniversaryDate: draft.nextAnniversaryDate,
-        accountStatus: draft.status,
+        accountStatus: draft.status === "Archived" ? "Archived" : "Active",
+        clientStatus: draft.status,
         category: draft.clientCategory,
         annualAgreement: {
           ...((person as PersonRecord & Record<string, unknown>).annualAgreement as Record<string, unknown> | null),

@@ -1,0 +1,1129 @@
+.page {
+  min-height: 100vh;
+  background: #f4f6f8;
+  color: #1f2933;
+  padding: 28px clamp(18px, 3vw, 40px) 40px;
+}
+
+.header,
+.panel,
+.section {
+  width: 100%;
+  margin: 0 auto;
+}
+
+.header {
+  display: grid;
+  gap: 8px;
+  padding: 10px 4px 24px;
+}
+
+.headerContent {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header h1,
+.panel h1 {
+  margin: 0;
+  color: #111827;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 720;
+  line-height: 1.05;
+}
+
+.header p,
+.notice {
+  max-width: 1200px;
+  margin: 8px 0 0;
+  color: #52616f;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.signOutButton {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid #f2c500;
+  border-radius: 10px;
+  background: #fff7d6;
+  color: #243b53;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.signOutButton:hover {
+  border-color: #ecc92a;
+  color: #a89023;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: #0f766e;
+  font-size: 0.78rem;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.panel,
+.section {
+  background: #ffffff;
+  border: 1px solid #dfe5eb;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+}
+
+.panel {
+  padding: clamp(24px, 5vw, 48px);
+}
+
+.section {
+  padding: clamp(20px, 4vw, 32px);
+}
+
+.section + .section {
+  margin-top: 18px;
+}
+
+.section h2 {
+  margin: 0 0 18px;
+  color: #111827;
+  font-size: 1.15rem;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.detailItem {
+  min-width: 0;
+}
+
+.detailItem dt {
+  margin-bottom: 5px;
+  color: #657384;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.detailItem dd {
+  margin: 0;
+  color: #1f2933;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.summaryTile {
+  min-height: 92px;
+  padding: 16px;
+  border: 1px solid #dfe5eb;
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.summaryTile span {
+  display: block;
+  color: #657384;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.summaryTile strong {
+  display: block;
+  margin-top: 10px;
+  color: #111827;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.emptyText {
+  margin: 0;
+  color: #657384;
+}
+
+.workflowShell {
+  display: grid;
+  grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr);
+  gap: 24px;
+  width: 100%;
+  margin: 0 auto;
+  align-items: start;
+}
+
+.stepList {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid #dde5ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+
+.stepButton {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #415466;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stepButton span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: #edf2f7;
+  color: #52616f;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.stepButtonActive {
+  border-color: #f2c500;
+  background: #fff7d6;
+  color: #102a56;
+  font-weight: 800;
+  box-shadow: inset 3px 0 0 #f2c500;
+}
+
+.stepButtonActive span {
+  background: #f2c500;
+  color: #102a56;
+}
+
+.stepPanel {
+  min-width: 0;
+  padding: clamp(22px, 3vw, 34px);
+  border: 1px solid #dde5ee;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+}
+
+.stepHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.stepHeader h2 {
+  margin: 0;
+  color: #111827;
+  font-size: clamp(1.35rem, 2.3vw, 1.8rem);
+}
+
+.onboardingStack {
+  display: grid;
+  gap: 20px;
+}
+
+.onboardingCard,
+.nestedCard,
+.declarationBox {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  padding: clamp(18px, 2vw, 24px);
+  border: 1px solid #dde5ee;
+  border-radius: 12px;
+  background: #fbfcfd;
+}
+
+.nestedCard,
+.declarationBox {
+  background: #ffffff;
+}
+
+.onboardingCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.onboardingCardHeader h3,
+.onboardingCardHeader h4,
+.declarationBox h3 {
+  margin: 0;
+  color: #111827;
+  overflow-wrap: anywhere;
+}
+
+.onboardingCardHeader span {
+  color: #657384;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.personTabs {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 360px);
+  padding: 4px;
+  border: 1px solid #d7e0ea;
+  border-radius: 10px;
+  background: #eef3f7;
+}
+
+.personTab {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #415466;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.personTabActive {
+  border-color: #f2c500;
+  background: #ffffff;
+  color: #102a56;
+  box-shadow: 0 8px 16px rgba(15, 23, 42, 0.08);
+}
+
+.personTab:focus-visible {
+  outline: 3px solid rgba(242, 197, 0, 0.28);
+  outline-offset: 2px;
+}
+
+.employmentTable {
+  display: grid;
+  gap: 10px;
+}
+
+.employmentTableHeader,
+.employmentTableRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.95fr) minmax(0, 0.9fr) 150px;
+  gap: 12px;
+  align-items: center;
+}
+
+.employmentTableHeader {
+  padding: .7rem .65rem;
+  border-radius: .25rem;
+  background: #f8d64d;
+  color: #243b53;
+  font-size: .9rem;
+}
+
+.employmentTableRow {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #f1d372;
+  border-radius: 8px;
+  background: #fffbea;
+  color: #243b53;
+}
+
+.employmentTableRow > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plusButton {
+  border: 0;
+  background: transparent;
+  color: #102a56;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  margin-bottom: 1.8rem;
+}
+
+.plusButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.addActionBar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rowActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.rowActionButton {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #243b53;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.rowActionDanger {
+  border-color: #f3b3ae;
+  color: #b42318;
+}
+
+.rowActionButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.employmentModalCard {
+  display: grid;
+  width: min(100%, 34rem);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+  border-radius: 1.15rem;
+  background: #ffffff;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.35);
+}
+
+.confirmDialog {
+  display: grid;
+  gap: 14px;
+  width: min(100%, 420px);
+  padding: 22px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.35);
+}
+
+.confirmDialog h3,
+.confirmDialog p {
+  margin: 0;
+}
+
+.confirmDialog h3 {
+  color: #111827;
+}
+
+.confirmDialog p {
+  color: #52616f;
+  line-height: 1.5;
+}
+
+.confirmDanger {
+  background: #b42318;
+  color: #ffffff;
+  box-shadow: none;
+}
+
+.modalHeader {
+  padding: 1.1rem 1.15rem;
+  background: #ffd20a;
+  color: #ffffff;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.modalBody {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1.1rem 1.2rem 1rem;
+}
+
+.modalFieldRow {
+  display: grid;
+  grid-template-columns: 6.9rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.modalFieldRow span {
+  color: #334e68;
+  font-size: 0.88rem;
+}
+
+.modalFieldRow input,
+.modalFieldRow select {
+  min-height: 2.3rem;
+  width: 100%;
+  padding: 0 0.7rem;
+  border: 1px solid #c7d7eb;
+  border-radius: 0.3rem;
+  background: #ffffff;
+  color: #1f2933;
+  font: inherit;
+}
+
+.modalFieldRow input:focus,
+.modalFieldRow select:focus {
+  outline: 2px solid rgba(39, 110, 241, 0.22);
+  border-color: #276ef1;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  padding: 0 1.2rem 1.15rem;
+}
+
+.modalPrimary,
+.modalSecondary {
+  min-height: 2.4rem;
+  padding: 0 1rem;
+  border-radius: 0.35rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modalPrimary {
+  border: 0;
+  background: #6b6f75;
+  color: #fff;
+  border-radius : .25rem;
+  font-weight : 700;
+  min-height : 2.3rem;
+  min-width : 7.2rem;
+  cursor : pointer;
+  border : 0;
+}
+
+.modalSecondary {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+}
+
+.modalPrimary:disabled,
+.modalSecondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.onboardingFormGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 18px;
+}
+
+.onboardingFieldGroups {
+  display: grid;
+  gap: 24px;
+}
+
+.onboardingFieldGroup {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid #dfe5eb;
+}
+
+.onboardingFieldGroup:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.onboardingFieldGroup h4 {
+  margin: 0;
+  color: #102a56;
+  font-size: 0.95rem;
+  font-weight: 850;
+}
+
+.onboardingField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.onboardingFieldFull {
+  grid-column: 1 / -1;
+}
+
+.onboardingField span {
+  color: #415466;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.onboardingField input,
+.onboardingField select,
+.onboardingField textarea {
+  min-height: 44px;
+  width: 100%;
+  padding: 0 13px;
+  border: 1px solid #cfd8e3;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1f2933;
+  font: inherit;
+}
+
+.onboardingField input:focus,
+.onboardingField select:focus,
+.onboardingField textarea:focus {
+  outline: 2px solid rgba(39, 110, 241, 0.22);
+  border-color: #276ef1;
+}
+
+.onboardingField textarea {
+  min-height: 112px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  resize: vertical;
+}
+
+.primaryButton,
+.secondaryButton,
+.dangerButton {
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.primaryButton {
+  border: 0;
+  background: #f2c500;
+  color: #243b53;
+  box-shadow: 0 10px 20px rgba(39, 110, 241, 0.18);
+}
+
+.secondaryButton {
+  border: 1px solid #cfd8e3;
+  background: #ffffff;
+  color: #243b53;
+}
+
+.dangerButton {
+  border: 1px solid #f3b3ae;
+  background: #fff5f5;
+  color: #b42318;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.dangerButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workflowActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #edf1f5;
+}
+
+.errorText,
+.successText {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.errorText {
+  border: 1px solid #f3b3ae;
+  background: #fff5f5;
+  color: #b42318;
+}
+
+.successText {
+  border: 1px solid #b7e4c7;
+  background: #f0fff4;
+  color: #166534;
+}
+
+.reviewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px;
+}
+
+.reviewCount {
+  min-height: 92px;
+  padding: 16px;
+  border: 1px solid #dde5ee;
+  border-radius: 12px;
+  background: #fbfcfd;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.reviewCount:hover {
+  border-color: #f2c500;
+  box-shadow: 0 12px 24px rgba(242, 197, 0, 0.16);
+  transform: translateY(-1px);
+}
+
+.reviewCount:focus-visible {
+  outline: 3px solid rgba(242, 197, 0, 0.28);
+  outline-offset: 2px;
+  border-color: #f2c500;
+}
+
+.reviewCount span {
+  display: block;
+  color: #657384;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reviewCount strong {
+  display: block;
+  margin-top: 8px;
+  color: #111827;
+  font-size: 1.8rem;
+}
+
+.declarationBox ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+  color: #2c5b9b;
+  line-height: 1.5;
+}
+
+.declarationCheck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #102a56;
+  font-weight: 800;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.declarationCheck input {
+  width: 18px;
+  height: 18px;
+}
+
+.riskCanvas {
+  display: grid;
+  gap: 24px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.riskQuestionHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.riskQuestionHeader span {
+  color: #52616f;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.riskQuestionHeader h3,
+.riskQuestionHeader p {
+  margin: 0;
+}
+
+.riskQuestionHeader h3 {
+  color: #0b1730;
+  font-size: 1.05rem;
+}
+
+.riskQuestionHeader p {
+  color: #174ea6;
+  line-height: 1.5;
+}
+
+.riskTwoColumnGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.riskPersonPanel {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.riskPersonPanel h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.riskQuestion {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: clamp(18px, 5vw, 25px) clamp(16px, 4vw, 25px);
+  border: 0;
+  border-radius: 8px;
+  background: #f4f4f4;
+}
+
+.riskQuestionLegend {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 0;
+  color: #0b1730;
+  font-weight: 800;
+}
+
+.riskQuestionLegend span,
+.riskQuestionLegend small {
+  overflow-wrap: anywhere;
+}
+
+.riskQuestionLegend small {
+  color: #174ea6;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.riskChoiceList,
+.riskAgreementOptions {
+  display: grid;
+  gap: 10px;
+}
+
+.riskChoice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #174ea6;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.riskChoice:has(input:checked) {
+  color: #0b4db3;
+  font-weight: 700;
+}
+
+.riskChoice input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+
+.riskChoice span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fieldErrorText {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.riskActionRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.riskGraphFrame {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 352px;
+  padding: 38px 28px;
+  border-radius: 8px;
+  background: #f4f4f4;
+  color: #657384;
+}
+
+.riskGraphFrame img {
+  display: block;
+  width: min(100%, 420px);
+  max-height: 220px;
+  object-fit: contain;
+}
+
+.riskOutcomeContent {
+  display: grid;
+  gap: 10px;
+  padding: 8px clamp(0px, 1vw, 16px) 0;
+  color: #174ea6;
+}
+
+.riskOutcomeContent h4,
+.riskOutcomeContent p,
+.riskAgreementBox h5 {
+  margin: 0;
+}
+
+.riskOutcomeContent h4 {
+  color: #073b8e;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.riskOutcomeContent p {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.riskScoreLine {
+  font-weight: 700;
+}
+
+.riskAgreementBox {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.riskAgreementBox h5 {
+  color: #0b4db3;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+.riskAgreementOptions {
+  gap: 7px;
+}
+
+.riskCheckboxChoice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #174ea6;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.riskCheckboxChoice input {
+  width: 18px;
+  height: 18px;
+  accent-color: #f2c500;
+}
+
+.riskReasonField {
+  display: grid;
+  gap: 7px;
+  color: #174ea6;
+  font-size: 0.9rem;
+}
+
+.riskReasonField textarea {
+  min-height: 74px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #b8b8b8;
+  border-radius: 0;
+  background: #ffffff;
+  color: #1f2933;
+  font: inherit;
+  resize: vertical;
+}
+
+.riskReasonField textarea::placeholder {
+  color: #a9b0bc;
+}
+
+.riskSubmitButton {
+  justify-self: start;
+  min-height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 7px;
+  background: #202124;
+  color: #ffffff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.riskSubmitButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1180px) {
+  .workflowShell {
+    grid-template-columns: 1fr;
+  }
+
+  .stepList {
+    position: static;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .onboardingFormGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employmentTableHeader,
+  .employmentTableRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employmentTableHeader > div:last-child {
+    display: none;
+  }
+
+  .rowActions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 24px 14px;
+  }
+
+  .section + .section {
+    margin-top: 14px;
+  }
+
+  .stepList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stepButton {
+    grid-template-columns: 24px minmax(0, 1fr);
+    font-size: 0.82rem;
+  }
+
+  .stepButton span {
+    width: 24px;
+    height: 24px;
+  }
+
+  .onboardingFormGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .employmentTableHeader {
+    display: none;
+  }
+
+  .employmentTableRow,
+  .modalFieldRow {
+    grid-template-columns: 1fr;
+  }
+
+  .onboardingCardHeader,
+  .headerContent,
+  .stepHeader,
+  .workflowActions,
+  .modalActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .primaryButton,
+  .secondaryButton,
+  .dangerButton,
+  .signOutButton,
+  .personTabs,
+  .rowActionButton,
+  .plusButton,
+  .riskActionRow .primaryButton {
+    width: 100%;
+  }
+
+  .rowActions {
+    flex-direction: column;
+  }
+
+  .riskCanvas {
+    padding: 0;
+  }
+
+  .riskTwoColumnGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .riskQuestion {
+    padding:10px 10px;
+  }
+
+  .riskGraphFrame {
+    min-height: 260px;
+    padding: 24px 16px;
+  }
+
+  .riskActionRow {
+    justify-content: stretch;
+  }
+}

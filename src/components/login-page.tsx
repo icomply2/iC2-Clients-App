@@ -116,14 +116,14 @@ export function LoginPage() {
         });
 
         const body = (await response.json().catch(() => null)) as
-          | { message?: string; data?: { jwtToken?: string | null } }
+          | { message?: string; data?: { jwtToken?: string | null; redirectUrl?: string | null } }
           | null;
 
         if (!response.ok) {
           throw new Error(body?.message ?? "Two-factor verification failed.");
         }
 
-        router.push("/clients");
+        router.push(body?.data?.redirectUrl ?? "/clients");
         return;
       }
 
@@ -136,7 +136,7 @@ export function LoginPage() {
       });
 
       const body = (await response.json().catch(() => null)) as
-        | { message?: string; data?: { requiresTwoFactorAuthentication?: boolean } }
+        | { message?: string; data?: { redirectUrl?: string | null; requiresTwoFactorAuthentication?: boolean } }
         | null;
 
       if (!response.ok) {
@@ -149,7 +149,7 @@ export function LoginPage() {
         return;
       }
 
-      router.push("/clients");
+      router.push(body?.data?.redirectUrl ?? "/clients");
     } catch (submissionError) {
       const message =
         submissionError instanceof Error ? submissionError.message : "Unable to sign in right now.";

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { getClientLoginRedirectUrl } from "@/lib/auth-redirect";
 import { isArchivedUserToken } from "@/lib/auth-user-status";
 import { getApiBaseUrl, isMockAuthEnabled } from "@/lib/server-runtime";
 
@@ -38,11 +39,13 @@ export async function POST(request: NextRequest) {
   if (isMockAuthEnabled()) {
     const email = typeof payload.email === "string" && payload.email.trim() ? payload.email.trim() : "mock.user@ic2.local";
     const token = createMockToken(email);
+    const redirectUrl = getClientLoginRedirectUrl(token);
     const nextResponse = NextResponse.json(
       {
         data: {
           jwtToken: token,
           requiresTwoFactorAuthentication: false,
+          ...(redirectUrl ? { redirectUrl } : {}),
         },
         message: "Mock login successful.",
       },
@@ -99,7 +102,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const nextResponse = NextResponse.json(body, { status: response.status });
+    const redirectUrl = !requiresTwoFactor ? getClientLoginRedirectUrl(token) : null;
+    const responseBody = redirectUrl
+      ? {
+          ...body,
+          data: {
+            ...body?.data,
+            redirectUrl,
+          },
+        }
+      : body;
+    const nextResponse = NextResponse.json(responseBody, { status: response.status });
 
     if (token && !requiresTwoFactor) {
       nextResponse.cookies.set(AUTH_COOKIE_NAME, token, {

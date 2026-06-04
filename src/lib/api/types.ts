@@ -234,6 +234,7 @@ export type PersonRecord = {
     agreeOutcome?: string | null;
     score?: string | null;
     resultDisplay?: string | null;
+    notAgree?: string | null;
     resultGraph?: string | null;
     answer?: {
       index?: string | null;
