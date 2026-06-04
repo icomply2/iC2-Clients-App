@@ -3832,8 +3832,8 @@ function buildCreateFileNoteWorkflowResponse(
   const serviceDate = new Date().toISOString().slice(0, 10);
   const planId = makeId("plan");
   const stepId = makeId("step");
-  const summary = `Create a file note for ${clientName}`;
-  const description = "Create a file note on the selected client profile.";
+  const summary = `Create a file note record for ${clientName}`;
+  const description = "Create a draft file note record on the selected client profile.";
   const inputsPreview = {
     clientId,
     ownerId: defaultOwner?.value ?? "",
@@ -3886,7 +3886,7 @@ function buildCreateFileNoteWorkflowResponse(
     ...base,
     status: "awaiting_approval",
     responseMode: "plan",
-    assistantMessage: `I’ve opened the Create File Note workflow for ${clientName}. Add the subject, service date, and note body, then approve it when you’re ready to save it to the client record.`,
+    assistantMessage: `I’ve opened the Create File Note Record workflow for ${clientName}. This draft has not been saved to the client record. Add or review the subject, service date, and note body, then choose Save to client file when you’re ready.`,
     plan: {
       planId,
       summary,
@@ -3909,7 +3909,7 @@ function buildCreateFileNoteWorkflowResponse(
     displayCard: null,
     editorCard: {
       kind: "collection_form",
-      title: "New File Note",
+      title: "Create File Note Record",
       toolName: "create_file_note",
       fields: [
         {
@@ -3954,7 +3954,7 @@ function buildCreateFileNoteWorkflowResponse(
       ],
     },
     suggestedActions: [
-      { label: "Approve and run", action: "approve_plan", planId },
+      { label: "Save to client file", action: "approve_plan", planId },
       { label: "Cancel", action: "cancel_plan", planId },
     ],
   };
@@ -4836,72 +4836,6 @@ function isNoClientClientScopedRequest(message: string) {
   );
 }
 
-function getIdleWorkflowBoundary(message: string) {
-  const lower = normaliseConversationalMessage(message);
-
-  const matchers: Array<{ workflow: string; pattern: RegExp; copy?: string }> = [
-    {
-      workflow: "Update Fact Find",
-      pattern: /\b(?:update|map|apply|review|save)\b.*\bfact[-\s]?find\b|\bfact[-\s]?find\b.*\b(?:map|apply|profile)\b/,
-      copy: "Use **Update Fact Find** when you want to map or apply fact-find data to the selected client profile.",
-    },
-    {
-      workflow: "Create File Note",
-      pattern: /\b(?:save|add)\b.*\b(?:file note|client note|note)\b.*\b(?:client record|profile|file|crm|i ?c2)\b|\b(?:file note|client note|note)\b.*\b(?:save|add)\b.*\b(?:client record|profile|file|crm|i ?c2)\b/,
-      copy: "Use **Create File Note** when you want to save a note to the client record. I can still draft the wording here for you to copy.",
-    },
-    {
-      workflow: "Create Invoice",
-      pattern: /\b(?:create|prepare|generate|issue)\b.*\binvoice\b/,
-      copy: "Use **Create Invoice** when you want Finley to prepare an invoice workflow for the selected client.",
-    },
-    {
-      workflow: "Prepare Engagement Letter",
-      pattern: /\b(?:create|prepare|generate)\b.*\bengagement letter\b/,
-      copy: "Use **Prepare Engagement Letter** when you want a live engagement letter workspace and export.",
-    },
-    {
-      workflow: "Ongoing Agreement",
-      pattern: /\b(?:create|prepare|generate)\b.*\bongoing agreement\b/,
-      copy: "Use **Ongoing Agreement** when you want a live ongoing agreement workspace and export.",
-    },
-    {
-      workflow: "Annual Agreement",
-      pattern: /\b(?:create|prepare|generate)\b.*\bannual agreement\b/,
-      copy: "Use **Annual Agreement** when you want a live annual agreement workspace and export.",
-    },
-    {
-      workflow: "Record of Advice",
-      pattern: /\b(?:create|prepare|generate|start)\b.*\b(?:record of advice|roa)\b/,
-      copy: "Use **Record of Advice** when you want Finley to open the ROA drafting workspace.",
-    },
-    {
-      workflow: "Statement of Advice",
-      pattern: /\b(?:create|prepare|generate|start)\b.*\b(?:statement of advice|soa)\b/,
-      copy: "Use **Prepare Statement of Advice** when you want Finley to open the SOA workflow.",
-    },
-    {
-      workflow: "Client Profile Update",
-      pattern: /\b(?:update|change|set|apply|save|add|remove|delete)\b.*\b(?:client|profile|dob|date of birth|address|email|phone|income|asset|liability|expense|super|superannuation|pension|insurance|employment|dependant|entity|risk profile)\b/,
-      copy: "Use the relevant workflow or client profile editor when you want to change saved client data. I can answer questions and draft text here without saving anything.",
-    },
-  ];
-
-  return matchers.find((matcher) => matcher.pattern.test(lower)) ?? null;
-}
-
-function buildIdleWorkflowBoundaryAnswer(workflow: string, copy?: string) {
-  return [
-    "**Use The Workflow Button**",
-    copy ?? `Use **${workflow}** when you want Finley to create or change saved client records.`,
-    "",
-    "**What I Can Do Here**",
-    "- Draft wording, summaries, emails, file-note text, or paraplanning instructions in chat.",
-    "- Review uploaded documents and answer questions using the selected client context.",
-    "- Keep the response copyable without saving anything to the client record.",
-  ].join("\n");
-}
-
 function buildClientChatContext(context: LiveContext) {
   const profile = context.profile;
   const client = profile?.client ?? null;
@@ -5048,6 +4982,7 @@ async function buildGlobalFinleyAnswer(
               clientContext
                 ? "If the user asks to save, create, update, map, generate, or apply a client record or client document, tell them to use the relevant Finley workflow button."
                 : "If the user asks for profile reads, profile writes, fact-find mapping, file notes, invoices, agreements, or client document generation, tell them to select or create a client first.",
+              "If the user asks you to draft wording, such as a file note, email, paraplanning request, document checklist, advice scope summary, or client questions, draft the content directly in chat without saying it has been saved.",
               "Return structured Markdown. Prefer short bold section headings, bullet lists, and Markdown tables where they improve scanning.",
               "When answering from uploaded document text, group extracted facts under clear headings such as Objectives, Preferences, Constraints, Advice areas, and Next steps when relevant.",
               "For calculation questions, show the source values used, the formula or calculation steps, a Markdown table of the result, and an Assumptions section. Label model-derived calculations as estimates unless a deterministic system calculator was used.",
@@ -5137,7 +5072,7 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         ...base,
         status: "needs_clarification",
         responseMode: "clarification",
-        assistantMessage: "Select a client before starting the Create File Note workflow.",
+        assistantMessage: "Select a client before starting the Create File Note Record workflow.",
         plan: null,
         results: [],
         missingInformation: [{ field: "activeClientId", question: "Which client should this file note be saved against?" }],
@@ -5321,25 +5256,6 @@ export async function handleFinleyChat(request: FinleyChatRequest): Promise<Finl
         question: `Provide the client's ${field} so Finley can complete review preparation.`,
       })),
       warnings: liveContext.profile ? [] : ["Live client profile was not available, so this checklist may be incomplete."],
-      errors: [],
-      displayCard: null,
-      editorCard: null,
-      suggestedActions: [],
-    };
-  }
-
-  const workflowBoundary = getIdleWorkflowBoundary(message);
-
-  if (workflowBoundary) {
-    return {
-      ...base,
-      status: "completed",
-      responseMode: "inform",
-      assistantMessage: buildIdleWorkflowBoundaryAnswer(workflowBoundary.workflow, workflowBoundary.copy),
-      plan: null,
-      results: [],
-      missingInformation: [],
-      warnings: [],
       errors: [],
       displayCard: null,
       editorCard: null,
