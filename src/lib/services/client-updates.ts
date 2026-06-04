@@ -84,11 +84,12 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
   const current = ((input.person ?? {}) as MutablePersonRecord) || {};
   const { changes } = input;
 
+  const changedStatusValue = typeof changes.status === "string" && changes.status.trim() ? changes.status.trim() : "";
+  const currentClientStatusValue = getStringValue(current, ["status", "clientStatus"]);
+  const currentAccountStatusValue = getStringValue(current, ["accountStatus"]);
   const statusValue =
-    typeof changes.status === "string" && changes.status.trim()
-      ? changes.status.trim()
-      : getStringValue(current, ["accountStatus", "status", "clientStatus"]);
-  const accountStatusValue = statusValue === "Archived" ? "Archived" : "Active";
+    changedStatusValue || currentClientStatusValue || (currentAccountStatusValue === "Archived" ? currentAccountStatusValue : "");
+  const accountStatusValue = (changedStatusValue || currentAccountStatusValue || currentClientStatusValue) === "Archived" ? "Archived" : "Active";
 
   const categoryValue =
     typeof changes.clientCategory === "string" && changes.clientCategory.trim()
@@ -130,7 +131,12 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
   const payload: Record<string, unknown> = {
     id: input.personId,
     ic2AppId: current.ic2AppId ?? null,
-    declaration: typeof current.declaration === "boolean" ? current.declaration : null,
+    declaration:
+      typeof changes.declaration === "boolean"
+        ? changes.declaration
+        : typeof current.declaration === "boolean"
+          ? current.declaration
+          : null,
     picture: typeof current.picture === "string" ? current.picture : null,
     fdsAnnualAgreementRequired: adviceAgreementValue,
     annualAgreementRequired: adviceAgreementValue,
@@ -153,7 +159,10 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
     accountStatus: accountStatusValue,
     status: statusValue || null,
     clientStatus: statusValue || null,
-    onboardingStatus: current.onboardingStatus ?? null,
+    onboardingStatus:
+      typeof changes.onboardingStatus === "string" && changes.onboardingStatus.trim()
+        ? changes.onboardingStatus.trim()
+        : current.onboardingStatus ?? null,
     title:
       typeof changes.title === "string"
         ? changes.title.trim() || null
@@ -190,7 +199,12 @@ function buildClientPersonPayload(input: UpdateClientDetailsInput) {
         : getStringValue(current, ["maritalStatus"]) || null,
     nationalId: current.nationalId ?? {},
     nationalIds: current.nationalId ?? {},
-    nationality: typeof current.nationality === "string" ? current.nationality : null,
+    nationality:
+      typeof changes.nationality === "string"
+        ? changes.nationality.trim() || null
+        : typeof current.nationality === "string"
+          ? current.nationality
+          : null,
     timeZone: typeof current.timeZone === "string" ? current.timeZone : null,
     addressPostCode:
       typeof changes.postCode === "string"

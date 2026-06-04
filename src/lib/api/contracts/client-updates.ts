@@ -7,6 +7,7 @@ export type ClientDetailChanges = {
   clientCategory?: string;
   riskProfile?: string;
   gender?: string;
+  nationality?: string;
   maritalStatus?: string;
   residentStatus?: string;
   dateOfBirth?: string;
@@ -31,6 +32,8 @@ export type ClientDetailChanges = {
   adviceAgreementRequired?: string;
   agreementType?: string;
   nextAnniversaryDate?: string;
+  declaration?: boolean;
+  onboardingStatus?: string;
 };
 
 export type UpdateClientDetailsInput = {

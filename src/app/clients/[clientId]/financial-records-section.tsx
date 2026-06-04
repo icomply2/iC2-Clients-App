@@ -42,6 +42,7 @@ type Props = {
   profile: ClientProfile;
   kind: SectionKind;
   useMockFallback?: boolean;
+  hideSectionTitle?: boolean;
 };
 
 const frequencyOptions = ["Weekly", "Fortnightly", "Monthly", "Quarterly", "Annually"];
@@ -193,7 +194,7 @@ function getFallbackMessage() {
   return "Live client data is temporarily unavailable. Editing is disabled while sample data is shown.";
 }
 
-export function FinancialRecordsSection({ profile, kind, useMockFallback = false }: Props) {
+export function FinancialRecordsSection({ profile, kind, useMockFallback = false, hideSectionTitle = false }: Props) {
   const router = useRouter();
   const hasPartner = Boolean(profile.partner?.id);
   const ownerOptions = useMemo(() => ownerOptionsFromProfile(profile, hasPartner), [hasPartner, profile]);
@@ -274,17 +275,17 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
   function getSectionMeta() {
     switch (kind) {
       case "liabilities":
-        return { title: "Liabilities", deleteTitle: "Delete Liability", savePath: "liabilities", deletePath: "liabilities", emptyName: "liability" };
+        return { title: "Liabilities", deleteTitle: "Delete Liability", savePath: "liabilities", deletePath: "liabilities", emptyName: "liability", emptyMessage: "No liabilities have been added yet." };
       case "income":
-        return { title: "Income", deleteTitle: "Delete Income", savePath: "income", deletePath: "income", emptyName: "income record" };
+        return { title: "Income", deleteTitle: "Delete Income", savePath: "income", deletePath: "income", emptyName: "income record", emptyMessage: "No income records have been added yet." };
       case "expenses":
-        return { title: "Expense", deleteTitle: "Delete Expense", savePath: "expenses", deletePath: "expenses", emptyName: "expense" };
+        return { title: "Expense", deleteTitle: "Delete Expense", savePath: "expenses", deletePath: "expenses", emptyName: "expense", emptyMessage: "No expenses have been added yet." };
       case "superannuation":
-        return { title: "Superannuation", deleteTitle: "Delete Superannuation", savePath: "superannuation", deletePath: "superannuation", emptyName: "superannuation record" };
+        return { title: "Superannuation", deleteTitle: "Delete Superannuation", savePath: "superannuation", deletePath: "superannuation", emptyName: "superannuation record", emptyMessage: "No superannuation records have been added yet." };
       case "retirement-income":
-        return { title: "Pensions", deleteTitle: "Delete Pension", savePath: "retirement-income", deletePath: "retirement-income", emptyName: "pension record" };
+        return { title: "Pensions", deleteTitle: "Delete Pension", savePath: "retirement-income", deletePath: "retirement-income", emptyName: "pension record", emptyMessage: "No pension records have been added yet." };
       case "insurance":
-        return { title: "Insurance", deleteTitle: "Delete Insurance", savePath: "insurance", deletePath: "insurance", emptyName: "insurance record" };
+        return { title: "Insurance", deleteTitle: "Delete Insurance", savePath: "insurance", deletePath: "insurance", emptyName: "insurance record", emptyMessage: "No insurance records have been added yet." };
     }
   }
 
@@ -728,7 +729,8 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
   const headerColumns = columns();
   const rowData = displayRows();
   const totals = summaryCells(rowData);
-  const usesAnnualisedGrid = kind === "income" || kind === "expenses" || kind === "insurance";
+  const usesInsuranceGrid = kind === "insurance";
+  const usesAnnualisedGrid = kind === "income" || kind === "expenses";
   const usesIncomeGrid = kind === "income";
   const usesFinancialSummaryRow = kind === "liabilities" || kind === "superannuation" || kind === "retirement-income";
   const usesAnnualisedSummaryRow = kind === "income" || kind === "expenses";
@@ -744,8 +746,8 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
 
   return (
     <>
-      <div className={styles.sectionHeader}>
-        <h1 className={styles.title}>{meta.title}</h1>
+      <div className={`${styles.sectionHeader} ${hideSectionTitle ? styles.addActionBar : ""}`.trim()}>
+        {hideSectionTitle ? null : <h1 className={styles.title}>{meta.title}</h1>}
         <button
           type="button"
           className={styles.plusButton}
@@ -770,7 +772,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
       <section className={styles.financialSection}>
         <div
           className={`${styles.financialHeader} ${
-            usesIncomeGrid ? styles.financialRowIncomeAnnualised : usesAnnualisedGrid ? styles.financialRowAnnualised : ""
+            usesIncomeGrid ? styles.financialRowIncomeAnnualised : usesInsuranceGrid ? styles.financialRowInsurance : usesAnnualisedGrid ? styles.financialRowAnnualised : ""
           }`.trim()}
         >
           {headerColumns.map((column) => (
@@ -783,7 +785,7 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           <div
             key={row.id || row.label}
             className={`${styles.financialRow} ${
-              usesIncomeGrid ? styles.financialRowIncomeAnnualised : usesAnnualisedGrid ? styles.financialRowAnnualised : ""
+              usesIncomeGrid ? styles.financialRowIncomeAnnualised : usesInsuranceGrid ? styles.financialRowInsurance : usesAnnualisedGrid ? styles.financialRowAnnualised : ""
             }`.trim()}
           >
             {row.cells.map((cell, index) => (
@@ -827,7 +829,9 @@ export function FinancialRecordsSection({ profile, kind, useMockFallback = false
           </div>
         ))}
 
-        {totals ? (
+        {!rowData.length ? <p className={styles.emptyTableMessage}>{meta.emptyMessage}</p> : null}
+
+        {rowData.length && totals ? (
           <div
             className={`${
               usesFinancialSummaryRow

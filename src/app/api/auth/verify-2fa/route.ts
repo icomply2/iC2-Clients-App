@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { getClientLoginRedirectUrl } from "@/lib/auth-redirect";
 import { isArchivedUserToken } from "@/lib/auth-user-status";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -40,8 +41,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const nextResponse = NextResponse.json(body, { status: response.status });
     const token = body?.data?.jwtToken;
+    const redirectUrl = getClientLoginRedirectUrl(token);
+    const responseBody = redirectUrl
+      ? {
+          ...body,
+          data: {
+            ...body?.data,
+            redirectUrl,
+          },
+        }
+      : body;
+    const nextResponse = NextResponse.json(responseBody, { status: response.status });
 
     if (token) {
       if (await isArchivedUserToken(token)) {

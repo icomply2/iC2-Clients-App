@@ -8,13 +8,14 @@ import styles from "./page.module.css";
 type DependentSectionProps = {
   profile: ClientProfile;
   useMockFallback?: boolean;
+  hideSectionTitle?: boolean;
 };
 
 function getFallbackMessage() {
   return "Live client data is temporarily unavailable. Editing is disabled while sample data is shown.";
 }
 
-export function DependentSection({ profile, useMockFallback = false }: DependentSectionProps) {
+export function DependentSection({ profile, useMockFallback = false, hideSectionTitle = false }: DependentSectionProps) {
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -299,8 +300,8 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
 
   return (
     <>
-      <div className={styles.sectionHeader}>
-        <h1 className={styles.title}>Dependent</h1>
+      <div className={`${styles.sectionHeader} ${hideSectionTitle ? styles.addActionBar : ""}`.trim()}>
+        {hideSectionTitle ? null : <h1 className={styles.title}>Dependent</h1>}
         <button
           type="button"
           className={styles.plusButton}
@@ -365,6 +366,8 @@ export function DependentSection({ profile, useMockFallback = false }: Dependent
             </div>
           </div>
         ))}
+
+        {!displayDependants.length ? <p className={styles.emptyTableMessage}>No dependants have been added yet.</p> : null}
       </section>
 
       {isOpen ? (
