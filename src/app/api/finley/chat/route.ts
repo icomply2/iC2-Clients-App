@@ -5,6 +5,7 @@ export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as
     | {
         message?: string;
+        workflowAction?: "create_file_note" | null;
         activeClientId?: string;
         activeClientName?: string;
         threadId?: string;
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
 
   const result = await handleFinleyChat({
     message,
+    workflowAction: payload?.workflowAction ?? null,
     activeClientId: payload?.activeClientId ?? null,
     activeClientName: payload?.activeClientName ?? null,
     threadId: payload?.threadId ?? null,

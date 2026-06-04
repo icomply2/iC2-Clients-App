@@ -50,6 +50,9 @@ type AccountProfileProps = {
   practiceLogo: string;
   practiceLetterHead: string;
   documentStyleProfile: DocumentStyleProfile;
+  defaultLandingPage: string;
+  defaultPageSize: number;
+  compactLists: boolean;
   rexConnected: boolean;
   rexExpiresAt: string | null;
   desktopBrokerConfigured: boolean;
@@ -115,6 +118,9 @@ export function ProfileAccount({
   practiceLogo,
   practiceLetterHead,
   documentStyleProfile,
+  defaultLandingPage: initialDefaultLandingPage,
+  defaultPageSize: initialDefaultPageSize,
+  compactLists: initialCompactLists,
   rexConnected,
   rexExpiresAt,
   desktopBrokerConfigured,
@@ -145,9 +151,9 @@ export function ProfileAccount({
   const [stateValue, setStateValue] = useState(state);
   const [postCodeValue, setPostCodeValue] = useState(postCode);
   const [countryValue] = useState(country);
-  const [defaultLandingPage, setDefaultLandingPage] = useState("/clients");
-  const [defaultPageSize, setDefaultPageSize] = useState("10");
-  const [compactLists, setCompactLists] = useState(false);
+  const [defaultLandingPage, setDefaultLandingPage] = useState(initialDefaultLandingPage || "/clients");
+  const [defaultPageSize, setDefaultPageSize] = useState(String(initialDefaultPageSize || 10));
+  const [compactLists, setCompactLists] = useState(initialCompactLists);
   const [profilePhotoData, setProfilePhotoData] = useState(profilePhoto);
   const [practiceLogoData, setPracticeLogoData] = useState(practiceLogo);
   const [practiceLetterHeadData, setPracticeLetterHeadData] = useState(practiceLetterHead);
@@ -373,6 +379,28 @@ export function ProfileAccount({
 
       if (!response.ok) {
         throw new Error(body?.message ?? "Unable to save user changes right now.");
+      }
+
+      const preferencesResponse = await fetch(`/api/users/${encodeURIComponent(userId)}/preferences`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          application: {
+            landingPage: defaultLandingPage,
+            pageSize: Number.parseInt(defaultPageSize, 10) || 10,
+            useCompactListSpacing: compactLists,
+          },
+          documentStyle: normalizeDocumentStyleProfile(documentStyle),
+        }),
+      });
+
+      const preferencesBody = (await preferencesResponse.json().catch(() => null)) as { message?: string } | null;
+
+      if (!preferencesResponse.ok) {
+        throw new Error(preferencesBody?.message ?? "Unable to save user preferences right now.");
       }
 
       window.localStorage.setItem(

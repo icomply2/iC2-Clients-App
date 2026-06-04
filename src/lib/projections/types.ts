@@ -42,7 +42,7 @@ export type ProjectionAsset = {
   name: string;
   openingValue: number;
   annualIncome?: number;
-  growthRateKey: "none" | "cpi" | "cash" | "Defensive" | "Moderate" | "Balanced" | "Growth" | "High Growth";
+  growthRateKey: string;
   centrelink: "assessable" | "exempt" | "financial-asset";
   reserveTarget?: number | null;
   costBase?: number | null;

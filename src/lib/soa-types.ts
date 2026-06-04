@@ -328,6 +328,7 @@ export type InsuranceNeedsAnalysisLineItemKeyV1 =
   | "debt-repayment"
   | "income-replacement"
   | "education-costs"
+  | "medical-expenses"
   | "funeral-final-expenses"
   | "emergency-reserve"
   | "existing-cover"
@@ -343,11 +344,23 @@ export type InsuranceCoverAmountSetV1 = {
   incomeProtection?: number | null;
 };
 
+export type InsuranceNeedsAnalysisSourceItemV1 = {
+  sourceItemId: string;
+  label: string;
+  ownerLabel?: string | null;
+  amount?: number | null;
+  included?: boolean | null;
+  coverType?: "life" | "tpd" | "trauma" | "income-protection" | null;
+  sourceType?: "liability" | "existing-cover" | "superannuation" | "asset" | "manual" | null;
+  sourceRecordId?: string | null;
+};
+
 export type InsuranceNeedsAnalysisLineItemV1 = InsuranceCoverAmountSetV1 & {
   itemId: string;
   key?: InsuranceNeedsAnalysisLineItemKeyV1 | null;
   category?: InsuranceNeedsAnalysisLineItemCategoryV1 | null;
   title: string;
+  sourceItems?: InsuranceNeedsAnalysisSourceItemV1[] | null;
 };
 
 export type InsuranceRecommendationV1 = {
@@ -411,6 +424,8 @@ export type InsurancePolicyCoverComponentV1 = {
   premiumType?: InsurancePolicyPremiumTypeV1 | null;
   sumInsured?: number | null;
   monthlyBenefit?: number | null;
+  premiumAmount?: number | null;
+  premiumFrequency?: InsurancePolicyPremiumFrequencyV1 | null;
   waitingPeriod?: string | null;
   benefitPeriod?: string | null;
 };
@@ -439,6 +454,7 @@ export type InsurancePolicyRecommendationV1 = {
   insurerName?: string | null;
   productName?: string | null;
   policyName?: string | null;
+  policyNumber?: string | null;
   recommendationText?: string | null;
   ownershipGroups: InsurancePolicyOwnershipGroupV1[];
   optionalBenefits?: string[] | null;
@@ -451,6 +467,8 @@ export type InsurancePolicyRecommendationV1 = {
 
 export type InsurancePolicySnapshotV1 = {
   insurer?: string | null;
+  policyName?: string | null;
+  policyNumber?: string | null;
   totalLifeCover?: number | null;
   totalTpdCover?: number | null;
   totalIncomeProtectionCover?: number | null;
@@ -461,6 +479,8 @@ export type InsurancePolicySnapshotV1 = {
 export type InsurancePolicyReplacementV1 = {
   replacementId: string;
   ownerPersonId?: string | null;
+  currentPolicyId?: string | null;
+  recommendedPolicyRecommendationId?: string | null;
   currentPolicy: InsurancePolicySnapshotV1;
   recommendedPolicy: InsurancePolicySnapshotV1;
   premiumDifference?: number | null;
@@ -470,6 +490,97 @@ export type InsurancePolicyReplacementV1 = {
   benefitsLost: string[];
   notes?: string | null;
   linkedPolicyRecommendationIds?: string[] | null;
+};
+
+export type InsuranceCurrentCoverBenefitV1 = {
+  benefitId: string;
+  coverType: InsurancePolicyCoverTypeV1;
+  details?: string | null;
+  sumInsured?: number | null;
+  monthlyBenefit?: number | null;
+  premiumAmount?: number | null;
+  premiumFrequency?: InsurancePolicyPremiumFrequencyV1 | null;
+  waitingPeriod?: string | null;
+  benefitPeriod?: string | null;
+  status?: string | null;
+  exclusionsOrLoadings?: string | null;
+  notes?: string | null;
+};
+
+export type InsuranceCurrentPolicyReviewV1 = {
+  policyId: string;
+  ownerPersonIds: string[];
+  insuredPersonId?: string | null;
+  insurerName?: string | null;
+  productName?: string | null;
+  policyName?: string | null;
+  policyNumber?: string | null;
+  ownership?: InsurancePolicyOwnershipV1 | null;
+  fundingSource?: string | null;
+  linkedSuperFund?: string | null;
+  status?: string | null;
+  premiumAmount?: number | null;
+  premiumFrequency?: InsurancePolicyPremiumFrequencyV1 | null;
+  annualisedPremium?: number | null;
+  benefits: InsuranceCurrentCoverBenefitV1[];
+  exclusionsOrLoadings?: string | null;
+  retainabilityNotes?: string | null;
+  variationOptions?: string | null;
+  replacementRiskNotes?: string | null;
+  sourceEvidence?: string | null;
+};
+
+export type InsuranceCurrentCoverReviewV1 = {
+  summary?: string | null;
+  policies: InsuranceCurrentPolicyReviewV1[];
+  reviewNotes?: string | null;
+};
+
+export type InsuranceInsurabilityAssessmentV1 = {
+  healthDisclosureStatus?:
+    | "not-discussed"
+    | "no-concerns-disclosed"
+    | "concerns-disclosed"
+    | "requires-underwriting"
+    | "unknown"
+    | null;
+  abilityToObtainCover?: "likely" | "needs-underwriting" | "restricted" | "unlikely" | "unknown" | null;
+  healthNotes?: string | null;
+  occupationNotes?: string | null;
+  hazardousPursuitsNotes?: string | null;
+  claimsHistoryNotes?: string | null;
+  underwritingConcerns?: string | null;
+  replacementRiskNotes?: string | null;
+  adviserAssessment?: string | null;
+};
+
+export type InsuranceProductResearchOptionV1 = {
+  optionId: string;
+  insurerName?: string | null;
+  productName?: string | null;
+  ownership?: InsurancePolicyOwnershipV1 | null;
+  actionConsidered?: InsurancePolicyActionV1 | null;
+  coverSummary?: string | null;
+  premiumAmount?: number | null;
+  premiumFrequency?: InsurancePolicyPremiumFrequencyV1 | null;
+  annualisedPremium?: number | null;
+  keyFeatures?: string[] | null;
+  limitations?: string[] | null;
+  underwritingAssumptions?: string | null;
+  status?: "recommended" | "alternative" | "rejected" | "current" | "unknown" | null;
+  rationale?: string | null;
+  sourceEvidence?: string | null;
+};
+
+export type InsuranceAdvicePersonV1 = {
+  adviceId: string;
+  personId: string;
+  currentCoverReview: InsuranceCurrentCoverReviewV1;
+  insurabilityAssessment: InsuranceInsurabilityAssessmentV1;
+  needsAnalyses: InsuranceNeedsAnalysisV1[];
+  productResearchOptions: InsuranceProductResearchOptionV1[];
+  recommendations: InsurancePolicyRecommendationV1[];
+  replacementAnalyses: InsurancePolicyReplacementV1[];
 };
 
 export type ProjectionMetricV1 = {
@@ -570,6 +681,7 @@ export type AdviceRecommendationsV1 = {
   insurance?: InsuranceRecommendationV1[] | null;
   insurancePolicies?: InsurancePolicyRecommendationV1[] | null;
   insuranceReplacements?: InsurancePolicyReplacementV1[] | null;
+  insuranceAdvice?: InsuranceAdvicePersonV1[] | null;
 };
 
 export type AdviceFeeItemV1 = {

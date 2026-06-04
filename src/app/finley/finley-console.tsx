@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import Image from "next/image";
 import Link from "next/link";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CreateClientDialog, type CreatedClientResponse } from "@/components/create-client-dialog";
 import type { ClientProfile, ClientSummary, FileNoteRecord, PersonRecord } from "@/lib/api/types";
@@ -14,6 +15,7 @@ import {
   normalizeDocumentStyleProfile,
   type DocumentStyleProfile,
 } from "@/lib/documents/document-style-profile";
+import { buildFinleyWordDraftDocx, FINLEY_WORD_DRAFT_DOCX_MIME_TYPE } from "@/lib/finley-word-draft-docx";
 import {
   FINLEY_FILE_NOTE_SUBTYPE_OPTIONS,
   type FinleyDisplayCard,
@@ -36,7 +38,7 @@ import {
   ONGOING_SERVICE_AGREEMENT_OPENING_PARAGRAPHS,
   groupServiceAgreementServices,
 } from "@/lib/documents/document-sections";
-import { getFactFindImportCounts, type FactFindImportCandidate } from "@/lib/fact-find-import";
+import { getFactFindImportCounts, getFactFindInsurancePolicies, type FactFindImportCandidate } from "@/lib/fact-find-import";
 import { UploadedFilesModal, type UploadedFilesModalFile } from "@/app/finley/uploaded-files-modal";
 import finleyAvatar from "./finley-avatar.png";
 import styles from "./page.module.css";
@@ -73,6 +75,62 @@ type Message = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  outputState?: boolean;
+  draftSkillId?: FinleyDraftSkillMessageId | null;
+  fileNoteSeed?: FileNoteEditorSeed | null;
+};
+
+type FinleyDraftSkillMessageId = "initial_meeting_file_note" | "paraplanning_request";
+
+type FileNoteEditorSeed = {
+  subject?: string | null;
+  content?: string | null;
+  serviceDate?: string | null;
+  type?: string | null;
+  subType?: string | null;
+};
+
+const OUTPUT_STATE_MESSAGE_PREFIXES = [
+  "assistant-agreement-",
+  "assistant-invoice-placeholder-",
+  "assistant-engagement-letter-",
+  "assistant-roa-draft-",
+  "assistant-document-placeholder-",
+  "assistant-file-note-workflow-",
+  "assistant-plan-",
+  "assistant-plan-error-",
+];
+
+function isOutputStateMessage(message: Message) {
+  return (
+    message.role === "assistant"
+    && (message.outputState || OUTPUT_STATE_MESSAGE_PREFIXES.some((prefix) => message.id.startsWith(prefix)))
+  );
+}
+
+type WorkingDraftType =
+  | "file_note"
+  | "follow_up_email"
+  | "advice_scope"
+  | "document_checklist"
+  | "paraplanning_request"
+  | "client_questions"
+  | "general";
+
+type WorkingDraft = {
+  id: string;
+  title: string;
+  type: WorkingDraftType;
+  sourceLabel: string;
+  content: string;
+  createdAt: string;
+};
+
+type WordDraftCardState = {
+  title: string;
+  sourceLabel: string;
+  content: string;
+  createdAt: string;
 };
 
 type PlanStepView = {
@@ -237,25 +295,67 @@ type ConciergeUpload = {
   tags: ConciergeDocumentTag[];
 };
 
-type ConciergeSuggestedTask = {
-  id: string;
-  title: string;
-  description: string;
-  actionLabel: string;
+type StarterWorkflowAction =
+  | "fact_find"
+  | "file_note"
+  | "engagement_letter"
+  | "record_of_advice"
+  | "statement_of_advice"
+  | "create_invoice"
+  | "ongoing_agreement"
+  | "annual_agreement";
+
+const WORKFLOW_LAUNCH_ACTIONS: Array<{
+  label: string;
+  action: StarterWorkflowAction;
+}> = [
+  { label: "Update Fact Find", action: "fact_find" },
+  { label: "Engagement Letter", action: "engagement_letter" },
+  { label: "Create File Note Record", action: "file_note" },
+  { label: "Invoice", action: "create_invoice" },
+  { label: "Record of Advice", action: "record_of_advice" },
+  { label: "Statement of Advice", action: "statement_of_advice" },
+  { label: "Ongoing Agreement", action: "ongoing_agreement" },
+  { label: "Annual Agreement", action: "annual_agreement" },
+];
+
+const PROMOTE_RESPONSE_ACTIONS: Array<{
+  label: string;
   action:
-    | "fact_find"
+    | "save_draft"
+    | "word_output"
     | "file_note"
     | "engagement_letter"
+    | "statement_of_advice"
     | "record_of_advice"
-    | "create_invoice"
-    | "ongoing_agreement"
-    | "annual_agreement"
-    | "service_agreement"
-    | "summarise_documents";
+    | "follow_up_email"
+    | "fact_find";
+}> = [
+  { label: "Save Draft", action: "save_draft" },
+  { label: "Output to Word", action: "word_output" },
+  { label: "Use draft in File Note", action: "file_note" },
+  { label: "Use in Engagement Letter", action: "engagement_letter" },
+  { label: "Start SOA", action: "statement_of_advice" },
+  { label: "Start ROA", action: "record_of_advice" },
+  { label: "Create Follow-up Email", action: "follow_up_email" },
+  { label: "Update Fact Find", action: "fact_find" },
+];
+
+const DRAFT_SKILL_LABELS: Record<FinleyDraftSkillMessageId, string> = {
+  initial_meeting_file_note: "Initial Meeting File Note",
+  paraplanning_request: "Paraplanning Request",
 };
 
 type FactFindImportResponse = {
   candidate?: FactFindImportCandidate | null;
+  warning?: string | null;
+  error?: string | null;
+};
+
+type DraftSkillApiResponse = {
+  skillId?: FinleyDraftSkillMessageId | string;
+  assistantMessage?: string | null;
+  fileNoteSeed?: FileNoteEditorSeed | null;
   warning?: string | null;
   error?: string | null;
 };
@@ -1326,23 +1426,17 @@ function totalAgreementAnnualFee(fees: AgreementFeeRow[]) {
 
 function InvoiceWorkflowCard({
   invoice,
-  practiceName,
-  licenseeName,
   onChange,
   onExport,
   isExporting,
   exportError,
 }: {
   invoice: InvoicePlaceholderCard;
-  practiceName?: string | null;
-  licenseeName?: string | null;
   onChange: (invoice: InvoicePlaceholderCard) => void;
   onExport: () => void | Promise<void>;
   isExporting: boolean;
   exportError?: string | null;
 }) {
-  const lineItems = invoice.items.filter((item) => item.description.trim() || item.quantity.trim() || item.priceExGst.trim());
-  const total = lineItems.reduce((sum, item) => sum + invoiceItemAmounts(item).total, 0);
   const visibleExportError = exportError && !/docmosis/i.test(exportError) ? exportError : null;
 
   function updateInvoice(patch: Partial<InvoicePlaceholderCard>) {
@@ -1391,9 +1485,6 @@ function InvoiceWorkflowCard({
         <div>
           <div className={styles.planLabel}>Invoice workflow</div>
           <div className={styles.planSummary}>{invoice.title}</div>
-          <div className={styles.workflowDescription}>
-            Review the invoice details, keep the structured data ready for Xero, and export the invoice document when it is ready.
-          </div>
         </div>
         <div className={styles.workflowStepBadge}>Structured invoice</div>
       </div>
@@ -1531,29 +1622,6 @@ function InvoiceWorkflowCard({
         </div>
       </div>
 
-      <div className={styles.planPreviewGrid}>
-        <div className={styles.planPreviewItem}>
-          <span className={styles.planPreviewLabel}>Xero contact</span>
-          <span className={styles.planPreviewValue}>{invoice.clientName || "-"}</span>
-        </div>
-        <div className={styles.planPreviewItem}>
-          <span className={styles.planPreviewLabel}>Invoice reference</span>
-          <span className={styles.planPreviewValue}>{invoice.referenceNumber || "-"}</span>
-        </div>
-        <div className={styles.planPreviewItem}>
-          <span className={styles.planPreviewLabel}>Practice</span>
-          <span className={styles.planPreviewValue}>{practiceName || licenseeName || "-"}</span>
-        </div>
-        <div className={styles.planPreviewItem}>
-          <span className={styles.planPreviewLabel}>Total incl. GST</span>
-          <span className={styles.planPreviewValue}>{formatCurrencyAmount(total)}</span>
-        </div>
-      </div>
-
-      <div className={styles.workflowGuidance}>
-        Next build: this same structured card can be posted to Xero using the contact, invoice reference, due date, and revenue item rows above.
-      </div>
-
       <div className={styles.workflowActions}>
         <div />
         <div className={styles.workflowActionsRight}>
@@ -1570,7 +1638,7 @@ function InvoiceWorkflowCard({
             onClick={() => void onExport()}
             disabled={isExporting}
           >
-            {isExporting ? "Generating..." : "Export Word"}
+            {isExporting ? "Saving..." : "Save + Export Word"}
           </button>
         </div>
       </div>
@@ -1943,24 +2011,6 @@ function escapeHtml(value: string) {
 
 function getUploadsWithTag(uploads: ConciergeUpload[], tag: ConciergeDocumentTag) {
   return uploads.filter((upload) => upload.tags.includes(tag) && upload.extractedText?.trim());
-}
-
-function buildUploadedDocumentContext(uploads: ConciergeUpload[], tags?: ConciergeDocumentTag[]) {
-  const tagSet = tags?.length ? new Set(tags) : null;
-  return uploads
-    .filter((upload) => upload.extractedText?.trim())
-    .filter((upload) => !tagSet || upload.tags.some((tag) => tagSet.has(tag)))
-    .map((upload) => {
-      const tagLabels = upload.tags.filter((tag) => tag !== "unknown").map(getConciergeTagLabel).join(", ");
-      return [
-        `File: ${upload.name}`,
-        tagLabels ? `Detected: ${tagLabels}` : null,
-        upload.extractedText?.trim().slice(0, 6000),
-      ]
-        .filter(Boolean)
-        .join("\n");
-    })
-    .join("\n\n---\n\n");
 }
 
 function findFirstMoneyNear(text: string, patterns: RegExp[]) {
@@ -2508,6 +2558,181 @@ function personAddressLines(person?: PersonRecord | null) {
   return [street, locality].filter(Boolean) as string[];
 }
 
+function readPersonDob(person?: PersonRecord | null) {
+  const record = person as Record<string, unknown> | null | undefined;
+
+  return formatPreviewValue(record?.dateOfBirth)
+    || formatPreviewValue(record?.dob)
+    || formatPreviewValue(record?.birthday)
+    || null;
+}
+
+function readPersonEmail(person?: PersonRecord | null) {
+  const record = person as Record<string, unknown> | null | undefined;
+
+  return formatPreviewValue(record?.email)
+    || formatPreviewValue(record?.emailAddress)
+    || formatPreviewValue(record?.contactEmail)
+    || null;
+}
+
+function readPersonPhone(person?: PersonRecord | null) {
+  const record = person as Record<string, unknown> | null | undefined;
+
+  return formatPreviewValue(record?.mobile)
+    || formatPreviewValue(record?.mobilePhone)
+    || formatPreviewValue(record?.phone)
+    || formatPreviewValue(record?.phoneNumber)
+    || null;
+}
+
+function readRiskProfile(profile?: ClientProfile | null) {
+  const client = profile?.client as Record<string, unknown> | null | undefined;
+  const profileRecord = profile as Record<string, unknown> | null | undefined;
+
+  return formatPreviewValue(client?.riskProfile)
+    || formatPreviewValue(client?.riskProfileName)
+    || formatPreviewValue(profileRecord?.riskProfile)
+    || formatPreviewValue(profileRecord?.riskProfileName)
+    || null;
+}
+
+function classifyWorkingDraft(content: string): WorkingDraftType {
+  const lower = content.toLowerCase();
+
+  if (/\b(file note|meeting record|client note)\b/.test(lower)) return "file_note";
+  if (/\b(email|follow[- ]?up|subject:)\b/.test(lower)) return "follow_up_email";
+  if (/\b(scope|statement of advice|soa|record of advice|roa)\b/.test(lower)) return "advice_scope";
+  if (/\b(checklist|documents required|missing information|next steps)\b/.test(lower)) return "document_checklist";
+  if (/\b(paraplanning|paraplanner|advice request)\b/.test(lower)) return "paraplanning_request";
+  if (/\b(questions for|client questions|clarify)\b/.test(lower)) return "client_questions";
+
+  return "general";
+}
+
+function workingDraftTypeLabel(type: WorkingDraftType) {
+  switch (type) {
+    case "file_note":
+      return "File note";
+    case "follow_up_email":
+      return "Follow-up email";
+    case "advice_scope":
+      return "Advice scope";
+    case "document_checklist":
+      return "Document checklist";
+    case "paraplanning_request":
+      return "Paraplanning request";
+    case "client_questions":
+      return "Client questions";
+    default:
+      return "Draft";
+  }
+}
+
+function buildWorkingDraftTitle(content: string, type: WorkingDraftType) {
+  const heading = content.match(/^\s{0,3}#{1,3}\s+(.+)$/m)?.[1]?.trim()
+    || content.match(/^\s{0,3}\*\*(.+?)\*\*/m)?.[1]?.trim();
+
+  if (heading) {
+    return heading.slice(0, 72);
+  }
+
+  const firstLine = content
+    .replace(/[#*_`]/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+
+  return (firstLine || workingDraftTypeLabel(type)).slice(0, 72);
+}
+
+function inferFileNoteSubject(content: string) {
+  const heading = content.match(/^\s{0,3}#{1,3}\s+(.+)$/m)?.[1]?.trim()
+    || content.match(/^\s{0,3}\*\*(.+?)\*\*/m)?.[1]?.trim()
+    || content.match(/(?:^|\n)\s*Subject:\s*(.+)/i)?.[1]?.trim();
+
+  return (heading || "Meeting file note").replace(/\s+/g, " ").slice(0, 90);
+}
+
+function isSubstantiveAssistantMessage(content: string) {
+  const trimmed = content.trim();
+
+  if (trimmed.length < 120) return false;
+  if (/^i(?:'|’)ve opened\b/i.test(trimmed)) return false;
+  if (/^select a client\b/i.test(trimmed)) return false;
+  if (/^use the workflow button\b/i.test(trimmed)) return false;
+
+  return true;
+}
+
+function seedFileNoteEditorCard(
+  editorCard: FinleyEditorCard | FinleyTableEditorCard | null,
+  seed?: string | FileNoteEditorSeed | null,
+) {
+  const normalizedSeed = normalizeFileNoteEditorSeed(seed);
+
+  if (!editorCard || editorCard.kind !== "collection_form" || editorCard.toolName !== "create_file_note" || !normalizedSeed) {
+    return editorCard;
+  }
+
+  return {
+    ...editorCard,
+    fields: editorCard.fields.map((field) => {
+      const currentValue = field.value?.trim() ?? "";
+
+      if (field.key === "subject" && normalizedSeed.subject && !currentValue) {
+        return { ...field, value: normalizedSeed.subject };
+      }
+
+      if (field.key === "content" && normalizedSeed.content && !currentValue) {
+        return { ...field, value: normalizedSeed.content };
+      }
+
+      if (field.key === "serviceDate" && normalizedSeed.serviceDate) {
+        return { ...field, value: normalizedSeed.serviceDate };
+      }
+
+      if (field.key === "type" && normalizedSeed.type) {
+        return { ...field, value: normalizedSeed.type };
+      }
+
+      if (field.key === "subType" && normalizedSeed.subType) {
+        return { ...field, value: normalizedSeed.subType };
+      }
+
+      return field;
+    }),
+  };
+}
+
+function normalizeFileNoteEditorSeed(seed?: string | FileNoteEditorSeed | null): FileNoteEditorSeed | null {
+  if (!seed) return null;
+
+  if (typeof seed === "string") {
+    const content = seed.trim();
+    return content
+      ? {
+          subject: inferFileNoteSubject(content),
+          content,
+        }
+      : null;
+  }
+
+  const normalized: FileNoteEditorSeed = {
+    subject: seed.subject?.trim() || undefined,
+    content: seed.content?.trim() || undefined,
+    serviceDate: seed.serviceDate?.trim() || undefined,
+    type: seed.type?.trim() || undefined,
+    subType: seed.subType?.trim() || undefined,
+  };
+
+  if (!normalized.subject && normalized.content) {
+    normalized.subject = inferFileNoteSubject(normalized.content);
+  }
+
+  return Object.values(normalized).some(Boolean) ? normalized : null;
+}
+
 function previewRows(inputsPreview?: Record<string, unknown>) {
   if (!inputsPreview) return [] as Array<{ label: string; value: string }>;
 
@@ -2618,8 +2843,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [threadId] = useState(() => `thr_${crypto.randomUUID()}`);
   const [messages, setMessages] = useState<Message[]>([]);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [workingDrafts, setWorkingDrafts] = useState<WorkingDraft[]>([]);
+  const [matterCockpitPortalTarget, setMatterCockpitPortalTarget] = useState<HTMLDivElement | null>(null);
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [currentUserScope, setCurrentUserScope] = useState<CurrentUserScope | null>(null);
+  const [matterProfile, setMatterProfile] = useState<ClientProfile | null>(null);
+  const [isMatterProfileLoading, setIsMatterProfileLoading] = useState(false);
   const [documentStyleProfile, setDocumentStyleProfile] = useState<DocumentStyleProfile>(
     DEFAULT_DOCUMENT_STYLE_PROFILE,
   );
@@ -2633,6 +2862,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [agreementDraftCard, setAgreementDraftCard] = useState<AgreementDraftCardState | null>(null);
   const [documentPlaceholderCard, setDocumentPlaceholderCard] = useState<EngagementLetterPlaceholderCard | null>(null);
   const [invoicePlaceholderCard, setInvoicePlaceholderCard] = useState<InvoicePlaceholderCard | null>(null);
+  const [wordDraftCard, setWordDraftCard] = useState<WordDraftCardState | null>(null);
   const [isSavingFactFindStep, setIsSavingFactFindStep] = useState(false);
   const [isGeneratingFactFindDocx, setIsGeneratingFactFindDocx] = useState(false);
   const [factFindWorkflowError, setFactFindWorkflowError] = useState<string | null>(null);
@@ -2642,6 +2872,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [agreementWorkflowError, setAgreementWorkflowError] = useState<string | null>(null);
   const [isGeneratingInvoiceDocx, setIsGeneratingInvoiceDocx] = useState(false);
   const [invoiceWorkflowError, setInvoiceWorkflowError] = useState<string | null>(null);
+  const [isGeneratingWordDraftDocx, setIsGeneratingWordDraftDocx] = useState(false);
+  const [wordDraftExportError, setWordDraftExportError] = useState<string | null>(null);
   const [activeAssistField, setActiveAssistField] = useState<"subject" | "content" | null>(null);
   const [fileNoteSubjectManuallyEdited, setFileNoteSubjectManuallyEdited] = useState(false);
   const [fileNoteAttachments, setFileNoteAttachments] = useState<NonNullable<FileNoteRecord["attachment"]>>([]);
@@ -2649,7 +2881,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   const [conciergeUploads, setConciergeUploads] = useState<ConciergeUpload[]>([]);
   const [isUploadingConciergeFiles, setIsUploadingConciergeFiles] = useState(false);
   const [isUploadsModalOpen, setIsUploadsModalOpen] = useState(false);
-  const [isConciergeSuggestionDismissed, setIsConciergeSuggestionDismissed] = useState(false);
   const [isExtractingFactFindImport, setIsExtractingFactFindImport] = useState(false);
   const [isApplyingFactFindImport, setIsApplyingFactFindImport] = useState(false);
   const [factFindImportCandidate, setFactFindImportCandidate] = useState<FactFindImportCandidate | null>(null);
@@ -2673,10 +2904,24 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     () => [...messages].reverse().find((message) => message.role === "assistant")?.id ?? null,
     [messages],
   );
+  const hasActiveWorkspace = Boolean(
+    planSummary ||
+    planSteps.length ||
+    displayCard ||
+    editorCard ||
+    factFindWorkflow ||
+    engagementLetterDraftCard ||
+    roaDraftCard ||
+    agreementDraftCard ||
+    documentPlaceholderCard ||
+    invoicePlaceholderCard ||
+    wordDraftCard,
+  );
   const conciergeUploadTags = useMemo(
     () => new Set(conciergeUploads.flatMap((upload) => upload.tags)),
     [conciergeUploads],
   );
+  const hasMeetingTranscriptEvidence = conciergeUploadTags.has("meeting-transcript");
   const primaryFactFindUpload = useMemo(
     () => getUploadsWithTag(conciergeUploads, "fact-find")[0] ?? null,
     [conciergeUploads],
@@ -2688,160 +2933,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       null,
     [conciergeUploads, primaryFactFindUpload],
   );
-  const conciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
-    const tasks: ConciergeSuggestedTask[] = [];
-
-    if (conciergeUploadTags.has("fact-find")) {
-      tasks.push({
-        id: "update-fact-find-from-upload",
-        title: "Update the fact find",
-        description: "Finley found fact find data that can be reviewed and used to update this client profile.",
-        actionLabel: "Review fact find",
-        action: "fact_find",
-      });
-    }
-
-    if (conciergeUploadTags.has("meeting-transcript")) {
-      tasks.push({
-        id: "create-file-note-from-transcript",
-        title: "Create a meeting file note",
-        description: "Finley can summarise the transcript into a compliant file note for the client record.",
-        actionLabel: "Create file note",
-        action: "file_note",
-      });
-    }
-
-    if (conciergeUploadTags.has("fact-find") || conciergeUploadTags.has("strategy-paper")) {
-      tasks.push({
-        id: "prepare-engagement-letter-from-context",
-        title: "Prepare an engagement letter",
-        description: "Use the uploaded client context to start the engagement letter scope and fee discussion.",
-        actionLabel: "Prepare letter",
-        action: "engagement_letter",
-      });
-    }
-
-    if (conciergeUploadTags.has("insurance-quote") || conciergeUploadTags.has("insurance-needs-analysis")) {
-      tasks.push({
-        id: "summarise-insurance-documents",
-        title: "Review insurance documents",
-        description: "Finley found insurance material and can summarise quotes, needs analysis, and missing confirmations.",
-        actionLabel: "Summarise insurance",
-        action: "summarise_documents",
-      });
-    }
-
-    if (
-      activeClient &&
-      (
-        conciergeUploadTags.has("fact-find") ||
-        conciergeUploadTags.has("meeting-transcript") ||
-        conciergeUploadTags.has("productrex") ||
-        conciergeUploadTags.has("strategy-paper") ||
-        conciergeUploadTags.has("record-of-advice")
-      )
-    ) {
-      tasks.push({
-        id: "prepare-record-of-advice-from-upload",
-        title: "Prepare a Record of Advice",
-        description: "Use the uploaded evidence and active client profile to start the live ROA draft.",
-        actionLabel: "Record of Advice",
-        action: "record_of_advice",
-      });
-    }
-
-    if (conciergeUploadTags.has("service-agreement")) {
-      tasks.push({
-        id: "prepare-service-agreement",
-        title: "Prepare a service agreement",
-        description: "Finley can use the uploaded agreement context to help prepare or review the service agreement.",
-        actionLabel: "Ongoing agreement",
-        action: "ongoing_agreement",
-      });
-    }
-
-    if (conciergeUploadTags.has("invoice")) {
-      tasks.push({
-        id: "create-invoice-from-upload",
-        title: "Create an invoice",
-        description: "Finley found invoice context and can help prepare the invoice workflow.",
-        actionLabel: "Create invoice",
-        action: "create_invoice",
-      });
-    }
-
-    if (conciergeUploads.length && !tasks.some((task) => task.action === "summarise_documents")) {
-      tasks.push({
-        id: "summarise-uploaded-documents",
-        title: "Review uploaded documents",
-        description: "Finley can summarise what was uploaded and suggest the next action for this client.",
-        actionLabel: "Review documents",
-        action: "summarise_documents",
-      });
-    }
-
-    return tasks.slice(0, 6);
-  }, [activeClient, conciergeUploadTags, conciergeUploads.length]);
-  const conciergeInsightText = useMemo(() => {
-    if (!conciergeUploads.length) {
-      return "";
-    }
-
-    if (conciergeUploadTags.has("fact-find")) {
-      if (!activeClient) {
-        return "I found a fact find in the uploaded files. I can summarise it now; select a client before mapping profile data or creating client records.";
-      }
-
-      return `I found a fact find for ${activeClient?.name ?? "this client"}. The most useful next step is to review the client profile updates before preparing client-facing documents. After that, I can create a file note or prepare the engagement letter.`;
-    }
-
-    if (conciergeUploadTags.has("meeting-transcript")) {
-      return `I found meeting notes or a transcript. I can turn this into a file note first, then help identify missing information or prepare the next client document.`;
-    }
-
-    if (conciergeUploadTags.has("insurance-quote") || conciergeUploadTags.has("insurance-needs-analysis")) {
-      return `I found insurance material. I can summarise the needs analysis and quotes, then help confirm what still needs adviser review.`;
-    }
-
-    if (conciergeUploadTags.has("productrex")) {
-      return `I found ProductRex material. This is more likely to support advice preparation, but I can still summarise the product and replacement context here.`;
-    }
-
-    return `I’ve loaded the uploaded document${conciergeUploads.length > 1 ? "s" : ""} into Finley. I can review the content and suggest what to do next.`;
-  }, [activeClient?.name, conciergeUploadTags, conciergeUploads.length]);
-  const visibleConciergeSuggestedTasks = useMemo<ConciergeSuggestedTask[]>(() => {
-    if (activeClient) {
-      return conciergeSuggestedTasks;
-    }
-
-    const summariseTask = conciergeSuggestedTasks.find((task) => task.action === "summarise_documents");
-    if (summariseTask) {
-      return [
-        {
-          ...summariseTask,
-          title: "Review uploaded documents",
-          description: "Finley can summarise the uploaded files before you select a client.",
-          actionLabel: "Summarise documents",
-        },
-      ];
-    }
-
-    if (!conciergeUploads.length) {
-      return [];
-    }
-
-    return [
-      {
-        id: "summarise-uploaded-documents",
-        title: "Review uploaded documents",
-        description: "Finley can summarise the uploaded files before you select a client.",
-        actionLabel: "Summarise documents",
-        action: "summarise_documents",
-      },
-    ];
-  }, [activeClient, conciergeSuggestedTasks, conciergeUploads.length]);
-  const primaryConciergeTask = visibleConciergeSuggestedTasks[0] ?? null;
-  const secondaryConciergeTasks = visibleConciergeSuggestedTasks.slice(1, 4);
   const uploadedFilesModalFiles = useMemo<UploadedFilesModalFile[]>(
     () =>
       conciergeUploads.map((upload) => ({
@@ -2890,6 +2981,139 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         : null,
     [factFindStepIndex, factFindWorkflow],
   );
+  const activeWorkflowLabel = useMemo(() => {
+    if (currentFactFindStep) return `Update Fact Find: ${currentFactFindStep.title}`;
+    if (editorCard?.kind === "collection_form" && editorCard.toolName === "create_file_note") return "Create File Note Record";
+    if (engagementLetterDraftCard) return "Engagement Letter";
+    if (roaDraftCard) return "Record of Advice";
+    if (agreementDraftCard) return agreementDraftCard.agreementType === "annual" ? "Annual Agreement" : "Ongoing Agreement";
+    if (invoicePlaceholderCard) return "Invoice";
+    if (wordDraftCard) return "Word Output";
+    if (documentPlaceholderCard) return documentPlaceholderCard.title;
+    if (displayCard) return displayCard.title;
+    if (planSummary) return planSummary;
+
+    return "General chat";
+  }, [
+    agreementDraftCard,
+    currentFactFindStep,
+    displayCard,
+    documentPlaceholderCard,
+    editorCard,
+    engagementLetterDraftCard,
+    invoicePlaceholderCard,
+    planSummary,
+    roaDraftCard,
+    wordDraftCard,
+  ]);
+  const matterProfileFacts = useMemo(() => {
+    const client = matterProfile?.client ?? null;
+    const address = personAddressLines(client).join(", ");
+
+    return [
+      { label: "DOB", value: readPersonDob(client) ?? "Not recorded" },
+      { label: "Address", value: address || "Not recorded" },
+      { label: "Risk profile", value: readRiskProfile(matterProfile) ?? "Not recorded" },
+    ];
+  }, [matterProfile]);
+  const matterProfileCounts = useMemo(() => {
+    const profile = matterProfile as Record<string, unknown> | null;
+    const count = (key: string) => {
+      const value = profile?.[key];
+      return Array.isArray(value) ? value.length : 0;
+    };
+
+    return [
+      { label: "Assets", value: count("assets") },
+      { label: "Liabilities", value: count("liabilities") },
+      { label: "Income", value: count("income") },
+      { label: "Expenses", value: count("expense") || count("expenses") },
+      { label: "Super", value: count("superannuation") },
+      { label: "Insurance", value: count("insurance") },
+    ];
+  }, [matterProfile]);
+  const matterNeedsAttention = useMemo(() => {
+    const items: string[] = [];
+    const client = matterProfile?.client ?? null;
+
+    if (!activeClient && conciergeUploads.length) {
+      items.push("Select a client before mapping profile data or creating saved client records.");
+    }
+
+    if (activeClient) {
+      if (isMatterProfileLoading) {
+        items.push("Loading the latest client profile snapshot.");
+      } else if (!matterProfile) {
+        items.push("Client profile could not be loaded for this cockpit snapshot.");
+      } else {
+        if (!readPersonDob(client)) items.push("Client date of birth is missing.");
+        if (!readPersonEmail(client)) items.push("Client email is missing.");
+        if (!readPersonPhone(client)) items.push("Client phone number is missing.");
+        if (!personAddressLines(client).length) items.push("Client address is missing.");
+        if (!readRiskProfile(matterProfile)) items.push("Risk profile is missing.");
+      }
+    }
+
+    if (!conciergeUploads.length) {
+      items.push("No evidence has been uploaded into this Finley session yet.");
+    } else if (conciergeUploadTags.has("fact-find")) {
+      items.push("Fact-find evidence is available. Use Update Fact Find to review mapping before applying changes.");
+    }
+
+    if (warnings.length) {
+      items.push(warnings[0] ?? "Finley has an open warning to review.");
+    }
+
+    return items.slice(0, 5);
+  }, [activeClient, conciergeUploadTags, conciergeUploads.length, isMatterProfileLoading, matterProfile, warnings]);
+  const shouldShowMatterCockpit = Boolean(activeClient || conciergeUploads.length);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    setMatterProfile(null);
+
+    if (!activeClient?.id || activeClient.isDraft) {
+      setIsMatterProfileLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setIsMatterProfileLoading(true);
+    void fetch(`/api/finley/soa/client-profile?clientId=${encodeURIComponent(activeClient.id)}`, {
+      method: "GET",
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const body = (await response.json().catch(() => null)) as { profile?: ClientProfile | null } | null;
+
+        if (!response.ok) {
+          return null;
+        }
+
+        return body?.profile ?? null;
+      })
+      .then((profile) => {
+        if (!cancelled) {
+          setMatterProfile(profile);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMatterProfile(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsMatterProfileLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeClient?.id, activeClient?.isDraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3060,6 +3284,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
   function resetConversation() {
     setMessages([]);
+    setWorkingDrafts([]);
     setPlanSummary(null);
     setPlanSteps([]);
     setWarnings([]);
@@ -3074,6 +3299,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setRoaDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
+    setWordDraftCard(null);
     setIsSavingFactFindStep(false);
     setIsGeneratingFactFindDocx(false);
     setFactFindWorkflowError(null);
@@ -3084,12 +3310,14 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setAgreementWorkflowError(null);
     setIsGeneratingInvoiceDocx(false);
     setInvoiceWorkflowError(null);
+    setIsGeneratingWordDraftDocx(false);
+    setWordDraftExportError(null);
     setActiveAssistField(null);
     setFileNoteSubjectManuallyEdited(false);
     setFileNoteAttachments([]);
     setFileNoteAttachmentFiles([]);
     setConciergeUploads([]);
-    setIsConciergeSuggestionDismissed(false);
+    setMatterProfile(null);
   }
 
   function clearLiveRenderOutputs() {
@@ -3098,9 +3326,28 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     setAgreementDraftCard(null);
     setDocumentPlaceholderCard(null);
     setInvoicePlaceholderCard(null);
+    setWordDraftCard(null);
     setEngagementLetterWorkflowError(null);
     setAgreementWorkflowError(null);
     setInvoiceWorkflowError(null);
+    setWordDraftExportError(null);
+    setIsGeneratingWordDraftDocx(false);
+  }
+
+  function closeFinleyOutputCard() {
+    setMessages((current) => current.filter((message) => !isOutputStateMessage(message)));
+    setPlanSummary(null);
+    setPlanSteps([]);
+    setWarnings([]);
+    setPendingPlanId(null);
+    setDisplayCard(null);
+    setReturnDisplayCard(null);
+    setEditorCard(null);
+    setFactFindWorkflow(null);
+    setFactFindStepIndex(0);
+    setFactFindWorkflowError(null);
+    clearLiveRenderOutputs();
+    setActiveAssistField(null);
   }
 
   function handleRefreshChat() {
@@ -3132,6 +3379,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       id: `assistant-agreement-${agreementType}-${Date.now()}`,
       role: "assistant",
       content: `I’m ready to prepare an ${isAnnual ? "annual advice agreement" : "ongoing service agreement"} for ${clientName}. I’ll show the live agreement render in the output pane so you can review it before exporting to Word.`,
+      outputState: true,
     };
 
     if (messageMode === "append") {
@@ -3174,23 +3422,23 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     });
   }
 
-  function detectAgreementRequest(message: string): AgreementType | null {
+  function shouldBypassActiveOutputEdit(
+    message: string,
+    activeOutputKind: "engagement_letter" | "record_of_advice" | "annual_agreement" | "ongoing_agreement",
+  ) {
     const lower = message.toLowerCase();
+    const workflowRequests = [
+      { kind: "fact_find", pattern: /\b(update fact find|fact find)\b/ },
+      { kind: "file_note", pattern: /\b(create file note|file note|client note)\b/ },
+      { kind: "create_invoice", pattern: /\b(create invoice|invoice)\b/ },
+      { kind: "engagement_letter", pattern: /\b(engagement letter)\b/ },
+      { kind: "record_of_advice", pattern: /\b(record of advice|roa)\b/ },
+      { kind: "statement_of_advice", pattern: /\b(statement of advice|soa)\b/ },
+      { kind: "ongoing_agreement", pattern: /\b(ongoing agreement|ongoing service agreement)\b/ },
+      { kind: "annual_agreement", pattern: /\b(annual agreement|annual advice agreement)\b/ },
+    ] as const;
 
-    if (/\b(annual agreement|annual advice agreement|fixed term agreement|fixed-term agreement)\b/.test(lower)) {
-      return "annual";
-    }
-
-    if (/\b(ongoing agreement|ongoing service agreement|service agreement)\b/.test(lower)) {
-      return "ongoing";
-    }
-
-    return null;
-  }
-
-  function shouldBypassActiveOutputEdit(message: string) {
-    const lower = message.toLowerCase();
-    return /\b(update fact find|fact find|create file note|file note|create invoice|invoice|engagement letter|ongoing agreement|annual agreement|statement of advice)\b/.test(lower);
+    return workflowRequests.some((request) => request.kind !== activeOutputKind && request.pattern.test(lower));
   }
 
   function openCreateClient() {
@@ -3359,17 +3607,20 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   }
 
   async function handleStarterAction(
-    action:
-      | "fact_find"
-      | "file_note"
-      | "engagement_letter"
-      | "record_of_advice"
-      | "statement_of_advice"
-      | "create_invoice"
-      | "ongoing_agreement"
-      | "annual_agreement",
+    action: StarterWorkflowAction,
+    options?: { preserveMessages?: boolean; seedContent?: string | null; seedFileNote?: FileNoteEditorSeed | null },
   ) {
     if (!activeClient || isSending) return;
+
+    const setStarterAssistantMessage = (message: Message) => {
+      const outputStateMessage = { ...message, outputState: true };
+      if (options?.preserveMessages) {
+        setMessages((current) => [...current, outputStateMessage]);
+        return;
+      }
+
+      setMessages([outputStateMessage]);
+    };
 
     if (action === "fact_find") {
       if (primaryFactFindReviewUpload) {
@@ -3397,7 +3648,10 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
 
     if (action === "ongoing_agreement" || action === "annual_agreement") {
-      void activateAgreementWorkflow(action === "annual_agreement" ? "annual" : "ongoing");
+      void activateAgreementWorkflow(
+        action === "annual_agreement" ? "annual" : "ongoing",
+        options?.preserveMessages ? "append" : "replace",
+      );
       return;
     }
 
@@ -3416,6 +3670,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         let adviserName = activeClient.clientAdviserName ?? "";
         let clientEntityId = activeClient.id ?? "";
         let clientName = activeClient.name ?? "";
+        let invoiceReferenceNumber = "";
+        let invoiceReferenceError: string | null = null;
         let clientNameOptions: InvoiceRecipientOption[] = clientName ? [{ value: clientName, label: clientName, email: "" }] : [];
 
         try {
@@ -3445,13 +3701,33 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           // Fall back to the lightweight client summary values already on hand.
         }
 
-        setMessages([
-          {
-            id: `assistant-invoice-placeholder-${Date.now()}`,
-            role: "assistant",
-            content: `I’m ready to help prepare an invoice for ${activeClient.name}. I’ll show the live invoice render in the output pane so you can review it before exporting to Word.`,
-          },
-        ]);
+        try {
+          const response = await fetch(`/api/finley/invoice/next-reference?clientId=${encodeURIComponent(activeClient.id ?? "")}`, {
+            method: "GET",
+            cache: "no-store",
+          });
+          const body = (await response.json().catch(() => null)) as
+            | {
+                referenceNumber?: string | null;
+                error?: string | null;
+              }
+            | null;
+
+          if (response.ok && typeof body?.referenceNumber === "string" && body.referenceNumber.trim()) {
+            invoiceReferenceNumber = body.referenceNumber.trim();
+          } else {
+            invoiceReferenceError = body?.error?.trim() || "Unable to load the next invoice reference.";
+          }
+        } catch (error) {
+          invoiceReferenceError =
+            error instanceof Error ? error.message : "Unable to load the next invoice reference.";
+        }
+
+        setStarterAssistantMessage({
+          id: `assistant-invoice-placeholder-${Date.now()}`,
+          role: "assistant",
+          content: `I’m ready to help prepare an invoice for ${activeClient.name}. I’ll show the live invoice render in the output pane so you can review it before exporting to Word.`,
+        });
         setPlanSummary(null);
         setPlanSteps([]);
         setWarnings([]);
@@ -3461,7 +3737,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setFactFindWorkflow(null);
         setFactFindStepIndex(0);
         setFactFindWorkflowError(null);
-        setInvoiceWorkflowError(null);
+        setInvoiceWorkflowError(invoiceReferenceError);
         setEngagementLetterDraftCard(null);
         setRoaDraftCard(null);
         setAgreementDraftCard(null);
@@ -3470,7 +3746,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           title: `Create an invoice for ${activeClient.name}`,
           description: "Prepare an invoice with client, service and line-item details.",
           note: "Live invoice render",
-          referenceNumber: `${Math.floor(1000 + Math.random() * 9000)}`,
+          referenceNumber: invoiceReferenceNumber,
           clientName,
           clientNameOptions,
           clientEmail,
@@ -3497,24 +3773,13 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         const adviserName = activeClient.clientAdviserName ?? currentUserScope?.name ?? "";
         const profile = activeClient.id ? await loadClientProfileForPreview(activeClient.id).catch(() => null) : null;
         const clientAddressLines = personAddressLines(profile?.client);
-        const uploadedDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, conciergeUploads);
-        const usedUploadContext = Boolean(buildUploadedDocumentContext(conciergeUploads, [
-          "fact-find",
-          "meeting-transcript",
-          "strategy-paper",
-          "engagement-letter",
-          "service-agreement",
-        ]).trim());
+        const initialDraft = buildEngagementDraftFromUploadedContext(clientName, adviserName, []);
 
-        setMessages([
-          {
-            id: `assistant-engagement-letter-${Date.now()}`,
-            role: "assistant",
-            content: usedUploadContext
-              ? `I reviewed the uploaded client pack and used that context to draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`
-              : `I’m ready to help draft an engagement letter for ${clientName}. I’ll show the live letter render in the output pane so you can review it like a client-facing document.`,
-          },
-        ]);
+        setStarterAssistantMessage({
+          id: `assistant-engagement-letter-${Date.now()}`,
+          role: "assistant",
+          content: `I’ve opened the Engagement Letter workspace for ${clientName}. Tell me what to draft or refine, and I’ll update the live render here.`,
+        });
         setPlanSummary(null);
         setPlanSteps([]);
         setWarnings([]);
@@ -3541,20 +3806,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           primaryClientName: activeClient.primaryClientName ?? clientName,
           partnerName: activeClient.partnerName ?? null,
           adviserName,
-          value: uploadedDraft,
+          value: initialDraft,
         });
         return;
       }
 
       if (action === "record_of_advice") {
         setIsSending(true);
-        setMessages([
-          {
-            id: `assistant-roa-draft-start-${Date.now()}`,
-            role: "assistant",
-            content: `I’m preparing a live Record of Advice draft for ${activeClient.name}. I’ll use the selected client profile and any uploaded supporting evidence, then show the editable draft in the workspace.`,
-          },
-        ]);
+        setStarterAssistantMessage({
+          id: `assistant-roa-draft-start-${Date.now()}`,
+          role: "assistant",
+          content: `I’m preparing a live Record of Advice draft for ${activeClient.name}. I’ll use the selected client profile and any uploaded supporting evidence, then show the editable draft in the workspace.`,
+        });
 
         try {
           const response = await fetch("/api/finley/roa/draft", {
@@ -3587,16 +3850,14 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             throw new Error(body?.error || "Unable to prepare the Record of Advice draft right now.");
           }
 
-          setMessages([
-            {
-              id: `assistant-roa-draft-${Date.now()}`,
-              role: "assistant",
-              content:
-                body.source === "fallback"
-                  ? `I prepared a safe Record of Advice skeleton for ${activeClient.name}. Review the live draft and tell me what to refine.`
-                  : `I prepared a live Record of Advice draft for ${activeClient.name}. Review the sections and tell me what to refine.`,
-            },
-          ]);
+          setStarterAssistantMessage({
+            id: `assistant-roa-draft-${Date.now()}`,
+            role: "assistant",
+            content:
+              body.source === "fallback"
+                ? `I prepared a safe Record of Advice skeleton for ${activeClient.name}. Review the live draft and tell me what to refine.`
+                : `I prepared a live Record of Advice draft for ${activeClient.name}. Review the sections and tell me what to refine.`,
+          });
           setPlanSummary(null);
           setPlanSteps([]);
           setWarnings(body.warning ? [body.warning] : []);
@@ -3623,13 +3884,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             value: body.draft,
           });
         } catch (error) {
-          setMessages([
-            {
-              id: `assistant-roa-draft-error-${Date.now()}`,
-              role: "assistant",
-              content: error instanceof Error ? error.message : "Unable to prepare the Record of Advice draft right now.",
-            },
-          ]);
+          setStarterAssistantMessage({
+            id: `assistant-roa-draft-error-${Date.now()}`,
+            role: "assistant",
+            content: error instanceof Error ? error.message : "Unable to prepare the Record of Advice draft right now.",
+          });
         } finally {
           setIsSending(false);
         }
@@ -3650,13 +3909,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         badge: "SOA Placeholder",
       };
 
-      setMessages([
-        {
-          id: `assistant-document-placeholder-${Date.now()}`,
-          role: "assistant",
-          content: `I’m ready to help prepare ${placeholder.title.replace(`Prepare `, "").toLowerCase()} for ${activeClient.name}. This placeholder card shows the planned workflow while we finish the generation and API steps.`,
-        },
-      ]);
+      setStarterAssistantMessage({
+        id: `assistant-document-placeholder-${Date.now()}`,
+        role: "assistant",
+        content: `I’m ready to help prepare ${placeholder.title.replace(`Prepare `, "").toLowerCase()} for ${activeClient.name}. This placeholder card shows the planned workflow while we finish the generation and API steps.`,
+      });
       setPlanSummary(null);
       setPlanSteps([]);
       setWarnings([]);
@@ -3674,21 +3931,70 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return;
     }
 
-    setPlanSummary(null);
-    setPlanSteps([]);
-    setWarnings([]);
-    setPendingPlanId(null);
-    setDisplayCard(null);
-    setEditorCard(null);
-    setFactFindWorkflow(null);
-    setFactFindStepIndex(0);
-    setFactFindWorkflowError(null);
-    clearLiveRenderOutputs();
-    setActiveAssistField(null);
-    setFileNoteSubjectManuallyEdited(false);
-    setFileNoteAttachments([]);
-    setFileNoteAttachmentFiles([]);
-    await handleSend("create a file note");
+    setIsSending(true);
+
+    try {
+      const response = await fetch("/api/finley/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: "Start Create File Note Record workflow",
+          workflowAction: "create_file_note",
+          activeClientId: activeClient.id ?? null,
+          activeClientName: activeClient.name ?? null,
+          threadId,
+          recentMessages: [],
+          uploadedFiles: conciergeUploads.map((upload) => ({
+            name: upload.name,
+            tags: upload.tags,
+            extractedText: upload.extractedText?.slice(0, 6000) ?? null,
+          })),
+        }),
+      });
+
+      const body = (await response.json().catch(() => null)) as FinleyChatResponse | null;
+
+      if (!response.ok || !body) {
+        throw new Error("Unable to start the Create File Note Record workflow right now.");
+      }
+
+      setStarterAssistantMessage({
+        id: `assistant-file-note-workflow-${Date.now()}`,
+        role: "assistant",
+        content: body.assistantMessage,
+      });
+      setPlanSummary(body.plan?.summary ?? null);
+      setPlanSteps(
+        (body.plan?.steps ?? []).map((step) => ({
+          toolName: step.toolName,
+          description: step.description,
+          inputsPreview: step.inputsPreview,
+        })),
+      );
+      setWarnings(body.warnings ?? []);
+      setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
+      setDisplayCard(body.displayCard ?? null);
+      setReturnDisplayCard(null);
+      setEditorCard(seedFileNoteEditorCard(normalizeEditorCard(body.editorCard ?? null), options?.seedFileNote ?? options?.seedContent));
+      setFactFindWorkflow(null);
+      setFactFindStepIndex(0);
+      setFactFindWorkflowError(null);
+      clearLiveRenderOutputs();
+      setActiveAssistField(null);
+      setFileNoteSubjectManuallyEdited(false);
+      setFileNoteAttachments([]);
+      setFileNoteAttachmentFiles([]);
+    } catch (error) {
+      setStarterAssistantMessage({
+        id: `assistant-file-note-workflow-error-${Date.now()}`,
+        role: "assistant",
+        content: error instanceof Error ? error.message : "Unable to start the Create File Note Record workflow right now.",
+      });
+    } finally {
+      setIsSending(false);
+    }
   }
 
   async function addConciergeUploads(files: FileList | null) {
@@ -3723,7 +4029,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       );
 
       setConciergeUploads((current) => [...current, ...nextUploads]);
-      setIsConciergeSuggestionDismissed(false);
       const activeClientName = activeClient?.name?.trim();
       setMessages((current) => [
         ...current,
@@ -3757,46 +4062,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setIsFactFindImportModalOpen(false);
       }
 
-      if (!nextUploads.length) {
-        setIsConciergeSuggestionDismissed(true);
-      }
-
       return nextUploads;
     });
-  }
-
-  async function handleConciergeSuggestedTask(task: ConciergeSuggestedTask) {
-    if (!activeClient && task.action !== "summarise_documents") {
-      await handleSend("I need to select a client before using this upload for a client workflow.");
-      return;
-    }
-
-    if (task.action === "file_note" && conciergeUploadTags.has("meeting-transcript")) {
-      const transcriptContext = buildUploadedDocumentContext(conciergeUploads, ["meeting-transcript"]);
-      await handleSend(
-        transcriptContext
-          ? `create a file note from the uploaded meeting transcript:\n\n${transcriptContext}`
-          : "create a file note from the uploaded meeting transcript",
-      );
-      return;
-    }
-
-    if (task.action === "fact_find" && primaryFactFindReviewUpload) {
-      await inspectFactFindUpload(primaryFactFindReviewUpload);
-      return;
-    }
-
-    if (task.action === "service_agreement") {
-      await handleStarterAction("ongoing_agreement");
-      return;
-    }
-
-    if (task.action === "summarise_documents") {
-      await handleSend("summarise the uploaded document and suggest the next adviser tasks");
-      return;
-    }
-
-    await handleStarterAction(task.action);
   }
 
   function closeCreateClient() {
@@ -3936,6 +4203,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
   async function handleInvoiceGenerateDocx() {
     if (!activeClientId || !invoicePlaceholderCard) return;
 
+    if (!invoicePlaceholderCard.referenceNumber.trim()) {
+      setInvoiceWorkflowError("Enter an invoice reference before saving the invoice.");
+      return;
+    }
+
     setIsGeneratingInvoiceDocx(true);
     setInvoiceWorkflowError(null);
 
@@ -3984,7 +4256,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       anchor.remove();
       URL.revokeObjectURL(url);
       notifyWorkflowComplete(
-        `Done — I generated the invoice for ${invoicePlaceholderCard.clientName || activeClient?.name || "the selected client"}. The Word file ${fileName} has been downloaded.`,
+        `Done — I saved invoice ${invoicePlaceholderCard.referenceNumber || "1"} to the client record and downloaded ${fileName}.`,
       );
     } catch (error) {
       setInvoiceWorkflowError(
@@ -4135,7 +4407,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       return false;
     }
 
-    if (shouldBypassActiveOutputEdit(message)) {
+    if (shouldBypassActiveOutputEdit(message, activeOutput.outputKind)) {
       return false;
     }
 
@@ -4266,6 +4538,245 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
     }
   }
 
+  function createWorkingDraftFromContent(
+    content: string,
+    forcedType?: WorkingDraftType,
+    sourceLabel = "Finley response",
+  ) {
+    const trimmed = content.trim();
+    if (!trimmed) return null;
+
+    const type = forcedType ?? classifyWorkingDraft(trimmed);
+    const draft: WorkingDraft = {
+      id: `draft-${Date.now()}-${crypto.randomUUID()}`,
+      title: buildWorkingDraftTitle(trimmed, type),
+      type,
+      sourceLabel,
+      content: trimmed,
+      createdAt: new Intl.DateTimeFormat("en-AU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date()),
+    };
+
+    setWorkingDrafts((current) => [draft, ...current.filter((item) => item.content !== draft.content)].slice(0, 6));
+    return draft;
+  }
+
+  async function handleRunDraftSkill(skillId: FinleyDraftSkillMessageId) {
+    if (isSending) return;
+
+    const skillLabel = DRAFT_SKILL_LABELS[skillId];
+    const userMessage: Message = {
+      id: `user-draft-skill-${Date.now()}`,
+      role: "user",
+      content: skillLabel,
+    };
+
+    setMessages((current) => [...current, userMessage]);
+    setIsSending(true);
+
+    try {
+      const response = await fetch("/api/finley/draft-skills", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          skillId,
+          clientId: activeClient?.id ?? null,
+          clientName: activeClient?.name ?? null,
+          adviserName: activeClient?.clientAdviserName ?? null,
+          uploadedFiles: conciergeUploads.map((upload) => ({
+            name: upload.name,
+            tags: upload.tags,
+            extractedText: upload.extractedText?.slice(0, 12000) ?? null,
+          })),
+          recentMessages: messages.slice(-8).map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        }),
+      });
+
+      const body = (await response.json().catch(() => null)) as DraftSkillApiResponse | null;
+      if (!response.ok || !body) {
+        throw new Error(body?.error || `Unable to run the ${skillLabel} skill right now.`);
+      }
+      const resolvedSkillId: FinleyDraftSkillMessageId =
+        body.skillId === "paraplanning_request" || body.skillId === "initial_meeting_file_note"
+          ? body.skillId
+          : skillId;
+
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-draft-skill-${Date.now()}`,
+          role: "assistant",
+          content:
+            body.assistantMessage
+            || `I prepared a ${DRAFT_SKILL_LABELS[resolvedSkillId]} draft.`,
+          draftSkillId: resolvedSkillId,
+          fileNoteSeed: body.fileNoteSeed ?? null,
+        },
+      ]);
+
+      if (body.warning) {
+        setWarnings((current) => [body.warning as string, ...current].slice(0, 3));
+      }
+    } catch (error) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `assistant-draft-skill-error-${Date.now()}`,
+          role: "assistant",
+          content:
+            error instanceof Error
+              ? error.message
+              : `Unable to run the ${skillLabel} skill right now.`,
+        },
+      ]);
+    } finally {
+      setIsSending(false);
+    }
+  }
+
+  function buildWordDraftTitleFromMessage(message: Message) {
+    const firstHeading = message.content
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => /^#{1,3}\s+/.test(line));
+
+    if (firstHeading) {
+      return firstHeading.replace(/^#{1,3}\s+/, "").trim().slice(0, 90) || "Finley Draft";
+    }
+
+    if (message.draftSkillId) {
+      return DRAFT_SKILL_LABELS[message.draftSkillId];
+    }
+
+    return "Finley Draft";
+  }
+
+  function sanitizeDownloadFilename(value: string) {
+    return (
+      value
+        .split("")
+        .map((character) => (character.charCodeAt(0) < 32 || /[<>:"/\\|?*]/.test(character) ? " " : character))
+        .join("")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 80) || "Finley Draft"
+    );
+  }
+
+  function openWordDraftFromMessage(message: Message) {
+    clearLiveRenderOutputs();
+    setWordDraftExportError(null);
+    setWordDraftCard({
+      title: buildWordDraftTitleFromMessage(message),
+      sourceLabel: message.draftSkillId ? DRAFT_SKILL_LABELS[message.draftSkillId] : "Finley response",
+      content: message.content,
+      createdAt: new Intl.DateTimeFormat("en-AU", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date()),
+    });
+  }
+
+  async function handleWordDraftExport() {
+    if (!wordDraftCard) return;
+
+    setIsGeneratingWordDraftDocx(true);
+    setWordDraftExportError(null);
+
+    try {
+      const bytes = await buildFinleyWordDraftDocx({
+        title: wordDraftCard.title,
+        content: wordDraftCard.content,
+        createdAt: wordDraftCard.createdAt,
+        documentStyleProfile,
+      });
+      const blob = new Blob([bytes as BlobPart], { type: FINLEY_WORD_DRAFT_DOCX_MIME_TYPE });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${sanitizeDownloadFilename(wordDraftCard.title)}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 500);
+    } catch (error) {
+      setWordDraftExportError(error instanceof Error ? error.message : "Unable to export this draft to Word.");
+    } finally {
+      setIsGeneratingWordDraftDocx(false);
+    }
+  }
+
+  async function handlePromoteAssistantResponse(
+    action: (typeof PROMOTE_RESPONSE_ACTIONS)[number]["action"],
+    message: Message,
+  ) {
+    if (action === "save_draft") {
+      createWorkingDraftFromContent(message.content);
+      return;
+    }
+
+    if (action === "word_output") {
+      openWordDraftFromMessage(message);
+      return;
+    }
+
+    if (action === "follow_up_email") {
+      createWorkingDraftFromContent(message.content, "follow_up_email", "Promoted response");
+      return;
+    }
+
+    if (!activeClient) {
+      createWorkingDraftFromContent(message.content);
+      return;
+    }
+
+    if (action === "file_note") {
+      await handleStarterAction("file_note", {
+        preserveMessages: true,
+        seedFileNote: message.fileNoteSeed ?? { content: message.content },
+      });
+      return;
+    }
+
+    if (action === "engagement_letter") {
+      createWorkingDraftFromContent(message.content, "advice_scope", "Engagement context");
+      await handleStarterAction("engagement_letter", { preserveMessages: true });
+      return;
+    }
+
+    if (action === "statement_of_advice") {
+      createWorkingDraftFromContent(message.content, "advice_scope", "SOA context");
+      await handleStarterAction("statement_of_advice", { preserveMessages: true });
+      return;
+    }
+
+    if (action === "record_of_advice") {
+      createWorkingDraftFromContent(message.content, "advice_scope", "ROA context");
+      await handleStarterAction("record_of_advice", { preserveMessages: true });
+      return;
+    }
+
+    if (action === "fact_find") {
+      await handleStarterAction("fact_find", { preserveMessages: true });
+    }
+  }
+
+  async function handlePromoteWorkingDraft(action: StarterWorkflowAction, draft: WorkingDraft) {
+    if (!activeClient) return;
+
+    if (action === "file_note") {
+      await handleStarterAction("file_note", { preserveMessages: true, seedContent: draft.content });
+      return;
+    }
+
+    await handleStarterAction(action, { preserveMessages: true });
+  }
+
   async function handleSend(nextMessage?: string) {
     const message = (nextMessage ?? composerValue).trim();
 
@@ -4357,12 +4868,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         return;
       }
 
-      const requestedAgreementType = detectAgreementRequest(message);
-      if (activeClient && requestedAgreementType) {
-        await activateAgreementWorkflow(requestedAgreementType, "append");
-        return;
-      }
-
       setFactFindWorkflow(null);
       setFactFindStepIndex(0);
       const response = await fetch("/api/finley/chat", {
@@ -4393,12 +4898,15 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         throw new Error("Unable to reach Finley right now.");
       }
 
+      const nextEditorCard = normalizeEditorCard(body.editorCard ?? null);
+      const assistantCreatesOutputState = Boolean(body.plan || nextEditorCard);
       setMessages((current) => [
         ...current,
         {
           id: `assistant-${Date.now()}`,
           role: "assistant",
           content: body.assistantMessage,
+          outputState: assistantCreatesOutputState,
         },
       ]);
       setPlanSummary(body.plan?.summary ?? null);
@@ -4411,7 +4919,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
       );
       setWarnings(body.warnings ?? []);
       setPendingPlanId(body.suggestedActions.length ? body.suggestedActions[0]?.planId ?? null : null);
-      const nextEditorCard = normalizeEditorCard(body.editorCard ?? null);
       if (body.displayCard || nextEditorCard) {
         clearLiveRenderOutputs();
       }
@@ -4747,9 +5254,22 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         { label: "Liabilities", records: factFindImportCandidate.liabilities },
         { label: "Superannuation", records: factFindImportCandidate.superannuation },
         { label: "Pensions", records: factFindImportCandidate.pensions },
-        { label: "Insurance", records: factFindImportCandidate.insurance },
       ]
     : [];
+  const factFindImportInsurancePolicies = factFindImportCandidate
+    ? getFactFindInsurancePolicies(factFindImportCandidate)
+    : [];
+  const hasFinleyWorkspaceOutput = Boolean(
+    currentFactFindStep
+    || engagementLetterDraftCard
+    || roaDraftCard
+    || agreementDraftCard
+    || documentPlaceholderCard
+    || invoicePlaceholderCard
+    || wordDraftCard
+    || displayCard
+    || planSummary,
+  );
 
   return (
     <main className={styles.workspace}>
@@ -4843,6 +5363,136 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
       <section className={styles.console}>
         <div className={styles.chatSurface}>
+          {shouldShowMatterCockpit && matterCockpitPortalTarget ? createPortal(
+            <section className={styles.matterCockpit} aria-label="Matter cockpit">
+              <div className={styles.matterCockpitHeader}>
+                <div>
+                  <div className={styles.matterCockpitEyebrow}>Matter Cockpit</div>
+                  <h2 className={styles.matterCockpitTitle}>
+                    {activeClient ? `${activeClient.name ?? "Selected client"} workspace` : "Finley workspace"}
+                  </h2>
+                </div>
+                <span className={styles.matterCockpitBadge}>{activeWorkflowLabel}</span>
+              </div>
+
+              <div className={styles.matterCockpitGrid}>
+                <article className={styles.matterCockpitCard}>
+                  <div className={styles.matterCockpitCardTitle}>Client Context</div>
+                  {activeClient ? (
+                    <>
+                      <div className={styles.matterCockpitMetaGrid}>
+                        {matterProfileFacts.map((fact) => (
+                          <div key={fact.label}>
+                            <span>{fact.label}</span>
+                            <strong>{fact.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      <div className={styles.matterCockpitCounts}>
+                        {matterProfileCounts.map((item) => (
+                          <span key={item.label}>{item.label}: {item.value}</span>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className={styles.matterCockpitEmpty}>Select a client to show profile context.</div>
+                  )}
+                </article>
+
+                <article className={styles.matterCockpitCard}>
+                  <div className={styles.matterCockpitCardHeader}>
+                    <div className={styles.matterCockpitCardTitle}>Evidence Loaded</div>
+                    <button
+                      type="button"
+                      className={styles.matterCockpitButton}
+                      onClick={() => void handleSend("review the uploaded documents and prepare a structured summary with key facts, advice issues, missing information, and suggested next steps")}
+                      disabled={!conciergeUploads.length || isSending}
+                    >
+                      Review documents
+                    </button>
+                  </div>
+                  {conciergeUploads.length ? (
+                    <div className={styles.matterCockpitFileList}>
+                      {conciergeUploads.slice(0, 4).map((upload) => (
+                        <div key={upload.id} className={styles.matterCockpitFileItem}>
+                          <strong>{upload.name}</strong>
+                          <span className={styles.matterCockpitTagRow}>
+                            {upload.tags.map((tag) => (
+                              <span key={tag} className={styles.matterCockpitTag}>{getConciergeTagLabel(tag)}</span>
+                            ))}
+                          </span>
+                        </div>
+                      ))}
+                      {conciergeUploads.length > 4 ? (
+                        <div className={styles.matterCockpitMuted}>+ {conciergeUploads.length - 4} more file{conciergeUploads.length - 4 === 1 ? "" : "s"}</div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className={styles.matterCockpitEmpty}>Upload evidence to give Finley more context.</div>
+                  )}
+                </article>
+
+                <article className={styles.matterCockpitCard}>
+                  <div className={styles.matterCockpitCardTitle}>Needs Attention</div>
+                  {matterNeedsAttention.length ? (
+                    <ul className={styles.matterAttentionList}>
+                      {matterNeedsAttention.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className={styles.matterCockpitEmpty}>Nothing urgent in the current cockpit snapshot.</div>
+                  )}
+                </article>
+
+                <article className={`${styles.matterCockpitCard} ${styles.matterCockpitCardWide}`.trim()}>
+                  <div className={styles.matterCockpitCardTitle}>Working Drafts</div>
+                  {workingDrafts.length ? (
+                    <div className={styles.workingDraftList}>
+                      {workingDrafts.map((draft) => (
+                        <div key={draft.id} className={styles.workingDraftItem}>
+                          <div>
+                            <span className={styles.workingDraftType}>{workingDraftTypeLabel(draft.type)}</span>
+                            <strong>{draft.title}</strong>
+                            <span>{draft.sourceLabel} · {draft.createdAt}</span>
+                          </div>
+                          <div className={styles.workingDraftActions}>
+                            <button
+                              type="button"
+                              className={styles.matterCockpitButton}
+                              onClick={() => void handleCopyAssistantMessage(draft.id, draft.content)}
+                            >
+                              {copiedMessageId === draft.id ? "Copied" : "Copy"}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.matterCockpitButton}
+                              onClick={() => void handlePromoteWorkingDraft("file_note", draft)}
+                              disabled={!activeClient || isSending}
+                            >
+                              File note
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.matterCockpitButton}
+                              onClick={() => void handlePromoteWorkingDraft("engagement_letter", draft)}
+                              disabled={!activeClient || isSending}
+                            >
+                              Engagement
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className={styles.matterCockpitEmpty}>Promote a useful Finley response to keep it as a temporary working draft.</div>
+                  )}
+                </article>
+              </div>
+            </section>,
+            matterCockpitPortalTarget,
+          ) : null}
+
           {!messages.length && !planSummary ? (
             <div className={styles.emptyState}>
               <div className={styles.emptyPortraitFrame}>
@@ -4855,11 +5505,18 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 />
               </div>
               <div className={styles.emptyStateCopy}>
-                <div className={styles.emptyStateTitle}>Start a new Finley chat</div>
+                <div className={styles.emptyStateTitle}>Start the matter</div>
                 <div className={styles.emptyStateText}>
                   {activeClient
-                    ? "Choose a workflow to begin, or upload documents and Finley can suggest some tasks to be completed."
-                    : "Select a client from the left rail or create a new client to begin working in Finley."}
+                    ? "Ask questions, upload evidence, draft from a transcript, or choose a workflow when you want to create or update client records."
+                    : "Ask a general question, upload evidence, or select a client when you need profile-specific work."}
+                </div>
+                <div className={styles.emptyCapabilityList} aria-label="Finley starting points">
+                  <span>Ask a question</span>
+                  <span>Upload evidence</span>
+                  <span>Start a workflow</span>
+                  <span>Review this client</span>
+                  <span>Draft from transcript</span>
                 </div>
                 {activeClient ? (
                   <div className={styles.starterActions}>
@@ -4909,7 +5566,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                       onClick={() => void handleStarterAction("file_note")}
                       disabled={isSending}
                     >
-                      <span className={styles.starterActionTitle}>Create File Note</span>
+                      <span className={styles.starterActionTitle}>Create File Note Record</span>
                     </button>
                     <button
                       type="button"
@@ -4933,133 +5590,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           ) : null}
 
-          {conciergeUploads.length && !isConciergeSuggestionDismissed ? (
-            <section className={styles.conciergeSuggestionPanel} aria-label="Suggested next steps">
-              <div className={styles.conciergeSuggestionHeader}>
-                <div>
-                  <div className={styles.suggestionTitle}>Finley noticed something useful</div>
-                  <div className={styles.conciergeSuggestionText}>{conciergeInsightText}</div>
-                </div>
-                <button
-                  type="button"
-                  className={styles.conciergeSuggestionClose}
-                  onClick={() => setIsConciergeSuggestionDismissed(true)}
-                  aria-label="Close suggested next steps"
-                >
-                  ×
-                </button>
-              </div>
-              <div className={styles.conciergeUploadList}>
-                {conciergeUploads.map((upload) => (
-                  <div key={upload.id} className={styles.conciergeUploadItem}>
-                    <span className={styles.conciergeUploadName}>{upload.name}</span>
-                    <span className={styles.conciergeTagRow}>
-                      {upload.tags.map((tag) => (
-                        <span key={tag} className={styles.conciergeTagPill}>
-                          {getConciergeTagLabel(tag)}
-                        </span>
-                      ))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {primaryConciergeTask ? (
-                <div className={styles.conciergeActionStack}>
-                  <button
-                    type="button"
-                    className={styles.conciergePrimaryAction}
-                    onClick={() => void handleConciergeSuggestedTask(primaryConciergeTask)}
-                    disabled={isSending}
-                  >
-                    <span>
-                      <strong>{primaryConciergeTask.title}</strong>
-                      <span>{primaryConciergeTask.description}</span>
-                    </span>
-                    <span>{primaryConciergeTask.actionLabel}</span>
-                  </button>
-                  {secondaryConciergeTasks.length ? (
-                    <div className={styles.conciergeSecondaryActions}>
-                      {secondaryConciergeTasks.map((task) => (
-                        <button
-                          key={task.id}
-                          type="button"
-                          className={styles.conciergeSecondaryAction}
-                          onClick={() => void handleConciergeSuggestedTask(task)}
-                          disabled={isSending}
-                        >
-                          {task.actionLabel}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {activeClient ? (
-                <div className={styles.conciergeCommonTasks}>
-                  <span>Other things I can help with:</span>
-                  <div>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleStarterAction("file_note")}
-                      disabled={isSending}
-                    >
-                      Create file note
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleStarterAction("engagement_letter")}
-                      disabled={isSending}
-                    >
-                      Engagement letter
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleStarterAction("create_invoice")}
-                      disabled={isSending}
-                    >
-                      Invoice
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleStarterAction("ongoing_agreement")}
-                      disabled={isSending}
-                    >
-                      Ongoing agreement
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleStarterAction("annual_agreement")}
-                      disabled={isSending}
-                    >
-                      Annual agreement
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleStarterAction("record_of_advice")}
-                      disabled={isSending}
-                    >
-                      Record of Advice
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.conciergeCommonTaskButton}
-                      onClick={() => void handleSend("check what information is missing for this client")}
-                      disabled={isSending}
-                    >
-                      Check missing info
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
-
           {messages.length ? (
             <div className={styles.messageGroup}>
               {messages.map((message) => (
@@ -5078,76 +5608,88 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                         </button>
                         <AssistantMarkdown content={message.content} />
                       </>
-                    ) : (
+                  ) : (
                       message.content
                     )}
                   </div>
-                  {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient ? (
-                    <div className={styles.workflowPillRow} aria-label="Suggested Finley workflows">
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("fact_find")}
-                        disabled={isSending}
-                      >
-                        Update fact find
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("engagement_letter")}
-                        disabled={isSending}
-                      >
-                        Engagement letter
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("file_note")}
-                        disabled={isSending}
-                      >
-                        File note
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("create_invoice")}
-                        disabled={isSending}
-                      >
-                        Invoice
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("record_of_advice")}
-                        disabled={isSending}
-                      >
-                        Record of Advice
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("ongoing_agreement")}
-                        disabled={isSending}
-                      >
-                        Ongoing agreement
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleStarterAction("annual_agreement")}
-                        disabled={isSending}
-                      >
-                        Annual agreement
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.workflowPill}
-                        onClick={() => void handleSend("check what information is missing for this client")}
-                        disabled={isSending}
-                      >
-                        Check missing info
-                      </button>
+                  {message.role === "assistant" &&
+                  message.id === latestAssistantMessageId &&
+                  activeClient &&
+                  !hasActiveWorkspace &&
+                  (hasMeetingTranscriptEvidence || conciergeUploads.length > 0) ? (
+                    <div className={styles.workflowPillRow} aria-label="Finley draft skills">
+                      <span className={styles.promotePillLabel}>Draft skills:</span>
+                      {hasMeetingTranscriptEvidence ? (
+                        <button
+                          type="button"
+                          className={styles.workflowPill}
+                          onClick={() => void handleRunDraftSkill("initial_meeting_file_note")}
+                          disabled={isSending}
+                        >
+                          Initial Meeting File Note
+                        </button>
+                      ) : null}
+                      {conciergeUploads.length > 0 ? (
+                        <button
+                          type="button"
+                          className={styles.workflowPill}
+                          onClick={() => void handleRunDraftSkill("paraplanning_request")}
+                          disabled={isSending}
+                        >
+                          Paraplanning Request
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient && !hasActiveWorkspace && isSubstantiveAssistantMessage(message.content) ? (
+                    <div className={styles.workflowPillRow} aria-label="Promote this Finley response">
+                      <span className={styles.promotePillLabel}>Promote this:</span>
+                      {(message.draftSkillId
+                        ? PROMOTE_RESPONSE_ACTIONS.filter((workflowAction) => {
+                            if (message.draftSkillId === "initial_meeting_file_note") {
+                              return ["save_draft", "file_note", "word_output"].includes(workflowAction.action);
+                            }
+
+                            return ["save_draft", "word_output"].includes(workflowAction.action);
+                          })
+                        : PROMOTE_RESPONSE_ACTIONS
+                      ).map((workflowAction) => (
+                        <button
+                          key={workflowAction.action}
+                          type="button"
+                          className={styles.workflowPill}
+                          onClick={() => void handlePromoteAssistantResponse(workflowAction.action, message)}
+                          disabled={isSending}
+                        >
+                          {workflowAction.label}
+                        </button>
+                      ))}
+                      {message.draftSkillId ? (
+                        <button
+                          type="button"
+                          className={styles.workflowPill}
+                          onClick={() => void handleCopyAssistantMessage(message.id, message.content)}
+                          disabled={copiedMessageId === message.id}
+                        >
+                          {copiedMessageId === message.id ? "Copied" : "Copy"}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {message.role === "assistant" && message.id === latestAssistantMessageId && activeClient && !hasActiveWorkspace ? (
+                    <div className={styles.workflowPillRow} aria-label="Suggested next workflow actions">
+                      <span className={styles.promotePillLabel}>Next actions:</span>
+                      {WORKFLOW_LAUNCH_ACTIONS.map((workflowAction) => (
+                        <button
+                          key={workflowAction.action}
+                          type="button"
+                          className={styles.workflowPill}
+                          onClick={() => void handleStarterAction(workflowAction.action, { preserveMessages: true })}
+                          disabled={isSending}
+                        >
+                          {workflowAction.label}
+                        </button>
+                      ))}
                     </div>
                   ) : null}
                 </div>
@@ -5194,7 +5736,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                 {activeClient
                   ? activeAssistField
                     ? `Selected field: ${activeAssistField === "content" ? "File note body" : "File note subject"}. Start your message with "Finley:" to draft into that field.`
-                    : ""
+                    : "Chat is for questions, summaries, drafts, and analysis. Use workflow buttons to create or change saved client records."
                   : "General questions and document summaries work now. Select a client before mapping profile data or creating client records."}
               </div>
               <div className={styles.composerActions}>
@@ -5240,7 +5782,19 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
       <aside className={styles.outputPane} aria-label="Finley output">
         <div className={styles.outputSurface}>
-          {!engagementLetterDraftCard && !roaDraftCard && !agreementDraftCard && !invoicePlaceholderCard ? (
+          {hasFinleyWorkspaceOutput ? (
+            <button
+              type="button"
+              className={styles.outputCloseButton}
+              onClick={closeFinleyOutputCard}
+              aria-label="Close Finley output card"
+              title="Close card"
+            >
+              ×
+            </button>
+          ) : null}
+
+          {!engagementLetterDraftCard && !roaDraftCard && !agreementDraftCard && !invoicePlaceholderCard && !wordDraftCard ? (
             <div className={styles.outputHeader}>
               <div>
                 <div className={styles.sidebarLabel}>Output</div>
@@ -5249,20 +5803,55 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
             </div>
           ) : null}
 
-          {!currentFactFindStep &&
-          !engagementLetterDraftCard &&
-          !roaDraftCard &&
-          !agreementDraftCard &&
-          !documentPlaceholderCard &&
-          !invoicePlaceholderCard &&
-          !displayCard &&
-          !planSummary ? (
+          {!hasFinleyWorkspaceOutput && shouldShowMatterCockpit ? (
+            <div className={styles.outputMatterCockpitHost} ref={setMatterCockpitPortalTarget} />
+          ) : null}
+
+          {!hasFinleyWorkspaceOutput && !shouldShowMatterCockpit ? (
             <div className={styles.outputEmptyState}>
               <div className={styles.outputEmptyTitle}>No output yet</div>
               <div className={styles.outputEmptyText}>
-                Start a workflow or ask Finley to prepare a document, update a record, create an invoice, or draft a file note.
+                Start a workflow to create records or documents. Chat can answer questions, summarise uploads, and draft copy without saving changes.
               </div>
             </div>
+          ) : null}
+
+          {wordDraftCard ? (
+            <section className={styles.wordDraftCard}>
+              <div className={styles.wordDraftHeader}>
+                <div>
+                  <div className={styles.planLabel}>Word Output</div>
+                  <h3>{wordDraftCard.title}</h3>
+                  <p>
+                    {wordDraftCard.sourceLabel} - {wordDraftCard.createdAt}
+                  </p>
+                </div>
+                <div className={styles.wordDraftActions}>
+                  <button
+                    type="button"
+                    className={styles.wordDraftSecondaryButton}
+                    onClick={() => void handleCopyAssistantMessage("word-draft", wordDraftCard.content)}
+                    disabled={copiedMessageId === "word-draft"}
+                  >
+                    {copiedMessageId === "word-draft" ? "Copied" : "Copy"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.wordDraftPrimaryButton}
+                    onClick={() => void handleWordDraftExport()}
+                    disabled={isGeneratingWordDraftDocx}
+                  >
+                    {isGeneratingWordDraftDocx ? "Exporting..." : "Export Word"}
+                  </button>
+                </div>
+              </div>
+              {wordDraftExportError ? (
+                <div className={styles.wordDraftExportError}>{wordDraftExportError}</div>
+              ) : null}
+              <div className={styles.wordDraftPreview}>
+                <AssistantMarkdown content={wordDraftCard.content} />
+              </div>
+            </section>
           ) : null}
 
           {currentFactFindStep ? (
@@ -5577,8 +6166,6 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
           {invoicePlaceholderCard ? (
             <InvoiceWorkflowCard
               invoice={invoicePlaceholderCard}
-              practiceName={activeClient?.clientAdviserPracticeName ?? currentUserScope?.practice?.name}
-              licenseeName={activeClient?.clientAdviserLicenseeName}
               onChange={setInvoicePlaceholderCard}
               onExport={() => void handleInvoiceGenerateDocx()}
               isExporting={isGeneratingInvoiceDocx}
@@ -6030,7 +6617,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
               {pendingPlanId ? (
                 <div className={styles.planActions}>
                   <button type="button" className={styles.planApproveButton} onClick={() => void handlePlanAction("approve_plan")} disabled={isSending}>
-                    Approve and run
+                    {editorCard?.kind === "collection_form" && editorCard.toolName === "create_file_note" ? "Save to client file" : "Approve and run"}
                   </button>
                   <button type="button" className={styles.planCancelButton} onClick={() => void handlePlanAction("cancel_plan")} disabled={isSending}>
                     Cancel
@@ -6126,6 +6713,29 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
                         </div>
                       ) : null,
                     )}
+
+                    {factFindImportInsurancePolicies.length ? (
+                      <div className={styles.factFindImportReviewCard}>
+                        <strong>Insurance policies</strong>
+                        <ul>
+                          {factFindImportInsurancePolicies.slice(0, 5).map((policy, index) => (
+                            <li key={`insurance-policy-${policy.ownerName ?? "owner"}-${policy.insurer ?? policy.policyNumber ?? index}`}>
+                              {[
+                                policy.ownerName,
+                                policy.insurer ?? policy.provider,
+                                policy.policyNumber,
+                                policy.covers.map((cover) => cover.coverType).filter(Boolean).join(", "),
+                              ]
+                                .filter(Boolean)
+                                .join(" | ")}
+                            </li>
+                          ))}
+                        </ul>
+                        {factFindImportInsurancePolicies.length > 5 ? (
+                          <p>Plus {factFindImportInsurancePolicies.length - 5} more insurance policies.</p>
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     {factFindImportCandidate.dependants.length || factFindImportCandidate.entities.length ? (
                       <div className={styles.factFindImportReviewCard}>

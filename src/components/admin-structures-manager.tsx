@@ -6,17 +6,21 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   createAdminLicensee,
   createAdminPractice,
+  deleteAdminLicenseeAssetClass,
   deleteAdminLicensee,
   deleteAdminPractice,
   getAdminLicensee,
+  updateAdminLicenseeAssetClasses,
   updateAdminLicensee,
+  updateAdminLicenseeRiskProfiles,
   updateAdminPractice,
 } from "@/lib/api/admin";
 import type { LicenseeSummary, PracticeSummary } from "@/lib/admin-data";
-import type { LicenseeDto } from "@/lib/api/types";
+import type { LicenseeAssetClass, LicenseeDto, LicenseeRiskProfile } from "@/lib/api/types";
 import styles from "@/app/admin/admin.module.css";
 
 type Mode = "create" | "edit";
+type LicenseeEditorTab = "information" | "riskProfiles" | "strategicAssetAllocations";
 
 type StructureDraft = {
   name: string;
@@ -58,6 +62,7 @@ const licenseeTextFields: { key: LicenseeTextDraftKey; label: string; placeholde
 ];
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
+const ASSET_CLASS_CATEGORIES: LicenseeAssetClass["category"][] = ["Defensive", "Growth"];
 
 function cleanText(value: string | null | undefined) {
   return value?.trim() ?? "";
@@ -107,6 +112,219 @@ function nullableText(value: string) {
   return value.trim() || null;
 }
 
+function nullableNumber(value: number | null | undefined) {
+  return Number.isFinite(value) ? value : null;
+}
+
+function displayNumber(value: number | null | undefined) {
+  return Number.isFinite(value) ? String(value) : "";
+}
+
+function readNumber(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function makeLocalId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function cloneAssetClasses(licensee: LicenseeDto | null | undefined): LicenseeAssetClass[] {
+  return (licensee?.assetClasses ?? [])
+    .map((item, index): LicenseeAssetClass => ({
+      assetClassId: item.assetClassId?.trim() || null,
+      name: item.name?.trim() || "",
+      category: item.category === "Growth" ? "Growth" : "Defensive",
+      displayOrder: item.displayOrder ?? index + 1,
+      isActive: item.isActive ?? true,
+    }))
+    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
+}
+
+function createAssetClassDraft(order: number): LicenseeAssetClass {
+  return {
+    assetClassId: makeLocalId("asset-class"),
+    name: "",
+    category: "Defensive",
+    displayOrder: order,
+    isActive: true,
+  };
+}
+
+function cloneRiskProfiles(licensee: LicenseeDto | null | undefined): LicenseeRiskProfile[] {
+  return (licensee?.riskProfiles ?? [])
+    .map((profile, index): LicenseeRiskProfile => ({
+      riskProfileId: profile.riskProfileId?.trim() || makeLocalId("risk-profile"),
+      riskProfileName: profile.riskProfileName?.trim() || "",
+      description: profile.description ?? "",
+      displayOrder: profile.displayOrder ?? index + 1,
+      timeframe: {
+        label: profile.timeframe?.label?.trim() || "",
+        minimumYears: profile.timeframe?.minimumYears ?? null,
+        maximumYears: profile.timeframe?.maximumYears ?? null,
+      },
+      assetAllocationSummary: {
+        defensiveAssetsPercent: profile.assetAllocationSummary?.defensiveAssetsPercent ?? 0,
+        growthAssetsPercent: profile.assetAllocationSummary?.growthAssetsPercent ?? 0,
+      },
+      strategicAssetAllocations: (profile.strategicAssetAllocations ?? []).map((allocation) => ({
+        assetClassId: allocation.assetClassId,
+        assetClassName: allocation.assetClassName,
+        category: allocation.category === "Growth" ? "Growth" : "Defensive",
+        targetPercent: allocation.targetPercent ?? 0,
+        minimumPercent: allocation.minimumPercent ?? null,
+        maximumPercent: allocation.maximumPercent ?? null,
+      })),
+      expectedReturns: {
+        expectedIncomePercent: profile.expectedReturns?.expectedIncomePercent ?? 0,
+        expectedGrowthPercent: profile.expectedReturns?.expectedGrowthPercent ?? 0,
+        totalExpectedReturnPercent: profile.expectedReturns?.totalExpectedReturnPercent ?? 0,
+        frankingPercent: profile.expectedReturns?.frankingPercent ?? 0,
+      },
+      negativeReturnFrequency: {
+        frequencyYears: profile.negativeReturnFrequency?.frequencyYears ?? null,
+        description: profile.negativeReturnFrequency?.description ?? "",
+      },
+      volatilityPercent: profile.volatilityPercent ?? null,
+      isActive: profile.isActive ?? true,
+      createdAt: profile.createdAt ?? null,
+      updatedAt: profile.updatedAt ?? null,
+    }))
+    .sort((left, right) => (left.displayOrder ?? 0) - (right.displayOrder ?? 0));
+}
+
+function createRiskProfileDraft(order: number): LicenseeRiskProfile {
+  return {
+    riskProfileId: makeLocalId("risk-profile"),
+    riskProfileName: "",
+    description: "",
+    displayOrder: order,
+    timeframe: {
+      label: "",
+      minimumYears: null,
+      maximumYears: null,
+    },
+    assetAllocationSummary: {
+      defensiveAssetsPercent: 0,
+      growthAssetsPercent: 0,
+    },
+    strategicAssetAllocations: [],
+    expectedReturns: {
+      expectedIncomePercent: 0,
+      expectedGrowthPercent: 0,
+      totalExpectedReturnPercent: 0,
+      frankingPercent: 0,
+    },
+    negativeReturnFrequency: {
+      frequencyYears: null,
+      description: "",
+    },
+    volatilityPercent: null,
+    isActive: true,
+  };
+}
+
+function isLocalId(value: string | null | undefined) {
+  return Boolean(value?.startsWith("asset-class-") || value?.startsWith("risk-profile-"));
+}
+
+function buildRiskProfilePayload(profile: LicenseeRiskProfile, assetClasses: LicenseeAssetClass[]): LicenseeRiskProfile {
+  const savedAssetClassIds = new Set(assetClasses.map((item) => item.assetClassId).filter((id): id is string => Boolean(id && !isLocalId(id))));
+  const allocations = profile.strategicAssetAllocations
+    .filter((allocation) => savedAssetClassIds.has(allocation.assetClassId))
+    .map((allocation) => ({
+      ...allocation,
+      targetPercent: allocation.targetPercent ?? 0,
+      minimumPercent: nullableNumber(allocation.minimumPercent),
+      maximumPercent: nullableNumber(allocation.maximumPercent),
+    }));
+  const defensiveAssetsPercent = allocations
+    .filter((allocation) => allocation.category === "Defensive")
+    .reduce((total, allocation) => total + (allocation.targetPercent ?? 0), 0);
+  const growthAssetsPercent = allocations
+    .filter((allocation) => allocation.category === "Growth")
+    .reduce((total, allocation) => total + (allocation.targetPercent ?? 0), 0);
+
+  return {
+    ...profile,
+    riskProfileId: isLocalId(profile.riskProfileId) ? null : profile.riskProfileId ?? null,
+    riskProfileName: profile.riskProfileName.trim() || "Untitled risk profile",
+    description: nullableText(profile.description ?? ""),
+    displayOrder: profile.displayOrder ?? 0,
+    timeframe: {
+      label: profile.timeframe.label.trim() || "Not specified",
+      minimumYears: nullableNumber(profile.timeframe.minimumYears),
+      maximumYears: nullableNumber(profile.timeframe.maximumYears),
+    },
+    assetAllocationSummary: {
+      defensiveAssetsPercent,
+      growthAssetsPercent,
+    },
+    strategicAssetAllocations: allocations,
+    expectedReturns: {
+      expectedIncomePercent: profile.expectedReturns.expectedIncomePercent ?? 0,
+      expectedGrowthPercent: profile.expectedReturns.expectedGrowthPercent ?? 0,
+      totalExpectedReturnPercent: profile.expectedReturns.totalExpectedReturnPercent ?? 0,
+      frankingPercent: profile.expectedReturns.frankingPercent ?? 0,
+    },
+    negativeReturnFrequency: {
+      frequencyYears: nullableNumber(profile.negativeReturnFrequency.frequencyYears),
+      description: nullableText(profile.negativeReturnFrequency.description ?? ""),
+    },
+    volatilityPercent: nullableNumber(profile.volatilityPercent),
+    isActive: profile.isActive ?? true,
+  };
+}
+
+function remapRiskProfilesToSavedAssetClasses(
+  profiles: LicenseeRiskProfile[],
+  previousAssetClasses: LicenseeAssetClass[],
+  savedAssetClasses: LicenseeAssetClass[],
+) {
+  const savedByPreviousId = new Map<string, LicenseeAssetClass>();
+
+  previousAssetClasses.forEach((previous) => {
+    if (!previous.assetClassId) {
+      return;
+    }
+
+    const matchingSaved = savedAssetClasses.find(
+      (saved) =>
+        saved.name.trim().toLowerCase() === previous.name.trim().toLowerCase() &&
+        saved.category === previous.category,
+    );
+
+    if (matchingSaved) {
+      savedByPreviousId.set(previous.assetClassId, matchingSaved);
+    }
+  });
+
+  return profiles.map((profile) => ({
+    ...profile,
+    strategicAssetAllocations: profile.strategicAssetAllocations.map((allocation) => {
+      const savedAssetClass = savedByPreviousId.get(allocation.assetClassId);
+
+      if (!savedAssetClass?.assetClassId) {
+        return allocation;
+      }
+
+      return {
+        ...allocation,
+        assetClassId: savedAssetClass.assetClassId,
+        assetClassName: savedAssetClass.name,
+        category: savedAssetClass.category,
+      };
+    }),
+  }));
+}
+
 async function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -133,6 +351,10 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>("create");
   const [draft, setDraft] = useState<StructureDraft | null>(null);
+  const [licenseeEditorTab, setLicenseeEditorTab] = useState<LicenseeEditorTab>("information");
+  const [assetClassesDraft, setAssetClassesDraft] = useState<LicenseeAssetClass[]>([]);
+  const [riskProfilesDraft, setRiskProfilesDraft] = useState<LicenseeRiskProfile[]>([]);
+  const [selectedRiskProfileId, setSelectedRiskProfileId] = useState<string>("");
   const [practiceQuery, setPracticeQuery] = useState("");
   const [selectedLicensee, setSelectedLicensee] = useState("All licensees");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -184,6 +406,7 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
   const paginatedItems = filteredItems.slice(pageStartIndex, pageEndIndex);
 
   const editingItem = items.find((item) => item.id === editingId) ?? null;
+  const selectedRiskProfile = riskProfilesDraft.find((profile) => profile.riskProfileId === selectedRiskProfileId) ?? null;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -200,6 +423,10 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
     setEditingId(null);
     setSaveError(null);
     setSaveSuccess(null);
+    setLicenseeEditorTab("information");
+    setAssetClassesDraft([]);
+    setRiskProfilesDraft([]);
+    setSelectedRiskProfileId("");
     setDraft(emptyDraft());
   }
 
@@ -208,6 +435,9 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
     setEditingId(item.id);
     setSaveError(null);
     setSaveSuccess(null);
+    setLicenseeEditorTab("information");
+    const summaryRecord = !isPractice && "record" in item ? item.record : null;
+    const summaryRiskProfiles = cloneRiskProfiles(summaryRecord);
     setDraft(
       isPractice
         ? {
@@ -217,6 +447,9 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
           }
         : licenseeToDraft("record" in item ? item.record : null, item as LicenseeSummary),
     );
+    setAssetClassesDraft(cloneAssetClasses(summaryRecord));
+    setRiskProfilesDraft(summaryRiskProfiles);
+    setSelectedRiskProfileId(summaryRiskProfiles[0]?.riskProfileId ?? "");
 
     if (!isPractice) {
       setIsLoadingDetails(true);
@@ -226,7 +459,11 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
         const fullRecord = result?.data ?? null;
 
         if (fullRecord) {
+          const nextRiskProfiles = cloneRiskProfiles(fullRecord);
           setDraft(licenseeToDraft(fullRecord, item as LicenseeSummary));
+          setAssetClassesDraft(cloneAssetClasses(fullRecord));
+          setRiskProfilesDraft(nextRiskProfiles);
+          setSelectedRiskProfileId(nextRiskProfiles[0]?.riskProfileId ?? "");
           setItems((existing) =>
             ((existing as LicenseeSummary[]).map((existingItem) =>
               existingItem.id === item.id && "practiceCount" in existingItem
@@ -250,6 +487,10 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
   function closeEditor() {
     setEditingId(null);
     setDraft(null);
+    setLicenseeEditorTab("information");
+    setAssetClassesDraft([]);
+    setRiskProfilesDraft([]);
+    setSelectedRiskProfileId("");
     setIsSaving(false);
     setIsLoadingDetails(false);
     setSaveError(null);
@@ -346,15 +587,20 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
             : await createAdminLicensee(payload);
 
         const saved = result?.data ?? payload;
+        const savedRecord = {
+          ...saved,
+          assetClasses: saved.assetClasses ?? current?.record.assetClasses ?? assetClassesDraft,
+          riskProfiles: saved.riskProfiles ?? current?.record.riskProfiles ?? riskProfilesDraft,
+        };
         const nextSummary: LicenseeSummary = {
-          id: saved.id?.trim() || current?.id || `licensee-${Date.now()}`,
-          name: saved.name?.trim() || payload.name,
+          id: savedRecord.id?.trim() || current?.id || `licensee-${Date.now()}`,
+          name: savedRecord.name?.trim() || payload.name,
           practiceCount: current?.practiceCount ?? 0,
           practices: current?.practices ?? [],
           userCount: current?.userCount ?? 0,
           activeUserCount: current?.activeUserCount ?? 0,
           appAdminCount: current?.appAdminCount ?? 0,
-          record: saved,
+          record: savedRecord,
         };
 
         setItems((existing) =>
@@ -370,6 +616,144 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
       setSaveError(error instanceof Error ? error.message : `Unable to save ${isPractice ? "practice" : "licensee"}.`);
       setIsSaving(false);
     }
+  }
+
+  function updateRiskProfile(profileId: string, updater: (profile: LicenseeRiskProfile) => LicenseeRiskProfile) {
+    setRiskProfilesDraft((existing) =>
+      existing.map((profile) => (profile.riskProfileId === profileId ? updater(profile) : profile)),
+    );
+  }
+
+  async function saveAssetClasses() {
+    const current = editingItem as LicenseeSummary | null;
+
+    if (!current) {
+      setSaveError("Save the licensee information before configuring asset classes.");
+      return null;
+    }
+
+    const payload = assetClassesDraft
+      .filter((item) => item.name.trim())
+      .map((item, index) => ({
+        ...item,
+        assetClassId: isLocalId(item.assetClassId) ? null : item.assetClassId ?? null,
+        name: item.name.trim(),
+        category: item.category,
+        displayOrder: item.displayOrder ?? index + 1,
+        isActive: item.isActive ?? true,
+      }));
+
+    const result = await updateAdminLicenseeAssetClasses(current.id, payload);
+    const savedAssetClasses = result?.data ?? payload;
+
+    setAssetClassesDraft(savedAssetClasses);
+    setItems((existing) =>
+      (existing as LicenseeSummary[]).map((item) =>
+        item.id === current.id ? { ...item, record: { ...item.record, assetClasses: savedAssetClasses } } : item,
+      ),
+    );
+
+    return savedAssetClasses;
+  }
+
+  async function saveRiskProfiles(assetClassesForSave = assetClassesDraft, profilesForSave = riskProfilesDraft) {
+    const current = editingItem as LicenseeSummary | null;
+
+    if (!current) {
+      setSaveError("Save the licensee information before configuring risk profiles.");
+      return null;
+    }
+
+    const payload = profilesForSave
+      .filter((profile) => profile.riskProfileName.trim())
+      .map((profile) => buildRiskProfilePayload(profile, assetClassesForSave));
+    const result = await updateAdminLicenseeRiskProfiles(current.id, payload);
+    const savedRiskProfiles = result?.data ?? payload;
+    const clonedSavedRiskProfiles = cloneRiskProfiles({ riskProfiles: savedRiskProfiles });
+
+    setRiskProfilesDraft(clonedSavedRiskProfiles);
+    setSelectedRiskProfileId((existing) => existing || clonedSavedRiskProfiles[0]?.riskProfileId || "");
+    setItems((existing) =>
+      (existing as LicenseeSummary[]).map((item) =>
+        item.id === current.id ? { ...item, record: { ...item.record, riskProfiles: savedRiskProfiles } } : item,
+      ),
+    );
+
+    return savedRiskProfiles;
+  }
+
+  async function saveRiskProfileTab() {
+    setIsSaving(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+
+    try {
+      await saveRiskProfiles();
+      setSaveSuccess("Risk profiles saved.");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save risk profiles.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveStrategicAssetAllocationTab() {
+    setIsSaving(true);
+    setSaveError(null);
+    setSaveSuccess(null);
+
+    try {
+      const previousAssetClasses = assetClassesDraft;
+      const savedAssetClasses = await saveAssetClasses();
+
+      if (savedAssetClasses) {
+        const remappedRiskProfiles = remapRiskProfilesToSavedAssetClasses(
+          riskProfilesDraft,
+          previousAssetClasses,
+          savedAssetClasses,
+        );
+
+        setRiskProfilesDraft(remappedRiskProfiles);
+        await saveRiskProfiles(savedAssetClasses, remappedRiskProfiles);
+        setSaveSuccess("Strategic asset allocations saved.");
+      }
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save strategic asset allocations.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function removeAssetClass(assetClass: LicenseeAssetClass, index: number) {
+    const current = editingItem as LicenseeSummary | null;
+
+    if (current && assetClass.assetClassId && !isLocalId(assetClass.assetClassId)) {
+      await deleteAdminLicenseeAssetClass(current.id, assetClass.assetClassId);
+    }
+
+    setAssetClassesDraft((existing) => existing.filter((_, itemIndex) => itemIndex !== index));
+    setRiskProfilesDraft((existing) =>
+      existing.map((profile) => ({
+        ...profile,
+        strategicAssetAllocations: profile.strategicAssetAllocations.filter(
+          (allocation) => allocation.assetClassId !== assetClass.assetClassId,
+        ),
+      })),
+    );
+  }
+
+  function handleModalSave() {
+    if (!isPractice && licenseeEditorTab === "riskProfiles") {
+      void saveRiskProfileTab();
+      return;
+    }
+
+    if (!isPractice && licenseeEditorTab === "strategicAssetAllocations") {
+      void saveStrategicAssetAllocationTab();
+      return;
+    }
+
+    void saveEntity();
   }
 
   async function deleteStructure(item: PracticeSummary | LicenseeSummary) {
@@ -605,70 +989,572 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
               </div>
             </div>
 
-            <div className={styles.formGrid}>
-              <label className={styles.field}>
-                <span>{isPractice ? "Practice name" : "Licensee name"}</span>
-                <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-              </label>
+            {!isPractice ? (
+              <div className={styles.editorTabs} role="tablist" aria-label="Licensee editor sections">
+                <button
+                  type="button"
+                  className={`${styles.editorTab} ${licenseeEditorTab === "information" ? styles.editorTabActive : ""}`}
+                  onClick={() => setLicenseeEditorTab("information")}
+                >
+                  Licensee Information
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.editorTab} ${licenseeEditorTab === "riskProfiles" ? styles.editorTabActive : ""}`}
+                  onClick={() => setLicenseeEditorTab("riskProfiles")}
+                  disabled={mode !== "edit"}
+                >
+                  Risk Profiles
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.editorTab} ${licenseeEditorTab === "strategicAssetAllocations" ? styles.editorTabActive : ""}`}
+                  onClick={() => setLicenseeEditorTab("strategicAssetAllocations")}
+                  disabled={mode !== "edit"}
+                >
+                  Strategic Asset Allocations
+                </button>
+              </div>
+            ) : null}
 
-              {isPractice ? (
+            {isPractice || licenseeEditorTab === "information" ? (
+              <div className={styles.formGrid}>
                 <label className={styles.field}>
-                  <span>Licensee</span>
-                  <select
-                    value={draft.licenseeId}
-                    onChange={(event) => setDraft({ ...draft, licenseeId: event.target.value })}
+                  <span>{isPractice ? "Practice name" : "Licensee name"}</span>
+                  <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+                </label>
+
+                {isPractice ? (
+                  <label className={styles.field}>
+                    <span>Licensee</span>
+                    <select
+                      value={draft.licenseeId}
+                      onChange={(event) => setDraft({ ...draft, licenseeId: event.target.value })}
+                    >
+                      <option value="">Unassigned licensee</option>
+                      {props.licensees.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                {!isPractice
+                  ? licenseeTextFields.map((field) => (
+                      <label className={styles.field} key={field.key}>
+                        <span>{field.label}</span>
+                        <input
+                          value={draft[field.key]}
+                          onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
+                          placeholder={field.placeholder}
+                        />
+                      </label>
+                    ))
+                  : null}
+
+                {!isPractice ? (
+                  <label className={`${styles.field} ${styles.logoUploadField}`}>
+                    <span>Licensee logo</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => void handleLicenseeLogoUpload(event.target.files?.[0] ?? null)}
+                    />
+                    <span className={styles.uploadMeta}>
+                      {draft.licenseeLogo ? "Licensee logo saved" : "Choose a logo file to upload"}
+                    </span>
+                    {draft.licenseeLogo ? (
+                      <img src={draft.licenseeLogo} alt="Licensee logo preview" className={styles.imagePreview} />
+                    ) : null}
+                  </label>
+                ) : null}
+
+                {!isPractice ? (
+                  <label className={styles.field}>
+                    <span>Custom prompt</span>
+                    <select
+                      value={draft.customPrompt ? "true" : "false"}
+                      onChange={(event) => setDraft({ ...draft, customPrompt: event.target.value === "true" })}
+                    >
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+
+            {!isPractice && licenseeEditorTab === "riskProfiles" ? (
+              <div className={styles.editorPanel}>
+                <div className={styles.contentCardHeader}>
+                  <div>
+                    <h4 className={styles.cardTitle}>Risk Profiles</h4>
+                    <p className={styles.helperText}>Create, update, or remove this licensee&apos;s risk profile options.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => {
+                      const next = createRiskProfileDraft(riskProfilesDraft.length + 1);
+                      setRiskProfilesDraft((existing) => [...existing, next]);
+                      setSelectedRiskProfileId(next.riskProfileId ?? "");
+                    }}
                   >
-                    <option value="">Unassigned licensee</option>
-                    {props.licensees.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.name}
+                    Add risk profile
+                  </button>
+                </div>
+
+                {riskProfilesDraft.length ? (
+                  <div className={styles.stackList}>
+                    {riskProfilesDraft.map((profile, index) => (
+                      <div className={styles.editorSubcard} key={profile.riskProfileId ?? index}>
+                        <div className={styles.formGrid}>
+                          <label className={styles.field}>
+                            <span>Risk profile name</span>
+                            <input
+                              value={profile.riskProfileName}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  riskProfileName: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Display order</span>
+                            <input
+                              type="number"
+                              value={displayNumber(profile.displayOrder)}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  displayOrder: readNumber(event.target.value),
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Timeframe label</span>
+                            <input
+                              value={profile.timeframe.label}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  timeframe: { ...existing.timeframe, label: event.target.value },
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Minimum years</span>
+                            <input
+                              type="number"
+                              value={displayNumber(profile.timeframe.minimumYears)}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  timeframe: { ...existing.timeframe, minimumYears: readNumber(event.target.value) },
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Maximum years</span>
+                            <input
+                              type="number"
+                              value={displayNumber(profile.timeframe.maximumYears)}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  timeframe: { ...existing.timeframe, maximumYears: readNumber(event.target.value) },
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Volatility %</span>
+                            <input
+                              type="number"
+                              value={displayNumber(profile.volatilityPercent)}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  volatilityPercent: readNumber(event.target.value),
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Negative return frequency years</span>
+                            <input
+                              type="number"
+                              value={displayNumber(profile.negativeReturnFrequency.frequencyYears)}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  negativeReturnFrequency: {
+                                    ...existing.negativeReturnFrequency,
+                                    frequencyYears: readNumber(event.target.value),
+                                  },
+                                }))
+                              }
+                            />
+                          </label>
+                          <label className={styles.field}>
+                            <span>Status</span>
+                            <select
+                              value={profile.isActive === false ? "false" : "true"}
+                              onChange={(event) =>
+                                updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                  ...existing,
+                                  isActive: event.target.value === "true",
+                                }))
+                              }
+                            >
+                              <option value="true">Active</option>
+                              <option value="false">Inactive</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <label className={styles.field}>
+                          <span>Description</span>
+                          <input
+                            value={profile.description ?? ""}
+                            onChange={(event) =>
+                              updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                ...existing,
+                                description: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+
+                        <label className={styles.field}>
+                          <span>Negative return frequency description</span>
+                          <input
+                            value={profile.negativeReturnFrequency.description ?? ""}
+                            onChange={(event) =>
+                              updateRiskProfile(profile.riskProfileId ?? "", (existing) => ({
+                                ...existing,
+                                negativeReturnFrequency: {
+                                  ...existing.negativeReturnFrequency,
+                                  description: event.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+
+                        <div className={styles.tableActions}>
+                          <button
+                            type="button"
+                            className={styles.dangerButton}
+                            onClick={() =>
+                              setRiskProfilesDraft((existing) =>
+                                existing.filter((existingProfile) => existingProfile.riskProfileId !== profile.riskProfileId),
+                              )
+                            }
+                          >
+                            Delete risk profile
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={styles.helperText}>No risk profiles configured yet.</p>
+                )}
+              </div>
+            ) : null}
+
+            {!isPractice && licenseeEditorTab === "strategicAssetAllocations" ? (
+              <div className={styles.editorPanel}>
+                <div className={styles.contentCardHeader}>
+                  <div>
+                    <h4 className={styles.cardTitle}>Asset Classes</h4>
+                    <p className={styles.helperText}>Define the licensee asset classes used by strategic allocations.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    onClick={() => setAssetClassesDraft((existing) => [...existing, createAssetClassDraft(existing.length + 1)])}
+                  >
+                    Add asset class
+                  </button>
+                </div>
+
+                <div className={styles.tableWrap}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Display order</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assetClassesDraft.map((assetClass, index) => (
+                        <tr key={assetClass.assetClassId ?? index}>
+                          <td>
+                            <input
+                              className={styles.inlineInput}
+                              value={assetClass.name}
+                              onChange={(event) =>
+                                setAssetClassesDraft((existing) =>
+                                  existing.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, name: event.target.value } : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <select
+                              className={styles.inlineInput}
+                              value={assetClass.category}
+                              onChange={(event) =>
+                                setAssetClassesDraft((existing) =>
+                                  existing.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, category: event.target.value === "Growth" ? "Growth" : "Defensive" }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              {ASSET_CLASS_CATEGORIES.map((category) => (
+                                <option key={category} value={category}>
+                                  {category}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              className={styles.inlineInput}
+                              type="number"
+                              value={displayNumber(assetClass.displayOrder)}
+                              onChange={(event) =>
+                                setAssetClassesDraft((existing) =>
+                                  existing.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, displayOrder: readNumber(event.target.value) } : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td>
+                            <select
+                              className={styles.inlineInput}
+                              value={assetClass.isActive === false ? "false" : "true"}
+                              onChange={(event) =>
+                                setAssetClassesDraft((existing) =>
+                                  existing.map((item, itemIndex) =>
+                                    itemIndex === index ? { ...item, isActive: event.target.value === "true" } : item,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="true">Active</option>
+                              <option value="false">Inactive</option>
+                            </select>
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className={styles.dangerButton}
+                              onClick={() => void removeAssetClass(assetClass, index)}
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {assetClassesDraft.length === 0 ? (
+                        <tr>
+                          <td colSpan={5}>No asset classes configured yet.</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className={styles.editorDivider} />
+
+                <label className={styles.field}>
+                  <span>Risk profile</span>
+                  <select value={selectedRiskProfileId} onChange={(event) => setSelectedRiskProfileId(event.target.value)}>
+                    <option value="">Select a risk profile</option>
+                    {riskProfilesDraft.map((profile) => (
+                      <option key={profile.riskProfileId} value={profile.riskProfileId ?? ""}>
+                        {profile.riskProfileName || "Untitled risk profile"}
                       </option>
                     ))}
                   </select>
                 </label>
-              ) : null}
 
-              {!isPractice
-                ? licenseeTextFields.map((field) => (
-                    <label className={styles.field} key={field.key}>
-                      <span>{field.label}</span>
-                      <input
-                        value={draft[field.key]}
-                        onChange={(event) => setDraft({ ...draft, [field.key]: event.target.value })}
-                        placeholder={field.placeholder}
-                      />
-                    </label>
-                  ))
-                : null}
+                {selectedRiskProfile ? (
+                  <>
+                    <div className={styles.formGrid}>
+                      <label className={styles.field}>
+                        <span>Expected income %</span>
+                        <input
+                          type="number"
+                          value={displayNumber(selectedRiskProfile.expectedReturns.expectedIncomePercent)}
+                          onChange={(event) =>
+                            updateRiskProfile(selectedRiskProfile.riskProfileId ?? "", (profile) => ({
+                              ...profile,
+                              expectedReturns: {
+                                ...profile.expectedReturns,
+                                expectedIncomePercent: readNumber(event.target.value) ?? 0,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>Expected growth %</span>
+                        <input
+                          type="number"
+                          value={displayNumber(selectedRiskProfile.expectedReturns.expectedGrowthPercent)}
+                          onChange={(event) =>
+                            updateRiskProfile(selectedRiskProfile.riskProfileId ?? "", (profile) => ({
+                              ...profile,
+                              expectedReturns: {
+                                ...profile.expectedReturns,
+                                expectedGrowthPercent: readNumber(event.target.value) ?? 0,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>Total expected return %</span>
+                        <input
+                          type="number"
+                          value={displayNumber(selectedRiskProfile.expectedReturns.totalExpectedReturnPercent)}
+                          onChange={(event) =>
+                            updateRiskProfile(selectedRiskProfile.riskProfileId ?? "", (profile) => ({
+                              ...profile,
+                              expectedReturns: {
+                                ...profile.expectedReturns,
+                                totalExpectedReturnPercent: readNumber(event.target.value) ?? 0,
+                              },
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className={styles.field}>
+                        <span>Franking %</span>
+                        <input
+                          type="number"
+                          value={displayNumber(selectedRiskProfile.expectedReturns.frankingPercent)}
+                          onChange={(event) =>
+                            updateRiskProfile(selectedRiskProfile.riskProfileId ?? "", (profile) => ({
+                              ...profile,
+                              expectedReturns: { ...profile.expectedReturns, frankingPercent: readNumber(event.target.value) ?? 0 },
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
 
-              {!isPractice ? (
-                <label className={`${styles.field} ${styles.logoUploadField}`}>
-                  <span>Licensee logo</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => void handleLicenseeLogoUpload(event.target.files?.[0] ?? null)}
-                  />
-                  <span className={styles.uploadMeta}>{draft.licenseeLogo ? "Licensee logo saved" : "Choose a logo file to upload"}</span>
-                  {draft.licenseeLogo ? (
-                    <img src={draft.licenseeLogo} alt="Licensee logo preview" className={styles.imagePreview} />
-                  ) : null}
-                </label>
-              ) : null}
+                    <div className={styles.tableWrap}>
+                      <table className={styles.table}>
+                        <thead>
+                          <tr>
+                            <th>Asset class</th>
+                            <th>Category</th>
+                            <th>Target %</th>
+                            <th>Minimum %</th>
+                            <th>Maximum %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {assetClassesDraft
+                            .filter((assetClass) => assetClass.name.trim())
+                            .map((assetClass) => {
+                              const assetClassId = assetClass.assetClassId ?? "";
+                              const allocation =
+                                selectedRiskProfile.strategicAssetAllocations.find(
+                                  (item) => item.assetClassId === assetClassId,
+                                ) ?? null;
 
-              {!isPractice ? (
-                <label className={styles.field}>
-                  <span>Custom prompt</span>
-                  <select
-                    value={draft.customPrompt ? "true" : "false"}
-                    onChange={(event) => setDraft({ ...draft, customPrompt: event.target.value === "true" })}
-                  >
-                    <option value="false">No</option>
-                    <option value="true">Yes</option>
-                  </select>
-                </label>
-              ) : null}
-            </div>
+                              function updateAllocation(
+                                key: "targetPercent" | "minimumPercent" | "maximumPercent",
+                                value: number | null,
+                              ) {
+                                updateRiskProfile(selectedRiskProfileId, (profile) => {
+                                  const existingAllocation = profile.strategicAssetAllocations.find(
+                                    (item) => item.assetClassId === assetClassId,
+                                  );
+                                  const nextAllocation = {
+                                    assetClassId,
+                                    assetClassName: assetClass.name,
+                                    category: assetClass.category,
+                                    targetPercent: 0,
+                                    minimumPercent: null,
+                                    maximumPercent: null,
+                                    ...existingAllocation,
+                                    [key]: value,
+                                  };
+                                  const otherAllocations = profile.strategicAssetAllocations.filter(
+                                    (item) => item.assetClassId !== assetClassId,
+                                  );
+
+                                  return {
+                                    ...profile,
+                                    strategicAssetAllocations: [...otherAllocations, nextAllocation],
+                                  };
+                                });
+                              }
+
+                              return (
+                                <tr key={assetClassId}>
+                                  <td>{assetClass.name}</td>
+                                  <td>{assetClass.category}</td>
+                                  <td>
+                                    <input
+                                      className={styles.inlineInput}
+                                      type="number"
+                                      value={displayNumber(allocation?.targetPercent)}
+                                      onChange={(event) => updateAllocation("targetPercent", readNumber(event.target.value) ?? 0)}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className={styles.inlineInput}
+                                      type="number"
+                                      value={displayNumber(allocation?.minimumPercent)}
+                                      onChange={(event) => updateAllocation("minimumPercent", readNumber(event.target.value))}
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      className={styles.inlineInput}
+                                      type="number"
+                                      value={displayNumber(allocation?.maximumPercent)}
+                                      onChange={(event) => updateAllocation("maximumPercent", readNumber(event.target.value))}
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : (
+                  <p className={styles.helperText}>Select a risk profile to configure strategic allocations and expected returns.</p>
+                )}
+              </div>
+            ) : null}
 
             {isLoadingDetails ? <p className={styles.cardText}>Loading full licensee details...</p> : null}
 
@@ -678,7 +1564,7 @@ export function AdminStructuresManager(props: AdminStructuresManagerProps) {
               <button type="button" className={styles.secondaryButton} onClick={closeEditor} disabled={isSaving}>
                 Cancel
               </button>
-              <button type="button" className={styles.primaryButton} onClick={saveEntity} disabled={isSaving}>
+              <button type="button" className={styles.primaryButton} onClick={handleModalSave} disabled={isSaving}>
                 {isSaving ? "Saving..." : "Save"}
               </button>
             </div>

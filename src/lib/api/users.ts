@@ -1,5 +1,5 @@
 import { apiRequest } from "./client";
-import type { ApiResult, LoginResponse, UserSummary } from "./types";
+import type { ApiResult, LoginResponse, UserPreferences, UserSummary } from "./types";
 
 export type LoginRequest = {
   email: string;
@@ -25,6 +25,21 @@ export async function getUsers(token: string) {
 export async function getUser(userId: string, token: string) {
   return apiRequest<ApiResult<UserSummary>>(`/api/Users/${encodeURIComponent(userId)}`, {
     method: "GET",
+    token,
+  });
+}
+
+export async function getUserPreferences(userId: string, token: string) {
+  return apiRequest<ApiResult<UserPreferences>>(`/api/Users/${encodeURIComponent(userId)}/Preferences`, {
+    method: "GET",
+    token,
+  });
+}
+
+export async function updateUserPreferences(userId: string, payload: UserPreferences, token: string) {
+  return apiRequest<ApiResult<boolean>>(`/api/Users/${encodeURIComponent(userId)}/Preferences`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
     token,
   });
 }

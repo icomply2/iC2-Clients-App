@@ -13,7 +13,8 @@ import {
   writeSoaProjectionPackage,
   writeSoaProjectionScenarioOptions,
 } from "@/lib/projections/soa-projection-package";
-import type { ClientProfile, PersonRecord } from "@/lib/api/types";
+import { listAdminLicensees } from "@/lib/api/admin";
+import type { ClientProfile, LicenseeDto, LicenseeRiskProfile, PersonRecord } from "@/lib/api/types";
 import type { FinancialProjectionV1 } from "@/lib/soa-types";
 import styles from "./projections.module.css";
 
@@ -58,6 +59,14 @@ type ScenarioAssumptionOverrides = {
       standardDeviation?: number | null;
       defensivePct?: number | null;
       growthPct?: number | null;
+      strategicAllocations?: Array<{
+        assetClassId: string;
+        assetClassName: string;
+        category: "Defensive" | "Growth";
+        targetPct: number;
+        minimumPct?: number | null;
+        maximumPct?: number | null;
+      }>;
     }
   >;
 };
@@ -495,6 +504,79 @@ function getInitialRiskProfileAssumptions() {
       ];
     }),
   );
+}
+
+function normalizeLookupValue(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function activeLicenseeRiskProfiles(licensee: LicenseeDto | null | undefined) {
+  return (licensee?.riskProfiles ?? [])
+    .filter((profile) => profile?.riskProfileName?.trim() && profile.isActive !== false)
+    .sort((left, right) => {
+      const leftOrder = left.displayOrder ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = right.displayOrder ?? Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.riskProfileName.localeCompare(right.riskProfileName);
+    });
+}
+
+function findClientLicensee(licensees: LicenseeDto[], profile: ClientProfile | null | undefined) {
+  const clientLicenseeName = normalizeLookupValue(profile?.licensee);
+  const adviserLicenseeName = normalizeLookupValue(profile?.adviser?.licensee?.name);
+  const adviserLicenseeId = normalizeLookupValue(profile?.adviser?.licensee?.id);
+
+  return (
+    licensees.find((licensee) => adviserLicenseeId && normalizeLookupValue(licensee.id) === adviserLicenseeId) ??
+    licensees.find((licensee) => adviserLicenseeName && normalizeLookupValue(licensee.name) === adviserLicenseeName) ??
+    licensees.find((licensee) => clientLicenseeName && normalizeLookupValue(licensee.name) === clientLicenseeName) ??
+    null
+  );
+}
+
+function mapLicenseeRiskProfilesToProjectionAssumptions(riskProfiles: LicenseeRiskProfile[]) {
+  return Object.fromEntries(
+    riskProfiles.map((riskProfile) => {
+      const name = riskProfile.riskProfileName.trim();
+      const incomeRate = (riskProfile.expectedReturns?.expectedIncomePercent ?? 0) / 100;
+      const growthRate = (riskProfile.expectedReturns?.expectedGrowthPercent ?? 0) / 100;
+      const totalReturn = (riskProfile.expectedReturns?.totalExpectedReturnPercent ?? 0) / 100;
+      const defensivePct = riskProfile.assetAllocationSummary?.defensiveAssetsPercent != null
+        ? riskProfile.assetAllocationSummary.defensiveAssetsPercent / 100
+        : null;
+      const growthPct = riskProfile.assetAllocationSummary?.growthAssetsPercent != null
+        ? riskProfile.assetAllocationSummary.growthAssetsPercent / 100
+        : defensivePct != null
+          ? Math.max(0, 1 - defensivePct)
+          : null;
+
+      return [
+        name,
+        {
+          incomeRate,
+          growthRate: growthRate || Math.max(0, totalReturn - incomeRate),
+          standardDeviation: riskProfile.volatilityPercent != null ? riskProfile.volatilityPercent / 100 : null,
+          defensivePct,
+          growthPct,
+          strategicAllocations: (riskProfile.strategicAssetAllocations ?? [])
+            .filter((allocation) => allocation.assetClassName?.trim())
+            .map((allocation) => ({
+              assetClassId: allocation.assetClassId,
+              assetClassName: allocation.assetClassName,
+              category: allocation.category,
+              targetPct: (allocation.targetPercent ?? 0) / 100,
+              minimumPct: allocation.minimumPercent != null ? allocation.minimumPercent / 100 : null,
+              maximumPct: allocation.maximumPercent != null ? allocation.maximumPercent / 100 : null,
+            })),
+        },
+      ];
+    }),
+  );
+}
+
+function riskProfileAssumptionNames(riskProfiles: LicenseeRiskProfile[]) {
+  const names = riskProfiles.map((profile) => profile.riskProfileName.trim()).filter(Boolean);
+  return names.length ? names : editableRiskProfileNames;
 }
 
 function getInitialScenarioAssumptionOverrides(): ScenarioAssumptionOverrides {
@@ -1956,6 +2038,8 @@ function ProjectionsPageContent() {
   const [mappingStatus, setMappingStatus] = useState<"idle" | "mapping" | "mapped" | "error">("idle");
   const [clientImportStatus, setClientImportStatus] = useState<ClientImportStatus>("idle");
   const [clientImportMessage, setClientImportMessage] = useState<string | null>(null);
+  const [licenseeRiskProfiles, setLicenseeRiskProfiles] = useState<LicenseeRiskProfile[]>([]);
+  const [licenseeRiskProfileSource, setLicenseeRiskProfileSource] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<ProjectionSection>("scenario-inputs");
   const [activeScenarioInputTab, setActiveScenarioInputTab] = useState<ScenarioInputTab>("scenario-details");
   const [cashflowViewMode, setCashflowViewMode] = useState<"table" | "chart">("table");
@@ -2019,6 +2103,60 @@ function ProjectionsPageContent() {
       setWorkspaceStateLoaded(true);
     }
   }, [workspaceStorageKey]);
+
+  useEffect(() => {
+    if (!workspaceStateLoaded || !linkedClientId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadLicenseeRiskProfiles() {
+      try {
+        const [profileResponse, licenseesResult] = await Promise.all([
+          fetch(`/api/finley/soa/client-profile?clientId=${encodeURIComponent(linkedClientId)}`, {
+            method: "GET",
+            cache: "no-store",
+          }),
+          listAdminLicensees(),
+        ]);
+        const profileBody = (await profileResponse.json().catch(() => null)) as { profile?: ClientProfile } | null;
+
+        if (cancelled || !profileResponse.ok || !profileBody?.profile) {
+          return;
+        }
+
+        const licensees = licenseesResult?.data ?? [];
+        const matchedLicensee = findClientLicensee(licensees, profileBody.profile);
+        const matchedRiskProfiles = activeLicenseeRiskProfiles(matchedLicensee);
+
+        setLicenseeRiskProfiles(matchedRiskProfiles);
+        setLicenseeRiskProfileSource(matchedRiskProfiles.length ? matchedLicensee?.name ?? "client licensee" : null);
+
+        if (matchedRiskProfiles.length) {
+          const licenseeAssumptions = mapLicenseeRiskProfilesToProjectionAssumptions(matchedRiskProfiles);
+          setScenarioAssumptionOverrides((current) => ({
+            ...current,
+            riskProfiles: {
+              ...current.riskProfiles,
+              ...licenseeAssumptions,
+            },
+          }));
+        }
+      } catch {
+        if (!cancelled) {
+          setLicenseeRiskProfiles([]);
+          setLicenseeRiskProfileSource(null);
+        }
+      }
+    }
+
+    loadLicenseeRiskProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [linkedClientId, workspaceStateLoaded]);
 
   useEffect(() => {
     if (!workspaceStateLoaded || typeof window === "undefined") {
@@ -2104,10 +2242,28 @@ function ProjectionsPageContent() {
 
   const mappedScenario = scenarios.find((scenario) => scenario.scenarioId === activeScenarioId) ?? null;
   const hasSourceDataReady = Boolean(scenarioFile || pendingClientProfileScenario);
+  const activeRiskProfileNames = useMemo(() => riskProfileAssumptionNames(licenseeRiskProfiles), [licenseeRiskProfiles]);
   const activeAssumptions = useMemo(
     () => {
+      const licenseeAssumptions = mapLicenseeRiskProfilesToProjectionAssumptions(licenseeRiskProfiles);
+      const baseRiskProfiles = {
+        ...currentProjectionAssumptions.investmentProfiles.profiles,
+        ...Object.fromEntries(
+          Object.entries(licenseeAssumptions).map(([profileName, profile]) => [
+            profileName,
+            {
+              incomeRate: profile.incomeRate,
+              growthRate: profile.growthRate,
+              totalReturn: profile.incomeRate + profile.growthRate,
+              standardDeviation: profile.standardDeviation ?? 0,
+              defensivePct: profile.defensivePct ?? 0,
+              growthPct: profile.growthPct ?? 0,
+            },
+          ]),
+        ),
+      };
       const riskProfiles = Object.fromEntries(
-        Object.entries(currentProjectionAssumptions.investmentProfiles.profiles).map(([profileName, profile]) => {
+        Object.entries(baseRiskProfiles).map(([profileName, profile]) => {
           const override = scenarioAssumptionOverrides.riskProfiles[profileName];
           const incomeRate = override?.incomeRate ?? profile.incomeRate;
           const growthRate = override?.growthRate ?? profile.growthRate;
@@ -2148,7 +2304,7 @@ function ProjectionsPageContent() {
         },
       };
     },
-    [scenarioAssumptionOverrides],
+    [licenseeRiskProfiles, scenarioAssumptionOverrides],
   );
   const viewModel = useMemo(
     () => buildProjectionViewModel(mappedScenario ?? blankProjectionScenario, activeAssumptions),
@@ -3386,7 +3542,7 @@ function ProjectionsPageContent() {
             tableId: "risk-profile-return-assumptions",
             title: "Risk profile return assumptions",
             columns: ["Income return", "Growth return", "Total return", "Volatility", "Defensive assets", "Growth assets"],
-            rows: editableRiskProfileNames.map((profileName) => {
+            rows: activeRiskProfileNames.map((profileName) => {
               const profile = activeAssumptions.investmentProfiles.profiles[profileName];
               const incomeRate = profile?.incomeRate ?? 0;
               const growthRate = profile?.growthRate ?? 0;
@@ -3787,6 +3943,15 @@ function ProjectionsPageContent() {
 
         <div className={styles.inputCard}>
           <h4>Risk profile return assumptions</h4>
+          {licenseeRiskProfileSource ? (
+            <p className={styles.inputHint}>
+              Using risk profiles configured for {licenseeRiskProfileSource}.
+            </p>
+          ) : (
+            <p className={styles.inputHint}>
+              Using the default projection risk profiles because no active licensee profiles are available for this client.
+            </p>
+          )}
           <div className={styles.tableWrap}>
             <table className={styles.dataTable}>
               <thead>
@@ -3801,7 +3966,7 @@ function ProjectionsPageContent() {
                 </tr>
               </thead>
               <tbody>
-                {editableRiskProfileNames.map((profileName) => {
+                {activeRiskProfileNames.map((profileName) => {
                   const profile = scenarioAssumptionOverrides.riskProfiles[profileName];
                   const incomeRate = profile?.incomeRate ?? 0;
                   const growthRate = profile?.growthRate ?? 0;
@@ -3847,6 +4012,47 @@ function ProjectionsPageContent() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className={styles.inputCard}>
+          <h4>Strategic asset allocations</h4>
+          <div className={styles.tableWrap}>
+            <table className={styles.dataTable}>
+              <thead>
+                <tr>
+                  <th>Risk profile</th>
+                  <th>Asset class</th>
+                  <th>Category</th>
+                  <th>Target</th>
+                  <th>Minimum</th>
+                  <th>Maximum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeRiskProfileNames.flatMap((profileName) => {
+                  const allocations = scenarioAssumptionOverrides.riskProfiles[profileName]?.strategicAllocations ?? [];
+
+                  return allocations.map((allocation) => (
+                    <tr key={`${profileName}-${allocation.assetClassId || allocation.assetClassName}`}>
+                      <td>{profileName}</td>
+                      <td>{allocation.assetClassName}</td>
+                      <td>{allocation.category}</td>
+                      <td>{percentInputValue(allocation.targetPct)}%</td>
+                      <td>{allocation.minimumPct == null ? "-" : `${percentInputValue(allocation.minimumPct)}%`}</td>
+                      <td>{allocation.maximumPct == null ? "-" : `${percentInputValue(allocation.maximumPct)}%`}</td>
+                    </tr>
+                  ));
+                })}
+                {activeRiskProfileNames.every(
+                  (profileName) => !(scenarioAssumptionOverrides.riskProfiles[profileName]?.strategicAllocations ?? []).length,
+                ) ? (
+                  <tr>
+                    <td colSpan={6}>No strategic asset allocations configured for this licensee.</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
@@ -4313,11 +4519,11 @@ function ProjectionsPageContent() {
                           <option value="none">None</option>
                           <option value="cpi">CPI</option>
                           <option value="cash">Cash</option>
-                          <option value="Defensive">Defensive</option>
-                          <option value="Moderate">Moderate</option>
-                          <option value="Balanced">Balanced</option>
-                          <option value="Growth">Growth</option>
-                          <option value="High Growth">High Growth</option>
+                          {activeRiskProfileNames.map((profileName) => (
+                            <option key={profileName} value={profileName}>
+                              {profileName}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td>

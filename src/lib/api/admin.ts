@@ -1,4 +1,4 @@
-import type { ApiResult, LicenseeDto, PracticeDto, UpdateUserRequest } from "./types";
+import type { ApiResult, LicenseeAssetClass, LicenseeDto, LicenseeRiskProfile, PracticeDto, UpdateUserRequest } from "./types";
 
 type AdminUserUpdateResponse = ApiResult<boolean>;
 
@@ -41,6 +41,16 @@ export async function createAdminLicensee(payload: LicenseeDto) {
   return (await readResponse(response)) as ApiResult<LicenseeDto> | null;
 }
 
+export async function listAdminLicensees() {
+  const response = await fetch("/api/admin/licensees", {
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  return (await readResponse(response)) as ApiResult<LicenseeDto[]> | null;
+}
+
 export async function getAdminLicensee(licenseeId: string) {
   const response = await fetch(`/api/admin/licensees/${encodeURIComponent(licenseeId)}`, {
     headers: {
@@ -73,6 +83,46 @@ export async function deleteAdminLicensee(licenseeId: string) {
   });
 
   return (await readResponse(response)) as ApiResult<boolean> | null;
+}
+
+export async function updateAdminLicenseeAssetClasses(licenseeId: string, payload: LicenseeAssetClass[]) {
+  const response = await fetch(`/api/admin/licensees/${encodeURIComponent(licenseeId)}/asset-classes`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return (await readResponse(response)) as ApiResult<LicenseeAssetClass[]> | null;
+}
+
+export async function deleteAdminLicenseeAssetClass(licenseeId: string, assetClassId: string) {
+  const response = await fetch(
+    `/api/admin/licensees/${encodeURIComponent(licenseeId)}/asset-classes/${encodeURIComponent(assetClassId)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+      },
+    },
+  );
+
+  return (await readResponse(response)) as ApiResult<boolean> | null;
+}
+
+export async function updateAdminLicenseeRiskProfiles(licenseeId: string, payload: LicenseeRiskProfile[]) {
+  const response = await fetch(`/api/admin/licensees/${encodeURIComponent(licenseeId)}/risk-profiles`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return (await readResponse(response)) as ApiResult<LicenseeRiskProfile[]> | null;
 }
 
 export async function deleteAdminPractice(practiceId: string) {

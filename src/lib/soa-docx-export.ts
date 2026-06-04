@@ -19,6 +19,14 @@ import {
   INSURANCE_NEEDS_REQUIREMENT_ITEMS,
   normalizeInsuranceNeedsLineItems,
 } from "@/lib/soa-insurance-needs";
+import {
+  flattenInsuranceNeedsAnalysesFromAdvice,
+  flattenInsuranceRecommendationsFromAdvice,
+  flattenInsuranceReplacementsFromAdvice,
+  getInsuranceAdvicePeople,
+  hasCurrentCoverReviewContent,
+  hasInsuranceRecommendationsContent,
+} from "@/lib/soa-insurance-advice";
 import { parseRecommendationMarkdown } from "@/lib/recommendation-markdown";
 import { sanitizeClientFacingResearchLanguage } from "@/lib/soa-recommendation-language";
 import { getProductFeeTypeLabel } from "@/lib/soa-fee-types";
@@ -83,6 +91,39 @@ type DocxBuildAssets = {
   allocationChartPng?: Uint8Array | null;
   assetLiabilityChartPngs?: Array<Uint8Array | null>;
 };
+
+function normalizeTextListKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[.;,\s]+$/g, "");
+}
+
+function dedupeTextList(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const text = value?.trim();
+    if (!text) {
+      continue;
+    }
+
+    const key = normalizeTextListKey(text);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(text);
+  }
+
+  return result;
+}
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const DEFAULT_HEADING_COLOR = "#B3742A";
@@ -1192,9 +1233,10 @@ function buildCover(input: SoaDocxExportInput, fontFamily: string, textColor: st
 function buildContents(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const hasReplacementAnalysis = input.adviceCase.recommendations.replacement.length > 0;
   const includesInsuranceAdvice = includesAdviceModule(input.adviceCase, "insurance-advice");
-  const hasInsuranceNeedsAnalysis = includesInsuranceAdvice && Boolean(input.adviceCase.recommendations.insuranceNeedsAnalyses?.length);
-  const hasInsuranceRecommendations = includesInsuranceAdvice && Boolean(input.adviceCase.recommendations.insurancePolicies?.length);
-  const hasInsuranceReplacement = includesInsuranceAdvice && Boolean(input.adviceCase.recommendations.insuranceReplacements?.length);
+  const insuranceAdvicePeople = getInsuranceAdvicePeople(input.adviceCase);
+  const hasInsuranceCurrentCoverReview = includesInsuranceAdvice && hasCurrentCoverReviewContent(insuranceAdvicePeople);
+  const hasInsuranceNeedsAnalysis = includesInsuranceAdvice && Boolean(flattenInsuranceNeedsAnalysesFromAdvice(insuranceAdvicePeople).length);
+  const hasInsuranceRecommendations = includesInsuranceAdvice && hasInsuranceRecommendationsContent(insuranceAdvicePeople);
   const feeAgreement = input.adviceCase.agreements.feeAgreement;
   const hasServiceAgreement = Boolean(feeAgreement?.present);
   const isFixedTermAgreement = feeAgreement?.agreementType === "fixed-term";
@@ -1209,9 +1251,9 @@ function buildContents(input: SoaDocxExportInput, fontFamily: string, textColor:
     "Investment Portfolio Recommendations",
     "Portfolio Allocation",
     ...(hasReplacementAnalysis ? ["Replacement Analysis"] : []),
+    ...(hasInsuranceCurrentCoverReview ? ["Current Cover Review"] : []),
     ...(hasInsuranceNeedsAnalysis ? ["Insurance Needs Analysis"] : []),
-    ...(hasInsuranceRecommendations ? ["Recommended Insurance Policies"] : []),
-    ...(hasInsuranceReplacement ? ["Insurance Product Replacement"] : []),
+    ...(hasInsuranceRecommendations ? ["Insurance Recommendations"] : []),
     "Projected Outcomes",
     "Fees and Disclosures",
     "Authority to Proceed",
@@ -1268,6 +1310,7 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
   const adviceFeeTotal = adviceCase.fees.adviceFees.reduce((sum, fee) => sum + (fee.amount ?? 0), 0);
   const serviceAgreementFeeItems = adviceCase.agreements.feeAgreement?.feeItems ?? [];
   const totalServiceAgreementFees = serviceAgreementFeeItems.reduce((sum, feeItem) => sum + getServiceFeeAnnualAmount(feeItem), 0);
+  const includedScope = dedupeTextList(adviceCase.scope.included.map((item) => item.topic));
   const betterPositionRows = [
     ...adviceCase.recommendations.strategic.map((recommendation) => ({
       recommendation: recommendation.recommendationText || "Draft strategy recommendation not yet written.",
@@ -1292,8 +1335,8 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
     normal(EXECUTIVE_SUMMARY_INTRO, fontFamily, textColor),
     heading("What Our Advice Covers", 2, fontFamily),
     normal(EXECUTIVE_SUMMARY_SCOPE_INTRO, fontFamily, textColor),
-    ...(adviceCase.scope.included.length
-      ? adviceCase.scope.included.map((item) => bullet(item.topic, fontFamily, textColor))
+    ...(includedScope.length
+      ? includedScope.map((item) => bullet(item, fontFamily, textColor))
       : [normal("No scope items have been recorded.", fontFamily, textColor)]),
     heading("Better Position Statement", 2, fontFamily),
     normal(BETTER_POSITION_STATEMENT_INTRO, fontFamily, textColor),
@@ -1369,7 +1412,8 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
 
 function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: string) {
   const adviceCase = input.adviceCase;
-  const limitationsAndExclusions = [...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations];
+  const includedScope = dedupeTextList(adviceCase.scope.included.map((item) => item.topic));
+  const limitationsAndExclusions = dedupeTextList([...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations]);
 
   return [
     sectionTitle("About This Advice", fontFamily),
@@ -1380,8 +1424,8 @@ function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: st
     heading("Scope of Advice", 2, fontFamily),
     emptyParagraph(),
     paragraph("Included scope", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingAfter: 20 }, fontFamily, textColor),
-    ...(adviceCase.scope.included.length
-      ? adviceCase.scope.included.map((item) => bullet(item.topic, fontFamily, textColor))
+    ...(includedScope.length
+      ? includedScope.map((item) => bullet(item, fontFamily, textColor))
       : [normal("No included scope has been recorded.", fontFamily, textColor)]),
     emptyParagraph(),
     paragraph("Limitations and exclusions", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingBefore: 120, spacingAfter: 20 }, fontFamily, textColor),
@@ -1770,8 +1814,77 @@ function buildProductRecommendations(
     .join("");
 }
 
+function buildInsuranceCurrentCoverReview(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
+  const insuranceAdvicePeople = getInsuranceAdvicePeople(input.adviceCase);
+
+  if (!includesAdviceModule(input.adviceCase, "insurance-advice") || !hasCurrentCoverReviewContent(insuranceAdvicePeople)) {
+    return "";
+  }
+
+  return [
+    sectionTitle("Current Cover Review", fontFamily),
+    normal("We have reviewed your current insurance cover before assessing your needs and making recommendations.", fontFamily, textColor),
+    ...insuranceAdvicePeople.flatMap((personAdvice) => {
+      const person = input.adviceCase.clientGroup.clients.find((entry) => entry.personId === personAdvice.personId);
+      const hasContent =
+        personAdvice.currentCoverReview.policies.length ||
+        personAdvice.currentCoverReview.summary ||
+        personAdvice.currentCoverReview.reviewNotes ||
+        personAdvice.insurabilityAssessment.adviserAssessment ||
+        personAdvice.insurabilityAssessment.healthNotes;
+
+      if (!hasContent) return [];
+
+      return [
+        heading(person?.fullName ?? "Client", 2, fontFamily),
+        personAdvice.currentCoverReview.summary ? normal(personAdvice.currentCoverReview.summary, fontFamily, textColor) : "",
+        personAdvice.currentCoverReview.policies.length
+          ? table(
+              [
+                [
+                  headerCell("Policy", tableHeaderColor, DEFAULT_TEXT_COLOR, 22),
+                  headerCell("Insurer", tableHeaderColor, DEFAULT_TEXT_COLOR, 18),
+                  headerCell("Benefits", tableHeaderColor, DEFAULT_TEXT_COLOR, 30),
+                  headerCell("Premium", tableHeaderColor, DEFAULT_TEXT_COLOR, 12),
+                  headerCell("Review notes", tableHeaderColor, DEFAULT_TEXT_COLOR, 18),
+                ],
+                ...personAdvice.currentCoverReview.policies.map((policy) => [
+                  { text: policy.policyName || policy.productName || "Current policy", widthPct: 22 },
+                  { text: policy.insurerName || "To be confirmed", widthPct: 18 },
+                  {
+                    text:
+                      policy.benefits
+                        .map((benefit) =>
+                          `${toTitleCase(benefit.coverType)} ${
+                            benefit.coverType === "income-protection"
+                              ? `${formatCurrency(benefit.monthlyBenefit)}/month`
+                              : formatCurrency(benefit.sumInsured)
+                          }`,
+                        )
+                        .join(", ") || "To be confirmed",
+                    widthPct: 30,
+                  },
+                  { text: formatCurrency(policy.annualisedPremium ?? policy.premiumAmount), widthPct: 12 },
+                  { text: policy.replacementRiskNotes || policy.retainabilityNotes || policy.exclusionsOrLoadings || "To be confirmed", widthPct: 18 },
+                ]),
+              ],
+              fontFamily,
+              textColor,
+            )
+          : "",
+        personAdvice.insurabilityAssessment.adviserAssessment || personAdvice.insurabilityAssessment.healthNotes
+          ? [
+              heading("Insurability considerations", 2, fontFamily),
+              normal(personAdvice.insurabilityAssessment.adviserAssessment || personAdvice.insurabilityAssessment.healthNotes || "", fontFamily, textColor),
+            ].join("")
+          : "",
+      ];
+    }),
+  ].join("");
+}
+
 function buildInsuranceNeedsAnalysis(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
-  const analyses = input.adviceCase.recommendations.insuranceNeedsAnalyses ?? [];
+  const analyses = flattenInsuranceNeedsAnalysesFromAdvice(getInsuranceAdvicePeople(input.adviceCase));
 
   if (!includesAdviceModule(input.adviceCase, "insurance-advice") || !analyses.length) {
     return "";
@@ -1862,14 +1975,16 @@ function buildInsuranceNeedsAnalysis(input: SoaDocxExportInput, fontFamily: stri
 }
 
 function buildInsuranceRecommendations(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
-  const policies = input.adviceCase.recommendations.insurancePolicies ?? [];
+  const insuranceAdvicePeople = getInsuranceAdvicePeople(input.adviceCase);
+  const policies = flattenInsuranceRecommendationsFromAdvice(insuranceAdvicePeople);
+  const replacements = flattenInsuranceReplacementsFromAdvice(insuranceAdvicePeople);
 
-  if (!includesAdviceModule(input.adviceCase, "insurance-advice") || !policies.length) {
+  if (!includesAdviceModule(input.adviceCase, "insurance-advice") || (!policies.length && !replacements.length)) {
     return "";
   }
 
   return [
-    sectionTitle("Recommended Insurance Policies", fontFamily),
+    sectionTitle("Insurance Recommendations", fontFamily),
     normal(INSURANCE_RECOMMENDATIONS_INTRO, fontFamily, textColor),
     ...policies.flatMap((policy, policyIndex) => {
       const insuredPerson = input.adviceCase.clientGroup.clients.find((person) => person.personId === policy.insuredPersonId);
@@ -1931,9 +2046,68 @@ function buildInsuranceRecommendations(input: SoaDocxExportInput, fontFamily: st
         policy.replacementNotes ? normal(policy.replacementNotes, fontFamily, textColor) : "",
       ];
     }),
+    replacements.length ? heading("Replacement analysis", 2, fontFamily) : "",
+    ...replacements.flatMap((replacement) => {
+      const ownerName = getOwnerName(input.adviceCase, replacement.ownerPersonId);
+      const premiumDifference =
+        replacement.premiumDifference ??
+        ((replacement.recommendedPolicy.totalAnnualPremium ?? 0) - (replacement.currentPolicy.totalAnnualPremium ?? 0));
+
+      return [
+        heading(ownerName, 2, fontFamily),
+        table(
+          [
+            [
+              headerCell("", tableHeaderColor, DEFAULT_TEXT_COLOR, 34),
+              headerCell("Current", tableHeaderColor, DEFAULT_TEXT_COLOR, 33),
+              headerCell("Recommended", tableHeaderColor, DEFAULT_TEXT_COLOR, 33),
+            ],
+            [
+              { text: "Insurer", widthPct: 34 },
+              { text: getInsurancePolicySnapshotValue(replacement.currentPolicy, "insurer"), widthPct: 33 },
+              { text: getInsurancePolicySnapshotValue(replacement.recommendedPolicy, "insurer"), widthPct: 33 },
+            ],
+            [
+              { text: "Life cover", widthPct: 34 },
+              { text: getInsurancePolicySnapshotValue(replacement.currentPolicy, "totalLifeCover"), widthPct: 33 },
+              { text: getInsurancePolicySnapshotValue(replacement.recommendedPolicy, "totalLifeCover"), widthPct: 33 },
+            ],
+            [
+              { text: "TPD cover", widthPct: 34 },
+              { text: getInsurancePolicySnapshotValue(replacement.currentPolicy, "totalTpdCover"), widthPct: 33 },
+              { text: getInsurancePolicySnapshotValue(replacement.recommendedPolicy, "totalTpdCover"), widthPct: 33 },
+            ],
+            [
+              { text: "Income protection", widthPct: 34 },
+              { text: getInsurancePolicySnapshotValue(replacement.currentPolicy, "totalIncomeProtectionCover"), widthPct: 33 },
+              { text: getInsurancePolicySnapshotValue(replacement.recommendedPolicy, "totalIncomeProtectionCover"), widthPct: 33 },
+            ],
+            [
+              { text: "Trauma cover", widthPct: 34 },
+              { text: getInsurancePolicySnapshotValue(replacement.currentPolicy, "totalTraumaCover"), widthPct: 33 },
+              { text: getInsurancePolicySnapshotValue(replacement.recommendedPolicy, "totalTraumaCover"), widthPct: 33 },
+            ],
+            [
+              { text: "Annual premium", widthPct: 34 },
+              { text: getInsurancePolicySnapshotValue(replacement.currentPolicy, "totalAnnualPremium"), widthPct: 33 },
+              { text: getInsurancePolicySnapshotValue(replacement.recommendedPolicy, "totalAnnualPremium"), widthPct: 33 },
+            ],
+            [
+              totalCell("Premium difference", tableHeaderColor, DEFAULT_TEXT_COLOR, 34),
+              totalCell(formatCurrency(premiumDifference), tableHeaderColor, DEFAULT_TEXT_COLOR, 66),
+            ],
+          ],
+          fontFamily,
+          textColor,
+        ),
+        ...(replacement.reasons.length ? [heading("Reasons", 2, fontFamily), ...replacement.reasons.map((reason) => bullet(reason, fontFamily, textColor))] : []),
+      ];
+    }),
   ].join("");
 }
 
+// Retained for legacy export shape reference while replacement analysis is now rendered inside Insurance Recommendations.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function buildInsuranceReplacement(input: SoaDocxExportInput, fontFamily: string, textColor: string, tableHeaderColor: string) {
   const replacements = input.adviceCase.recommendations.insuranceReplacements ?? [];
 
@@ -3007,9 +3181,9 @@ function buildDocument(input: SoaDocxExportInput, assets: DocxBuildAssets) {
     DEFAULT_HEADING_COLOR,
   );
   const replacementAnalysis = buildReplacementAnalysis(input, fontFamily, textColor, tableHeaderColor);
+  const insuranceCurrentCoverReview = buildInsuranceCurrentCoverReview(input, fontFamily, textColor, tableHeaderColor);
   const insuranceNeedsAnalysis = buildInsuranceNeedsAnalysis(input, fontFamily, textColor, tableHeaderColor);
   const insuranceRecommendations = buildInsuranceRecommendations(input, fontFamily, textColor, tableHeaderColor);
-  const insuranceReplacement = buildInsuranceReplacement(input, fontFamily, textColor, tableHeaderColor);
   const serviceAgreement = buildServiceAgreement(input, fontFamily, textColor, tableHeaderColor);
 
   const body = [
@@ -3036,9 +3210,9 @@ function buildDocument(input: SoaDocxExportInput, assets: DocxBuildAssets) {
     buildPortfolioAllocation(input, fontFamily, textColor, tableHeaderColor, assets),
     pageBreak(),
     ...(replacementAnalysis ? [replacementAnalysis, pageBreak()] : []),
+    ...(insuranceCurrentCoverReview ? [insuranceCurrentCoverReview, pageBreak()] : []),
     ...(insuranceNeedsAnalysis ? [insuranceNeedsAnalysis, pageBreak()] : []),
     ...(insuranceRecommendations ? [insuranceRecommendations, pageBreak()] : []),
-    ...(insuranceReplacement ? [insuranceReplacement, pageBreak()] : []),
     buildProjections(input, fontFamily, textColor, tableHeaderColor, assets),
     pageBreak(),
     buildFees(input, fontFamily, textColor, tableHeaderColor),
