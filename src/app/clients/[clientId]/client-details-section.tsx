@@ -85,6 +85,15 @@ type EmploymentSourceRecord = NonNullable<PersonRecord["employment"]>[number] | 
 
 type EditStepKey = "overview" | "personal" | "contact" | "health" | "employment" | "agreement";
 
+type AdviserOption = {
+  id: string;
+  entityId: string;
+  name: string;
+  email: string;
+  practiceName: string;
+  licenseeName: string;
+};
+
 const EDIT_STEPS: { key: EditStepKey; label: string }[] = [
   { key: "overview", label: "Overview" },
   { key: "personal", label: "Client Details" },
@@ -568,7 +577,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
   const [saving, setSaving] = useState(false);
   const [removedEmploymentIds, setRemovedEmploymentIds] = useState<string[]>([]);
   const [adviserName, setAdviserName] = useState(profile.adviser?.name ?? "");
-  const [adviserOptions, setAdviserOptions] = useState<Array<{ id: string; entityId: string; name: string; email: string }>>([]);
+  const [adviserOptions, setAdviserOptions] = useState<AdviserOption[]>([]);
   const [riskProfileOptions, setRiskProfileOptions] = useState<SelectOption[]>(DEFAULT_RISK_PROFILE_OPTIONS);
   const hasPartner = hasMeaningfulPerson(partner);
 
@@ -643,23 +652,42 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
           return;
         }
 
-        const nextOptions = Array.from(
-          new Map(
-            (body?.data ?? [])
-              //.filter((adviser) => user.userRole?.trim().toLowerCase() === "adviser")
-              .filter((adviser) => adviser?.practiceName?.trim() === practiceName) 
-              .filter((adviser) => typeof adviser.name === "string" && adviser.name.trim())
-              .map((adviser) => [
-                adviser.entityId ?? adviser.id ?? adviser.name!,
-                {
-                  id: adviser.id ?? adviser.name!,
-                  entityId: adviser.entityId?.trim() ?? "",
-                  name: adviser.name!.trim(),
-                  email: adviser.email?.trim() ?? "",
-                },
-              ]),
-          ).values(),
-        ).sort((left, right) => left.name.localeCompare(right.name));
+        const scopedPractice = normalizeLookupValue(practiceName);
+        const scopedLicensee = normalizeLookupValue(licenseeName);
+        const optionsByKey = new Map<string, AdviserOption>();
+
+        for (const adviser of body?.data ?? []) {
+          const name = adviser.name?.trim();
+          if (!name) {
+            continue;
+          }
+
+          const adviserPractice = normalizeLookupValue(adviser.practiceName);
+          const adviserLicensee = normalizeLookupValue(adviser.licenseeName);
+          const matchesPractice = !scopedPractice || !adviserPractice || adviserPractice === scopedPractice;
+          const matchesLicensee = !scopedLicensee || !adviserLicensee || adviserLicensee === scopedLicensee;
+
+          if (!matchesPractice || !matchesLicensee) {
+            continue;
+          }
+
+          const option: AdviserOption = {
+            id: adviser.id?.trim() || name,
+            entityId: adviser.entityId?.trim() ?? "",
+            name,
+            email: adviser.email?.trim() ?? "",
+            practiceName: adviser.practiceName?.trim() ?? "",
+            licenseeName: adviser.licenseeName?.trim() ?? "",
+          };
+          const key = normalizeLookupValue(option.entityId || option.id || option.email || option.name);
+          const existing = optionsByKey.get(key);
+
+          if (!existing || (!existing.entityId && option.entityId)) {
+            optionsByKey.set(key, option);
+          }
+        }
+
+        const nextOptions = Array.from(optionsByKey.values()).sort((left, right) => left.name.localeCompare(right.name));
 
         setAdviserOptions(nextOptions);
       } catch {
@@ -715,6 +743,23 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     setEditing(target);
   }
 
+  function resolveSelectedAdviserOption(selectedName: string) {
+    const normalizedName = normalizeLookupValue(selectedName);
+    const existingEntity = profile.adviser?.entity?.trim();
+    const existingEmail = profile.adviser?.email?.trim();
+    const selectedExistingAdviser = normalizedName === normalizeLookupValue(profile.adviser?.name);
+
+    return (
+      (selectedExistingAdviser
+        ? adviserOptions.find((option) => existingEntity && option.entityId === existingEntity) ??
+          adviserOptions.find((option) => existingEmail && normalizeLookupValue(option.email) === normalizeLookupValue(existingEmail))
+        : null) ??
+      adviserOptions.find((option) => normalizeLookupValue(option.name) === normalizedName && option.entityId) ??
+      adviserOptions.find((option) => normalizeLookupValue(option.name) === normalizedName) ??
+      null
+    );
+  }
+
   async function handleSave() {
     if (!editing || !profile.id) {
       return;
@@ -732,8 +777,13 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
     setSaveError(null);
 
     try {
-      const selectedAdviserOption = adviserOptions.find((option) => option.name === draft.adviser) ?? null;
-      const selectedAdviserEntity = selectedAdviserOption?.entityId || profile.adviser?.entity || "";
+      const adviserChanged = normalizeLookupValue(draft.adviser) !== normalizeLookupValue(adviserName);
+      const selectedAdviserOption = resolveSelectedAdviserOption(draft.adviser);
+      const selectedAdviserEntity =
+        selectedAdviserOption?.entityId ||
+        (!adviserChanged && normalizeLookupValue(profile.adviser?.name) === normalizeLookupValue(draft.adviser)
+          ? profile.adviser?.entity ?? ""
+          : "");
       const nextAdviser: ClientAdviserRecord | null =
         draft.adviser.trim()
           ? {
@@ -744,7 +794,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
             }
           : null;
 
-      if (nextAdviser && !nextAdviser.entity) {
+      if (adviserChanged && nextAdviser && !nextAdviser.entity) {
         throw new Error("This adviser is missing an adviser entity id, so the profile cannot be saved yet.");
       }
 
@@ -772,7 +822,7 @@ export function ClientDetailsSection({ profile, useMockFallback }: ClientDetails
         nextAnniversaryDate: draft.nextAnniversaryDate,
       };
 
-      if (draft.adviser.trim() !== adviserName.trim()) {
+      if (adviserChanged) {
         await updateClientProfileAdviser(
           profile.id,
           {

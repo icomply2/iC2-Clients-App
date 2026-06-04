@@ -92,6 +92,39 @@ type DocxBuildAssets = {
   assetLiabilityChartPngs?: Array<Uint8Array | null>;
 };
 
+function normalizeTextListKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[.;,\s]+$/g, "");
+}
+
+function dedupeTextList(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const text = value?.trim();
+    if (!text) {
+      continue;
+    }
+
+    const key = normalizeTextListKey(text);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(text);
+  }
+
+  return result;
+}
+
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const DEFAULT_HEADING_COLOR = "#B3742A";
 const DEFAULT_TEXT_COLOR = "#2F4A6D";
@@ -1277,6 +1310,7 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
   const adviceFeeTotal = adviceCase.fees.adviceFees.reduce((sum, fee) => sum + (fee.amount ?? 0), 0);
   const serviceAgreementFeeItems = adviceCase.agreements.feeAgreement?.feeItems ?? [];
   const totalServiceAgreementFees = serviceAgreementFeeItems.reduce((sum, feeItem) => sum + getServiceFeeAnnualAmount(feeItem), 0);
+  const includedScope = dedupeTextList(adviceCase.scope.included.map((item) => item.topic));
   const betterPositionRows = [
     ...adviceCase.recommendations.strategic.map((recommendation) => ({
       recommendation: recommendation.recommendationText || "Draft strategy recommendation not yet written.",
@@ -1301,8 +1335,8 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
     normal(EXECUTIVE_SUMMARY_INTRO, fontFamily, textColor),
     heading("What Our Advice Covers", 2, fontFamily),
     normal(EXECUTIVE_SUMMARY_SCOPE_INTRO, fontFamily, textColor),
-    ...(adviceCase.scope.included.length
-      ? adviceCase.scope.included.map((item) => bullet(item.topic, fontFamily, textColor))
+    ...(includedScope.length
+      ? includedScope.map((item) => bullet(item, fontFamily, textColor))
       : [normal("No scope items have been recorded.", fontFamily, textColor)]),
     heading("Better Position Statement", 2, fontFamily),
     normal(BETTER_POSITION_STATEMENT_INTRO, fontFamily, textColor),
@@ -1378,7 +1412,8 @@ function buildExecutiveSummary(input: SoaDocxExportInput, fontFamily: string, te
 
 function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: string) {
   const adviceCase = input.adviceCase;
-  const limitationsAndExclusions = [...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations];
+  const includedScope = dedupeTextList(adviceCase.scope.included.map((item) => item.topic));
+  const limitationsAndExclusions = dedupeTextList([...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations]);
 
   return [
     sectionTitle("About This Advice", fontFamily),
@@ -1389,8 +1424,8 @@ function buildAbout(input: SoaDocxExportInput, fontFamily: string, textColor: st
     heading("Scope of Advice", 2, fontFamily),
     emptyParagraph(),
     paragraph("Included scope", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingAfter: 20 }, fontFamily, textColor),
-    ...(adviceCase.scope.included.length
-      ? adviceCase.scope.included.map((item) => bullet(item.topic, fontFamily, textColor))
+    ...(includedScope.length
+      ? includedScope.map((item) => bullet(item, fontFamily, textColor))
       : [normal("No included scope has been recorded.", fontFamily, textColor)]),
     emptyParagraph(),
     paragraph("Limitations and exclusions", { bold: true, fontSize: DEFAULT_BODY_FONT_SIZE, spacingBefore: 120, spacingAfter: 20 }, fontFamily, textColor),

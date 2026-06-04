@@ -3670,7 +3670,8 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         let adviserName = activeClient.clientAdviserName ?? "";
         let clientEntityId = activeClient.id ?? "";
         let clientName = activeClient.name ?? "";
-        let invoiceReferenceNumber = "1";
+        let invoiceReferenceNumber = "";
+        let invoiceReferenceError: string | null = null;
         let clientNameOptions: InvoiceRecipientOption[] = clientName ? [{ value: clientName, label: clientName, email: "" }] : [];
 
         try {
@@ -3714,9 +3715,12 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
           if (response.ok && typeof body?.referenceNumber === "string" && body.referenceNumber.trim()) {
             invoiceReferenceNumber = body.referenceNumber.trim();
+          } else {
+            invoiceReferenceError = body?.error?.trim() || "Unable to load the next invoice reference.";
           }
-        } catch {
-          // Keep the invoice workflow usable if the invoice search API is unavailable.
+        } catch (error) {
+          invoiceReferenceError =
+            error instanceof Error ? error.message : "Unable to load the next invoice reference.";
         }
 
         setStarterAssistantMessage({
@@ -3733,7 +3737,7 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
         setFactFindWorkflow(null);
         setFactFindStepIndex(0);
         setFactFindWorkflowError(null);
-        setInvoiceWorkflowError(null);
+        setInvoiceWorkflowError(invoiceReferenceError);
         setEngagementLetterDraftCard(null);
         setRoaDraftCard(null);
         setAgreementDraftCard(null);
@@ -4198,6 +4202,11 @@ export function FinleyConsole({ initialClientId }: FinleyConsoleProps) {
 
   async function handleInvoiceGenerateDocx() {
     if (!activeClientId || !invoicePlaceholderCard) return;
+
+    if (!invoicePlaceholderCard.referenceNumber.trim()) {
+      setInvoiceWorkflowError("Enter an invoice reference before saving the invoice.");
+      return;
+    }
 
     setIsGeneratingInvoiceDocx(true);
     setInvoiceWorkflowError(null);

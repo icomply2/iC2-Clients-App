@@ -111,6 +111,45 @@ function resolveClientEntityId(profile: ClientProfile, invoice: InvoiceDocxInput
   );
 }
 
+function formatApiError(error: ApiError, fallback: string) {
+  const parts = [fallback];
+
+  if (error.details) {
+    try {
+      const details = JSON.parse(error.details) as {
+        message?: string | null;
+        modelErrors?: { fieldName?: string | null; errorMessage?: string | null }[] | null;
+        errors?: Record<string, string[] | string> | null;
+      };
+
+      if (details.message && details.message !== error.message) {
+        parts.push(details.message);
+      }
+
+      for (const modelError of details.modelErrors ?? []) {
+        const fieldName = modelError.fieldName?.trim();
+        const errorMessage = modelError.errorMessage?.trim();
+
+        if (fieldName || errorMessage) {
+          parts.push([fieldName, errorMessage].filter(Boolean).join(": "));
+        }
+      }
+
+      for (const [fieldName, messages] of Object.entries(details.errors ?? {})) {
+        const text = Array.isArray(messages) ? messages.join("; ") : messages;
+
+        if (text) {
+          parts.push(`${fieldName}: ${text}`);
+        }
+      }
+    } catch {
+      // The raw API details are best-effort only; keep the concise fallback if parsing fails.
+    }
+  }
+
+  return Array.from(new Set(parts.filter(Boolean))).join(" ");
+}
+
 function buildInvoiceSavePayload({
   clientId,
   profile,
@@ -241,7 +280,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message =
       error instanceof ApiError
-        ? `Unable to load the live invoice data (${error.statusCode}): ${error.message}`
+        ? formatApiError(error, `Unable to save the invoice (${error.statusCode}): ${error.message}`)
         : error instanceof Error
           ? error.message
           : "Unable to generate the invoice document right now.";

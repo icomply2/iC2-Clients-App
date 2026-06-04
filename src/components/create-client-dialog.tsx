@@ -104,7 +104,8 @@ export function CreateClientDialog({
     let isMounted = true;
     async function loadAdviserOptions() {
       const params = new URLSearchParams();
-      const scopedPracticeName = currentUserScope?.practice?.name?.trim() || defaultPracticeName?.trim();
+      const scopedPracticeName =
+        currentUserScope?.practice?.name?.trim() || practiceName.trim() || defaultPracticeName?.trim();
       const normalizedPracticeName = scopedPracticeName?.toLowerCase();
       const licenseeName = currentUserScope?.licensee?.name?.trim() || defaultLicenseeName?.trim();
       const normalizedLicenseeName = licenseeName?.toLowerCase();
@@ -119,8 +120,8 @@ export function CreateClientDialog({
         params.set("licenseeName", licenseeName);
       }
 
-      if (!isComplianceManager && practiceName) {
-        params.set("practiceName", practiceName);
+      if (!isComplianceManager && scopedPracticeName) {
+        params.set("practiceName", scopedPracticeName);
       }
 
       try {
@@ -152,11 +153,11 @@ export function CreateClientDialog({
 
         const scopedUserAdvisers = (usersBody?.data ?? [])
           .filter((user) => user.name)
-          .filter((user) => normalizeText(user.userRole) === "adviser")
+          .filter((user) => !user.userRole || normalizeText(user.userRole) === "adviser")
           .filter((user) =>
             isComplianceManager
-              ? normalizeText(user.licenseeName) === normalizedLicenseeName
-              : normalizeText(user.practiceName) === normalizedPracticeName,
+              ? !user.licenseeName || normalizeText(user.licenseeName) === normalizedLicenseeName
+              : !user.practiceName || normalizeText(user.practiceName) === normalizedPracticeName,
           )
           .map((user) => ({
             id: "",
@@ -295,6 +296,7 @@ export function CreateClientDialog({
     defaultPracticeName,
     isComplianceManager,
     isOpen,
+    practiceName,
   ]);
 
   function handleAdviserChange(nextValue: string) {
@@ -327,6 +329,11 @@ export function CreateClientDialog({
         adviserOptions.find((option) => getCreateClientAdviserOptionValue(option) === adviserValue) ??
         adviserOptions[0] ??
         null;
+      if (selectedAdviser && !selectedAdviser.entityId) {
+        setError("This adviser is missing an adviser entity id, so the client profile cannot be created yet.");
+        return;
+      }
+
       const selectedAdviserPracticeName = selectedAdviser?.practiceName?.trim();
       const resolvedPracticeName =
         (isComplianceManager ? selectedAdviserPracticeName : "") ||
@@ -455,7 +462,7 @@ export function CreateClientDialog({
                   ? currentUserScope?.licensee?.name || defaultLicenseeName
                     ? "No advisers available in this licensee"
                     : "No licensee selected"
-                  : currentUserScope?.practice?.name || defaultPracticeName
+                  : practiceName.trim() || currentUserScope?.practice?.name || defaultPracticeName
                     ? "No advisers available in this practice"
                     : "No practice selected"}
               </option>
