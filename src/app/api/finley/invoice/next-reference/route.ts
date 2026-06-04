@@ -14,7 +14,7 @@ type InvoiceSearchResult = {
 type InvoiceSearchApiResult = ApiResult<InvoiceSearchResult | unknown[]>;
 
 const MAX_SEARCH_PAGES = 8;
-const SEARCH_PAGE_SIZE = 200;
+const SEARCH_PAGE_SIZE = 100;
 
 async function loadProfile(clientId: string, token: string) {
   try {
@@ -38,7 +38,15 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function stringValue(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return "";
 }
 
 function nestedString(record: Record<string, unknown>, path: string[]): string {
@@ -151,13 +159,18 @@ async function searchInvoices(token: string, targetLicenseeValues: string[]) {
   let continuationToken: string | null = null;
 
   for (let page = 0; page < MAX_SEARCH_PAGES; page += 1) {
+    const searchBody: Record<string, unknown> = {
+      pageSize: SEARCH_PAGE_SIZE,
+    };
+
+    if (continuationToken) {
+      searchBody.continuationToken = continuationToken;
+    }
+
     const body = await apiRequest<InvoiceSearchApiResult>("/api/Invoices/Search", {
       method: "POST",
       token,
-      body: JSON.stringify({
-        pageSize: SEARCH_PAGE_SIZE,
-        continuationToken,
-      }),
+      body: JSON.stringify(searchBody),
     });
     const { rows, continuationToken: nextContinuationToken } = invoiceRowsFromResponse(body);
 

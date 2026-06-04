@@ -400,6 +400,34 @@ function normalizeText(value: string) {
   return value.trim().toLowerCase();
 }
 
+function normalizeScopeTopicKey(value: string) {
+  return normalizeText(value)
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[.;,\s]+$/g, "")
+    .trim();
+}
+
+function dedupeScopeTopics(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const topic = value?.trim();
+    if (!topic) continue;
+
+    const key = normalizeScopeTopicKey(topic);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    result.push(topic);
+  }
+
+  return result;
+}
+
 function resolvePersonIdsFromNames(
   names: string[] | null | undefined,
   people: AdviceCaseV1["clientGroup"]["clients"],
@@ -784,6 +812,57 @@ const INSURANCE_PREMIUM_FREQUENCY_OPTIONS: Array<{ value: NonNullable<InsuranceP
 
 function makeId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function makeScopeItemsFromTopics(
+  topics: Array<string | null | undefined>,
+  existingItems: AdviceCaseV1["scope"]["included"] = [],
+) {
+  const existingByKey = new Map(
+    existingItems
+      .map((item) => [normalizeScopeTopicKey(item.topic), item] as const)
+      .filter(([key]) => Boolean(key)),
+  );
+
+  return dedupeScopeTopics(topics).map((topic) => {
+    const existing = existingByKey.get(normalizeScopeTopicKey(topic));
+    return existing ? { ...existing, topic } : { scopeItemId: makeId("scope"), topic };
+  });
+}
+
+function getScopeIncludedTopics(scope: AdviceCaseV1["scope"]) {
+  return dedupeScopeTopics(scope.included.map((item) => item.topic));
+}
+
+function getScopeExclusionTopics(scope: AdviceCaseV1["scope"]) {
+  return dedupeScopeTopics([...scope.excluded.map((item) => item.topic), ...scope.limitations]);
+}
+
+function normalizeAdviceScope(scope: AdviceCaseV1["scope"]) {
+  return {
+    included: makeScopeItemsFromTopics(scope.included.map((item) => item.topic), scope.included),
+    excluded: makeScopeItemsFromTopics(
+      [...scope.excluded.map((item) => item.topic), ...scope.limitations],
+      scope.excluded,
+    ),
+    limitations: [],
+  };
+}
+
+function normalizeAdviceCaseScope(adviceCase: AdviceCaseV1) {
+  return {
+    ...adviceCase,
+    scope: normalizeAdviceScope(adviceCase.scope),
+  };
+}
+
+function hasScopeDuplication(scope: AdviceCaseV1["scope"]) {
+  return (
+    scope.limitations.some((item) => item.trim()) ||
+    getScopeIncludedTopics(scope).length !== scope.included.filter((item) => item.topic.trim()).length ||
+    getScopeExclusionTopics(scope).length !==
+      [...scope.excluded.map((item) => item.topic), ...scope.limitations].filter((item) => item.trim()).length
+  );
 }
 
 function createEmptyRiskProfile(): RiskProfileV1 {
@@ -1887,8 +1966,23 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
     setInsuranceWorkspaceDraft(readInsuranceWorkspaceDraft(activeClientId));
   }, [activeClientId, insuranceWorkspaceRefreshKey]);
 
+  useEffect(() => {
+    if (!hasScopeDuplication(adviceCase.scope)) {
+      return;
+    }
+
+    setAdviceCase((current) =>
+      hasScopeDuplication(current.scope)
+        ? {
+            ...current,
+            scope: normalizeAdviceScope(current.scope),
+          }
+        : current,
+    );
+  }, [adviceCase.scope]);
+
   function resetConsoleState(nextAdviceCase: AdviceCaseV1) {
-    setAdviceCase(nextAdviceCase);
+    setAdviceCase(normalizeAdviceCaseScope(nextAdviceCase));
     setMessages([]);
     setUploads([]);
     setShowReadiness(false);
@@ -1965,7 +2059,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
   }, [activeClientId]);
 
   function hydrateScenarioDraft(draft: SoaScenarioDraftValue) {
-    setAdviceCase(normalizeAdviceCaseRecommendationLanguage(draft.adviceCase, activeClient?.name));
+    setAdviceCase(normalizeAdviceCaseScope(normalizeAdviceCaseRecommendationLanguage(draft.adviceCase, activeClient?.name)));
     setMessages(draft.messages as Message[]);
     setUploads(draft.uploads as UploadedInput[]);
     setShowReadiness(false);
@@ -3003,8 +3097,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           priority: objective.priority ?? null,
         })),
         scope: {
-          included: nextAssessment.candidateScopeInclusions.map((topic) => ({ scopeItemId: makeId("scope"), topic })),
-          excluded: nextAssessment.candidateScopeExclusions.map((topic) => ({ scopeItemId: makeId("scope"), topic })),
+          included: makeScopeItemsFromTopics(nextAssessment.candidateScopeInclusions),
+          excluded: makeScopeItemsFromTopics(nextAssessment.candidateScopeExclusions),
           limitations: [],
         },
         riskProfile: adviceCase.riskProfile ?? null,
@@ -3045,8 +3139,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           priority: objective.priority ?? null,
         })),
         scope: {
-          included: nextAssessment.candidateScopeInclusions.map((topic) => ({ scopeItemId: makeId("scope"), topic })),
-          excluded: nextAssessment.candidateScopeExclusions.map((topic) => ({ scopeItemId: makeId("scope"), topic })),
+          included: makeScopeItemsFromTopics(nextAssessment.candidateScopeInclusions),
+          excluded: makeScopeItemsFromTopics(nextAssessment.candidateScopeExclusions),
           limitations: [],
         },
         riskProfile: adviceCase.riskProfile ?? null,
@@ -3148,8 +3242,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           included: "Agreed Scope field. Items that are included in the advice.",
           exclusions: "Limitations / Exclusions field. Items outside the advice scope or explicitly excluded.",
         },
-        included: adviceCase.scope.included.map((item) => item.topic),
-        exclusions: [...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations],
+        included: getScopeIncludedTopics(adviceCase.scope),
+        exclusions: getScopeExclusionTopics(adviceCase.scope),
       };
     }
 
@@ -3744,14 +3838,9 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                 objectives: nextObjectives,
                 scope: {
                   ...current.scope,
-                  included: nextAssessment.candidateScopeInclusions.map((topic) => ({
-                    scopeItemId: makeId("scope"),
-                    topic,
-                  })),
-                  excluded: nextAssessment.candidateScopeExclusions.map((topic) => ({
-                    scopeItemId: makeId("scope"),
-                    topic,
-                  })),
+                  included: makeScopeItemsFromTopics(nextAssessment.candidateScopeInclusions, current.scope.included),
+                  excluded: makeScopeItemsFromTopics(nextAssessment.candidateScopeExclusions, current.scope.excluded),
+                  limitations: [],
                 },
                 recommendations: {
                   ...current.recommendations,
@@ -4371,8 +4460,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
           ...current,
           scope: {
             ...current.scope,
-            included: edit.scope?.included.map((topic) => ({ scopeItemId: makeId("scope"), topic })) ?? [],
-            excluded: edit.scope?.exclusions.map((topic) => ({ scopeItemId: makeId("scope"), topic })) ?? [],
+            included: makeScopeItemsFromTopics(edit.scope?.included ?? [], current.scope.included),
+            excluded: makeScopeItemsFromTopics(edit.scope?.exclusions ?? [], current.scope.excluded),
             limitations: [],
           },
           metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
@@ -5318,17 +5407,17 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       <textarea
                         className={`${finleyStyles.composerInput} ${styles.largeTextarea}`.trim()}
                         placeholder="One scope item per line"
-                        value={adviceCase.scope.included.map((item) => item.topic).join("\n")}
+                        value={getScopeIncludedTopics(adviceCase.scope).join("\n")}
                         onChange={(event) => {
+                          const entries = event.target.value
+                            .split(/\r?\n/)
+                            .map((line) => line.trim())
+                            .filter(Boolean);
                           setAdviceCase((current) => ({
                             ...current,
                             scope: {
                               ...current.scope,
-                              included: event.target.value
-                                .split(/\r?\n/)
-                                .map((line) => line.trim())
-                                .filter(Boolean)
-                                .map((topic) => ({ scopeItemId: makeId("scope"), topic })),
+                              included: makeScopeItemsFromTopics(entries, current.scope.included),
                             },
                             metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
                           }));
@@ -5341,10 +5430,7 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                       <textarea
                         className={`${finleyStyles.composerInput} ${styles.largeTextarea}`.trim()}
                         placeholder="One limitation or exclusion per line"
-                        value={[
-                          ...adviceCase.scope.excluded.map((item) => item.topic),
-                          ...adviceCase.scope.limitations,
-                        ].join("\n")}
+                        value={getScopeExclusionTopics(adviceCase.scope).join("\n")}
                         onChange={(event) => {
                           const entries = event.target.value
                             .split(/\r?\n/)
@@ -5354,8 +5440,8 @@ export function FinleySoaConsole({ initialClientId, initialSoaId }: FinleySoaCon
                             ...current,
                             scope: {
                               ...current.scope,
-                              excluded: entries.map((topic) => ({ scopeItemId: makeId("scope"), topic })),
-                              limitations: entries,
+                              excluded: makeScopeItemsFromTopics(entries, current.scope.excluded),
+                              limitations: [],
                             },
                             metadata: { ...current.metadata, updatedAt: new Date().toISOString() },
                           }));

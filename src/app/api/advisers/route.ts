@@ -8,6 +8,20 @@ function normalizeText(value?: string | null) {
   return value?.trim().toLowerCase() ?? "";
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
 function matchesScope(record: { practiceName?: string | null; licenseeName?: string | null }, practiceName?: string | null, licenseeName?: string | null) {
   const scopedPractice = normalizeText(practiceName);
   const scopedLicensee = normalizeText(licenseeName);
@@ -18,19 +32,27 @@ function matchesScope(record: { practiceName?: string | null; licenseeName?: str
 }
 
 function userToAdviserSummary(user: UserSummary): AdviserSummary | null {
-  if (normalizeText(user.userRole) !== "adviser" || !user.name?.trim()) {
+  const rawUser = user as UserSummary & Record<string, unknown>;
+  const role = isRecord(rawUser.role)
+    ? readString(rawUser.userRole, rawUser.role.name, rawUser.roleName)
+    : readString(rawUser.userRole, rawUser.role, rawUser.roleName);
+  const name = readString(rawUser.name, rawUser.fullName, rawUser.displayName);
+  const practice = isRecord(rawUser.practice) ? rawUser.practice : null;
+  const licensee = isRecord(rawUser.licensee) ? rawUser.licensee : null;
+
+  if (normalizeText(role) !== "adviser" || !name) {
     return null;
   }
 
   return {
-    id: user.id ?? null,
-    entityId: user.entityId ?? null,
-    name: user.name ?? null,
-    email: user.email ?? null,
-    userRole: user.userRole ?? null,
-    practiceName: user.practice?.name ?? null,
-    licenseeName: user.licensee?.name ?? null,
-    licenseeId: user.licensee?.id ?? null,
+    id: readString(rawUser.id, rawUser.userId),
+    entityId: readString(rawUser.entityId, rawUser.adviserEntityId),
+    name,
+    email: readString(rawUser.email, rawUser.emailAddress),
+    userRole: role,
+    practiceName: readString(practice?.name, rawUser.practiceName, rawUser.practiceDisplayName),
+    licenseeName: readString(licensee?.name, rawUser.licenseeName, rawUser.licenseeDisplayName),
+    licenseeId: readString(licensee?.id, rawUser.licenseeId),
   };
 }
 

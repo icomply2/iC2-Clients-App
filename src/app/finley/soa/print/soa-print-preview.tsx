@@ -88,6 +88,39 @@ const ABOUT_ADVICE_WARNINGS = [
   },
 ];
 
+function normalizeTextListKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/[.;,\s]+$/g, "");
+}
+
+function dedupeTextList(values: Array<string | null | undefined>) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const text = value?.trim();
+    if (!text) {
+      continue;
+    }
+
+    const key = normalizeTextListKey(text);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(text);
+  }
+
+  return result;
+}
+
 type StoredPrintPayload = {
   savedAt: string;
   clientId?: string | null;
@@ -1553,7 +1586,7 @@ export function SoaPrintPreview() {
             <h3>What Our Advice Covers</h3>
             <p>{EXECUTIVE_SUMMARY_SCOPE_INTRO}</p>
             {renderBulletList(
-              adviceCase.scope.included.map((item) => item.topic),
+              dedupeTextList(adviceCase.scope.included.map((item) => item.topic)),
               "No scope items drafted yet.",
             )}
           </div>
@@ -1669,12 +1702,12 @@ export function SoaPrintPreview() {
             <h3>Scope of Advice</h3>
             <h4 className={styles.subheading}>Included scope</h4>
             {renderBulletList(
-              adviceCase.scope.included.map((item) => item.topic),
+              dedupeTextList(adviceCase.scope.included.map((item) => item.topic)),
               "No scope items drafted yet.",
             )}
             <h4 className={styles.subheading}>Limitations and exclusions</h4>
             {renderBulletList(
-              [...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations],
+              dedupeTextList([...adviceCase.scope.excluded.map((item) => item.topic), ...adviceCase.scope.limitations]),
               "No exclusions drafted yet.",
             )}
           </div>
