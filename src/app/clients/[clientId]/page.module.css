@@ -2542,6 +2542,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  padding : 0.45rem 0.45rem 0.45rem 0;
 }
 
 .portfolioAccountHeaderBlock {
@@ -2643,6 +2644,22 @@
 .portfolioActionButton:hover {
   border-color: #cbd5e1;
   color: #374151;
+}
+
+.portfolioActionButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.portfolioDangerButton {
+  border-color: #fecaca;
+  color: #b42318;
+}
+
+.portfolioDangerButton:hover:not(:disabled) {
+  border-color: #f3b3ae;
+  background: #fff5f5;
+  color: #b42318;
 }
 
 .portfolioHeaderButton {

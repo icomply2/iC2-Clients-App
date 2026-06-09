@@ -47,6 +47,11 @@ type HoldingAddState = {
   account: ClientPortfolioAccountRecord;
 };
 
+type AccountDeleteState = {
+  account: ClientPortfolioAccountRecord;
+  holdings: ClientPortfolioRecord[];
+};
+
 type DesktopBrokerHoldingBalance = {
   SecurityCode?: string | null;
   SecurityName?: string | null;
@@ -460,6 +465,9 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
   const [deleteHoldingTarget, setDeleteHoldingTarget] = useState<HoldingEditState | null>(null);
   const [deleteHoldingError, setDeleteHoldingError] = useState<string | null>(null);
   const [isDeletingHolding, setIsDeletingHolding] = useState(false);
+  const [deleteAccountTarget, setDeleteAccountTarget] = useState<AccountDeleteState | null>(null);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [desktopBrokerClientId, setDesktopBrokerClientId] = useState("");
   const [desktopBrokerOwnerId, setDesktopBrokerOwnerId] = useState("");
@@ -1413,6 +1421,75 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
     }
   }
 
+  function openDeleteAccount(account: ClientPortfolioAccountRecord, holdings: ClientPortfolioRecord[]) {
+    setDeleteAccountError(null);
+    setIsDeletingAccount(false);
+    setDeleteAccountTarget({ account, holdings });
+  }
+
+  function closeDeleteAccount() {
+    if (isDeletingAccount) {
+      return;
+    }
+
+    setDeleteAccountTarget(null);
+    setDeleteAccountError(null);
+  }
+
+  async function confirmDeleteAccount() {
+    if (!deleteAccountTarget?.account.id) {
+      setDeleteAccountError("The selected portfolio account could not be resolved for deletion.");
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    setDeleteAccountError(null);
+
+    try {
+      for (const holding of deleteAccountTarget.holdings) {
+        if (!holding.id) {
+          throw new Error("One of the account holdings could not be resolved for deletion.");
+        }
+
+        const holdingResponse = await fetch(
+          `/api/client-profiles/account/${encodeURIComponent(deleteAccountTarget.account.id)}/portfolio/${encodeURIComponent(holding.id)}`,
+          {
+            method: "DELETE",
+          },
+        );
+        const holdingPayload = await holdingResponse.json().catch(() => null);
+        const holdingResult = parseApiResult<boolean>(holdingPayload);
+
+        if (!holdingResponse.ok) {
+          throw new Error(
+            holdingResult.message ||
+              `Unable to delete ${holding.positionDescription || holding.positionCode || "a holding"} (${holdingResponse.status}).`,
+          );
+        }
+      }
+
+      const accountResponse = await fetch(
+        `/api/client-profiles/account/${encodeURIComponent(deleteAccountTarget.account.id)}`,
+        {
+          method: "DELETE",
+        },
+      );
+      const accountPayload = await accountResponse.json().catch(() => null);
+      const accountResult = parseApiResult<boolean>(accountPayload);
+
+      if (!accountResponse.ok) {
+        throw new Error(accountResult.message || `Unable to delete the portfolio account (${accountResponse.status}).`);
+      }
+
+      await loadPortfolioData();
+      setDeleteAccountTarget(null);
+    } catch (error) {
+      setDeleteAccountError(error instanceof Error ? error.message : "Unable to delete the portfolio account.");
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  }
+
   async function savePortfolioWorkflow() {
     if (!accountName.trim()) {
       setSaveError("Enter the account name before saving.");
@@ -1777,6 +1854,16 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
                             title="Add holding"
                           >
                             +
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.portfolioActionButton} ${styles.portfolioHeaderButton} ${styles.portfolioDangerButton}`}
+                            onClick={() => openDeleteAccount(account, holdings)}
+                            disabled={!account.id}
+                            aria-label={`Delete ${account.accountName || "portfolio account"}`}
+                            title="Delete portfolio account"
+                          >
+                            🗑
                           </button>
                         </div>
                       </div>
@@ -2782,6 +2869,28 @@ export function PortfolioSection({ clientId, profile, useMockFallback = false }:
               </button>
               <button type="button" className={`${styles.modalPrimary} ${styles.confirmDanger}`} onClick={confirmDeleteHolding} disabled={isDeletingHolding}>
                 {isDeletingHolding ? "Deleting..." : "Delete holding"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteAccountTarget ? (
+        <div className={styles.modalOverlay} role="presentation" onClick={closeDeleteAccount}>
+          <div className={styles.confirmDialog} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <h2 className={styles.confirmTitle}>Delete portfolio account</h2>
+            <p className={styles.confirmText}>
+              Are you sure you want to delete <strong>{deleteAccountTarget.account.accountName || "this portfolio account"}</strong>?
+              This will also delete {deleteAccountTarget.holdings.length} holding
+              {deleteAccountTarget.holdings.length === 1 ? "" : "s"} under the account.
+            </p>
+            {deleteAccountError ? <p className={styles.modalError}>{deleteAccountError}</p> : null}
+            <div className={styles.confirmActions}>
+              <button type="button" className={styles.modalSecondary} onClick={closeDeleteAccount} disabled={isDeletingAccount}>
+                Cancel
+              </button>
+              <button type="button" className={`${styles.modalPrimary} ${styles.confirmDanger}`} onClick={confirmDeleteAccount} disabled={isDeletingAccount}>
+                {isDeletingAccount ? "Deleting..." : "Delete account"}
               </button>
             </div>
           </div>
