@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import type { AdviserSummary } from "@/lib/api/types";
 import styles from "./create-client-dialog.module.css";
@@ -80,6 +80,7 @@ export function CreateClientDialog({
   const [practiceName, setPracticeName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const hasUserSelectedAdviserRef = useRef(false);
   const isComplianceManager = normalizeText(currentUserScope?.userRole) === "compliance manager";
   
 
@@ -92,6 +93,7 @@ export function CreateClientDialog({
     setClientName("");
     setPartnerName("");
     setAdviserValue("");
+    hasUserSelectedAdviserRef.current = false;
     setPracticeName(currentUserScope?.practice?.name ?? defaultPracticeName ?? "");
     setError(null);
   }, [currentUserScope?.practice?.name, defaultPracticeName, isOpen]);
@@ -270,8 +272,18 @@ export function CreateClientDialog({
           nextOptions[0] ??
           null;
 
-        setAdviserValue(preferredOption ? getCreateClientAdviserOptionValue(preferredOption) : "");
-        if (isComplianceManager && preferredOption?.practiceName) {
+        setAdviserValue((currentValue) => {
+          const currentOption = nextOptions.find(
+            (option) => getCreateClientAdviserOptionValue(option) === currentValue,
+          );
+
+          return currentOption
+            ? currentValue
+            : preferredOption
+              ? getCreateClientAdviserOptionValue(preferredOption)
+              : "";
+        });
+        if (isComplianceManager && !hasUserSelectedAdviserRef.current && preferredOption?.practiceName) {
           setPracticeName(preferredOption.practiceName);
         }
       } catch {
@@ -300,6 +312,7 @@ export function CreateClientDialog({
   ]);
 
   function handleAdviserChange(nextValue: string) {
+    hasUserSelectedAdviserRef.current = true;
     setAdviserValue(nextValue);
 
     if (!isComplianceManager) {
