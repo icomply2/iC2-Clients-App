@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { API_BASE_URL, readBearerToken } from "@/app/api/client-profiles/_shared";
+import { normalizeInsurancePolicyPayload } from "@/lib/insurance-policy-payload";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ clientId: string; policyId: string }> }) {
   if (!API_BASE_URL) {
@@ -13,12 +14,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   const payload = await request.json().catch(() => null);
   const { clientId, policyId } = await params;
+  const normalizedPayload = payload && typeof payload === "object" ? normalizeInsurancePolicyPayload(payload) : {};
 
   try {
     const response = await fetch(new URL(`/api/Insurance/${encodeURIComponent(clientId)}/Policy/${encodeURIComponent(policyId)}`, API_BASE_URL), {
       method: "PUT",
       headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload && typeof payload === "object" ? payload : {}),
+      body: JSON.stringify(normalizedPayload),
       cache: "no-store",
     });
 

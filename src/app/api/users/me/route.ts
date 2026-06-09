@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth";
+import { getUserPreferences } from "@/lib/api/users";
 import { mockClientSummaries } from "@/lib/client-mocks";
 import { resolveCurrentUserFromApi } from "@/lib/current-user";
 import { DEFAULT_DOCUMENT_STYLE_PROFILE, normalizeDocumentStyleProfile } from "@/lib/documents/document-style-profile";
@@ -62,17 +63,23 @@ export async function GET(request: NextRequest) {
 
   try {
     const matchedUser = await resolveCurrentUserFromApi(token);
-    if (!matchedUser) {
+    if (!matchedUser?.id) {
       return NextResponse.json({ message: "Unable to resolve the signed-in user." }, { status: 404 });
     }
 
-    const profileOverride = await readUserProfileOverride(matchedUser.id);
+    const [profileOverride, preferencesResult] = await Promise.all([
+      readUserProfileOverride(matchedUser.id),
+      getUserPreferences(matchedUser.id, token).catch(() => null),
+    ]);
 
     return NextResponse.json(
       {
         data: {
           ...matchedUser,
-          documentStyleProfile: normalizeDocumentStyleProfile(profileOverride?.documentStyleProfile),
+          preferences: preferencesResult?.data ?? null,
+          documentStyleProfile: normalizeDocumentStyleProfile(
+            preferencesResult?.data?.documentStyle ?? profileOverride?.documentStyleProfile,
+          ),
         },
       },
       { status: 200 },

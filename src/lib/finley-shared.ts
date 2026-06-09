@@ -5,6 +5,7 @@ import {
 
 export type FinleyChatRequest = {
   message: string;
+  workflowAction?: "create_file_note" | null;
   activeClientId?: string | null;
   activeClientName?: string | null;
   threadId?: string | null;

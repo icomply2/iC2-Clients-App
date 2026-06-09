@@ -81,6 +81,24 @@ export type UserSummary = {
   modifiedDate?: string | null;
 };
 
+export type ApplicationPreference = {
+  landingPage?: string | null;
+  pageSize?: number | null;
+  useCompactListSpacing?: boolean | null;
+};
+
+export type DocumentStylePreference = {
+  fontFamily?: string | null;
+  bodyTextColor?: string | null;
+  headingColor?: string | null;
+  tableHeaderColor?: string | null;
+};
+
+export type UserPreferences = {
+  application?: ApplicationPreference | null;
+  documentStyle?: DocumentStylePreference | null;
+};
+
 export type ApiAddress = {
   street?: string | null;
   suburb?: string | null;
@@ -110,6 +128,58 @@ export type LicenseeDto = {
   name?: string | null;
   suburb?: string | null;
   xplanUrl?: string | null;
+  assetClasses?: LicenseeAssetClass[] | null;
+  riskProfiles?: LicenseeRiskProfile[] | null;
+};
+
+export type LicenseeAssetClassCategory = "Defensive" | "Growth";
+
+export type LicenseeAssetClass = {
+  assetClassId?: string | null;
+  name: string;
+  category: LicenseeAssetClassCategory;
+  displayOrder?: number | null;
+  isActive?: boolean | null;
+};
+
+export type LicenseeStrategicAssetAllocation = {
+  assetClassId: string;
+  assetClassName: string;
+  category: LicenseeAssetClassCategory;
+  targetPercent?: number | null;
+  minimumPercent?: number | null;
+  maximumPercent?: number | null;
+};
+
+export type LicenseeRiskProfile = {
+  riskProfileId?: string | null;
+  riskProfileName: string;
+  description?: string | null;
+  displayOrder?: number | null;
+  timeframe: {
+    label: string;
+    minimumYears?: number | null;
+    maximumYears?: number | null;
+  };
+  assetAllocationSummary: {
+    defensiveAssetsPercent?: number | null;
+    growthAssetsPercent?: number | null;
+  };
+  strategicAssetAllocations: LicenseeStrategicAssetAllocation[];
+  expectedReturns: {
+    expectedIncomePercent?: number | null;
+    expectedGrowthPercent?: number | null;
+    totalExpectedReturnPercent?: number | null;
+    frankingPercent?: number | null;
+  };
+  negativeReturnFrequency: {
+    frequencyYears?: number | null;
+    description?: string | null;
+  };
+  volatilityPercent?: number | null;
+  isActive?: boolean | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
 };
 
 export type PracticeDto = {
