@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type {
   ClientEmploymentRecord,
+  ClientInsuranceRecord,
   ClientProfile,
   PersonRecord,
 } from "@/lib/api/types";
@@ -411,6 +412,43 @@ function employmentOwnerName(item: EmploymentSourceRecord, profile: ClientProfil
   return "";
 }
 
+function insurancePolicyDetails(record: ClientInsuranceRecord) {
+  if (record.policyDetails?.length) {
+    return record.policyDetails;
+  }
+
+  if (record.coverRequired || record.sumInsured || record.premiumAmount || record.frequency) {
+    return [
+      {
+        coverType: record.coverRequired,
+        sumInsured: record.sumInsured,
+        premiumAmount: record.premiumAmount,
+        premiumFrequency: record.frequency,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function insuranceCoversSummary(record: ClientInsuranceRecord) {
+  return insurancePolicyDetails(record)
+    .map((detail) => [text(detail.coverType), formatCurrency(detail.sumInsured)].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join("; ");
+}
+
+function insurancePremiumTotal(record: ClientInsuranceRecord) {
+  return insurancePolicyDetails(record).reduce((total, detail) => total + numberValue(detail.premiumAmount), 0);
+}
+
+function linkedSuperFundName(profile: ClientProfile, record: ClientInsuranceRecord) {
+  const superFundId = text(record.superFund?.id);
+  if (!superFundId) return "No linked super fund";
+
+  return profile.superannuation?.find((item) => text(item.id) === superFundId)?.superFund ?? "No linked super fund";
+}
+
 function buildDocumentXml(profile: ClientProfile) {
   const assets = profile.assets ?? [];
   const liabilities = profile.liabilities ?? [];
@@ -517,15 +555,14 @@ function buildDocumentXml(profile: ClientProfile) {
     paragraphXml(`Total Retirement Income Balance: ${formatNumber(totalPension)}`, { bold: true, spacingAfter: 180 }),
     headingXml("Insurance", 2),
     tableXml(
-      ["Owner", "Cover", "Insurer", "Sum Insured", "Premium", "Frequency", "Status"],
+      ["Owner", "Insurer", "Policy No", "Covers", "Total Premium", "Linked Super"],
       insurance.map((item) => [
         text(item.owner?.name),
-        text(item.coverRequired),
         text(item.insurer),
-        formatCurrency(item.sumInsured),
-        formatCurrency(item.premiumAmount),
-        frequency(item.frequency),
-        text(item.status),
+        text(item.policyNumber),
+        insuranceCoversSummary(item),
+        formatNumber(insurancePremiumTotal(item)),
+        linkedSuperFundName(profile, item),
       ]),
     ),
     riskProfileXml(profile),

@@ -639,6 +639,7 @@ export type ClientInsuranceRecord = {
   coverRequired?: string | null;
   sumInsured?: string | null;
   premiumAmount?: string | null;
+  policyNumber?: string | null;
   frequency?: {
     type?: string | null;
     value?: string | null;
