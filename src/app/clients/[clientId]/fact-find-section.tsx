@@ -11,10 +11,9 @@ import type {
   ClientInsuranceRecord,
   ClientLiabilityRecord,
   ClientPensionRecord,
-  ClientPolicyRecord,
   ClientProfile,
   ClientSuperannuationRecord,
-  PolicyCoverRecord,
+  InsurancePolicyRecord,
 } from "@/lib/api/types";
 import type { FinancialCollectionKind, ProfileCollectionRecord } from "@/lib/api/contracts/profile-collections";
 import type { FinleyDisplayCard, FinleyEditorCard, FinleyFactFindWorkflow, FinleyTableEditorCard } from "@/lib/finley-shared";
@@ -87,8 +86,6 @@ type InsuranceBenefitDraft = {
   premiumAmount: string;
   frequency: string;
 };
-
-type InsurancePolicyView = ClientPolicyRecord;
 
 const FACT_FIND_POPUP_SECTIONS: Record<FactFindPopupSection, true> = {
   assets: true,
@@ -323,59 +320,45 @@ function formatMoneyValue(value?: string | number | null) {
   return formatCurrencyInput(String(value));
 }
 
-function insuranceCoverSummary(cover: PolicyCoverRecord) {
+function insuranceCoverSummary(cover: InsurancePolicyRecord) {
   return [cover.coverType, formatMoneyValue(cover.sumInsured)].filter(Boolean).join(" ");
 }
 
-function buildInsurancePolicyDisplayCard(clientName: string, policies: InsurancePolicyView[]) {
-  if (!policies.length) return null;
+function calculateInsurancePremiumTotal(record: ClientInsuranceRecord) {
+  return (record.policyDetails ?? []).reduce((total, detail) => total + (numberFromCurrencyLike(detail.premiumAmount) ?? 0), 0);
+}
+
+function resolveLinkedSuperFundLabel(profile: ClientProfile, record: ClientInsuranceRecord) {
+  const superFundId = record.superFund?.id?.trim();
+  if (!superFundId) return "No linked super fund";
+
+  return profile.superannuation?.find((item) => item.id?.trim() === superFundId)?.superFund ?? "No linked super fund";
+}
+
+function buildInsurancePolicyDisplayCard(clientName: string, profile: ClientProfile) {
+  const records = profile.insurance ?? [];
+  if (!records.length) return null;
 
   return {
     kind: "collection_summary",
     title: `${clientName} Insurance`,
     columns: ["Owner", "Insurer", "Policy No", "Covers", "Total Premium", "Linked Super"],
-    rows: policies.map((policy, index) => {
-      const totalPremium = (policy.covers ?? []).reduce((total, cover) => total + (cover.premiumAmount ?? 0), 0);
+    rows: records.map((record, index) => {
       return {
-        id: policy.id ?? `insurance-policy-${index}`,
+        id: record.id ?? `insurance-policy-${index}`,
         cells: [
-          policy.policyOwner ?? "",
-          policy.insurer ?? "",
-          policy.policyNumber ?? "",
-          (policy.covers ?? []).map(insuranceCoverSummary).filter(Boolean).join("; "),
-          formatMoneyValue(totalPremium),
-          policy.linkedSuperFund ?? "",
+          record.owner?.name ?? "",
+          record.insurer ?? "",
+          record.policyNumber ?? "",
+          (record.policyDetails ?? []).map(insuranceCoverSummary).filter(Boolean).join("; "),
+          formatMoneyValue(calculateInsurancePremiumTotal(record)),
+          resolveLinkedSuperFundLabel(profile, record),
         ],
-        editAction: policy.id ? { kind: "insurance", recordId: policy.id, label: "Edit" } : null,
+        editAction: record.id ? { kind: "insurance", recordId: record.id, label: "Edit" } : null,
       };
     }),
     footer: null,
   } satisfies FinleyDisplayCard;
-}
-
-function getApiErrorMessage(payload: unknown, fallback: string) {
-  if (!payload || typeof payload !== "object") {
-    return fallback;
-  }
-
-  if ("message" in payload && typeof payload.message === "string" && payload.message.trim()) {
-    return payload.message;
-  }
-
-  if ("error" in payload && typeof payload.error === "string" && payload.error.trim()) {
-    return payload.error;
-  }
-
-  if ("errors" in payload && payload.errors && typeof payload.errors === "object") {
-    const messages = Object.values(payload.errors as Record<string, unknown>).flatMap((value) =>
-      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
-    );
-    if (messages.length) {
-      return messages[0];
-    }
-  }
-
-  return fallback;
 }
 
 function hasLinkedPartner(profile: ClientProfile) {
@@ -662,8 +645,8 @@ function getModalInitialValues(
         ownerId: getRecordOwnerValue(item) || ownerFallback,
         coverRequired: item?.coverRequired ?? "",
         insurer: item?.insurer ?? "",
-        policyNumber: "",
-        linkedSuperFundId: "",
+        policyNumber: item?.policyNumber ?? "",
+        linkedSuperFundId: item?.superFund?.id ?? "",
         sumInsured: item?.sumInsured ? formatCurrencyInput(item.sumInsured) : "",
         premiumAmount: item?.premiumAmount ? formatCurrencyInput(item.premiumAmount) : "",
         frequency: item?.frequency?.value ?? item?.frequency?.type ?? "Monthly",
@@ -683,13 +666,13 @@ function createInsuranceBenefitDraft(record?: ClientInsuranceRecord | null): Ins
   };
 }
 
-function createInsuranceBenefitDraftFromCover(cover?: PolicyCoverRecord | null): InsuranceBenefitDraft {
+function createInsuranceBenefitDraftFromPolicyDetail(detail?: InsurancePolicyRecord | null): InsuranceBenefitDraft {
   return {
-    id: cover?.id ?? `benefit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    coverRequired: cover?.coverType ?? "",
-    sumInsured: formatMoneyValue(cover?.sumInsured),
-    premiumAmount: formatMoneyValue(cover?.premiumAmount),
-    frequency: cover?.premiumFrequency ?? "Monthly",
+    id: detail?.id ?? `benefit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    coverRequired: detail?.coverType ?? "",
+    sumInsured: formatMoneyValue(detail?.sumInsured),
+    premiumAmount: formatMoneyValue(detail?.premiumAmount),
+    frequency: detail?.premiumFrequency?.type ?? detail?.premiumFrequency?.value ?? "Monthly",
   };
 }
 
@@ -995,7 +978,6 @@ function renderEditorCard(
 export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
   const [profileState, setProfileState] = useState(profile);
   const [workflow, setWorkflow] = useState<FinleyFactFindWorkflow | null>(null);
-  const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicyView[]>([]);
   const [stepIndex, setStepIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1021,8 +1003,8 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
   const ownerOptions = useMemo(() => buildOwnerOptions(profileState), [profileState]);
   const superFundOptions = useMemo(() => buildSuperFundOptions(profileState), [profileState]);
   const recordModalFields = recordModal ? getPopupFields(recordModal.section, ownerOptions, superFundOptions) : [];
-  const currentDisplayCard = currentStep?.id === "insurance" && insurancePolicies.length
-    ? buildInsurancePolicyDisplayCard(clientName, insurancePolicies)
+  const currentDisplayCard = currentStep?.id === "insurance"
+    ? buildInsurancePolicyDisplayCard(clientName, profileState)
     : currentStep?.displayCard ?? null;
 
   useEffect(() => {
@@ -1050,29 +1032,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
       isMounted = false;
     };
   }, [profileState]);
-
-  const loadInsurancePolicies = useCallback(
-    async (profileId?: string | null) => {
-      const resolvedProfileId = profileId?.trim() || profileState.id?.trim() || clientId;
-      if (!resolvedProfileId) {
-        setInsurancePolicies([]);
-        return;
-      }
-
-      try {
-        const response = await fetch(`/api/insurance/${encodeURIComponent(resolvedProfileId)}/policies`, { cache: "no-store" });
-        const body = (await response.json().catch(() => null)) as { data?: ClientPolicyRecord[] | null } | null;
-        if (!response.ok) {
-          throw new Error("Unable to load nested insurance policies.");
-        }
-
-        setInsurancePolicies(body?.data ?? []);
-      } catch {
-        setInsurancePolicies([]);
-      }
-    },
-    [clientId, profileState.id],
-  );
 
   const loadWorkflow = useCallback(
     async (options?: { resetStep?: boolean }) => {
@@ -1114,10 +1073,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
   }, [loadWorkflow]);
 
   useEffect(() => {
-    void loadInsurancePolicies();
-  }, [loadInsurancePolicies]);
-
-  useEffect(() => {
     setSelectedRecordIds([]);
     setBulkDeleteError(null);
   }, [currentStep?.id]);
@@ -1127,25 +1082,24 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
     setRecordModal(nextModal);
     setRecordValues(getModalInitialValues(profileState, nextModal, ownerOptions));
     if (section === "insurance") {
-      const existingPolicy = recordId ? insurancePolicies.find((policy) => policy.id === recordId) ?? null : null;
-      if (existingPolicy) {
-        const ownerOption = findOptionByValueOrLabel(existingPolicy.policyOwner, ownerOptions);
-        const superOption = findOptionByValueOrLabel(existingPolicy.linkedSuperFund, superFundOptions);
+      const existingRecord = recordId ? profileState.insurance?.find((record) => record.id === recordId) ?? null : null;
+      if (existingRecord) {
+        const ownerOption = findOptionByValueOrLabel(existingRecord.owner?.id ?? existingRecord.owner?.name, ownerOptions);
+        const superOption = findOptionByValueOrLabel(existingRecord.superFund?.id, superFundOptions);
         setRecordValues({
           ownerId: ownerOption?.value ?? ownerOptions[0]?.value ?? "",
-          insurer: existingPolicy.insurer ?? "",
-          policyNumber: existingPolicy.policyNumber ?? "",
-          status: existingPolicy.status ?? "Active",
+          insurer: existingRecord.insurer ?? "",
+          policyNumber: existingRecord.policyNumber ?? "",
+          status: existingRecord.status ?? "Active",
           linkedSuperFundId: superOption?.value ?? "",
         });
         setInsuranceBenefits(
-          existingPolicy.covers?.length
-            ? existingPolicy.covers.map(createInsuranceBenefitDraftFromCover)
-            : [createInsuranceBenefitDraftFromCover()],
+          existingRecord.policyDetails?.length
+            ? existingRecord.policyDetails.map(createInsuranceBenefitDraftFromPolicyDetail)
+            : [createInsuranceBenefitDraftFromPolicyDetail()],
         );
       } else {
-        const existingRecord = recordId ? profileState.insurance?.find((record) => record.id === recordId) ?? null : null;
-        setInsuranceBenefits([createInsuranceBenefitDraft(existingRecord)]);
+        setInsuranceBenefits([createInsuranceBenefitDraftFromPolicyDetail()]);
       }
     }
     setRecordError(null);
@@ -1342,81 +1296,34 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
       throw new Error("Please choose a policy owner.");
     }
 
-    const coverPayloads = benefits
+    const policyDetails = benefits
       .filter((benefit) => benefit.coverRequired || benefit.sumInsured || benefit.premiumAmount)
       .map((benefit) => ({
-        id: null,
+        id: benefit.id.startsWith("benefit-") ? null : benefit.id,
         coverType: benefit.coverRequired || null,
-        sumInsured: numberFromCurrencyLike(benefit.sumInsured),
-        premiumAmount: numberFromCurrencyLike(benefit.premiumAmount),
-        premiumFrequency: benefit.frequency?.trim() || null,
-      }) satisfies PolicyCoverRecord);
+        sumInsured: cleanCurrencyLike(benefit.sumInsured),
+        premiumAmount: cleanCurrencyLike(benefit.premiumAmount),
+        premiumFrequency: optionFromValue(benefit.frequency?.trim() || "Monthly"),
+      }) satisfies InsurancePolicyRecord);
 
-    if (!coverPayloads.length || coverPayloads.some((benefit) => !benefit.coverType)) {
+    if (!policyDetails.length || policyDetails.some((benefit) => !benefit.coverType)) {
       throw new Error("Please add at least one benefit and choose a cover type for each benefit.");
     }
 
     const linkedSuperFund = superFundOptions.find((option) => option.value === values.linkedSuperFundId);
-    const policyPayload: ClientPolicyRecord = {
+    const record: ClientInsuranceRecord = {
       id: policyId ?? null,
-      clientId: profileId,
-      policyOwner: owner.name ?? null,
+      owner,
       insurer: values.insurer?.trim() || null,
       policyNumber: values.policyNumber?.trim() || null,
       status: values.status?.trim() || "Active",
-      linkedSuperFund: linkedSuperFund?.label ?? null,
-      covers: coverPayloads,
+      superFund: linkedSuperFund ? { id: linkedSuperFund.value, type: linkedSuperFund.label } : { id: "", type: "" },
+      policyDetails,
     };
 
-    const policyEndpoint = policyId
-      ? `/api/insurance/${encodeURIComponent(profileId)}/policy/${encodeURIComponent(policyId)}`
-      : `/api/insurance/${encodeURIComponent(profileId)}/policy`;
-    const policyResponse = await fetch(policyEndpoint, {
-      method: policyId ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(policyPayload),
-    });
-    const policyBody = (await policyResponse.json().catch(() => null)) as { data?: ClientPolicyRecord | null; message?: string | null } | null;
-
-    if (!policyResponse.ok) {
-      throw new Error(getApiErrorMessage(policyBody, `Unable to save insurance policy right now (status ${policyResponse.status}).`));
-    }
-
-    const savedPolicyId = policyBody?.data?.id?.trim() || policyId?.trim();
-    if (!savedPolicyId) {
-      throw new Error("The insurance policy was created, but the API did not return a policy id for the cover.");
-    }
-
-    if (policyId) {
-      const existingPolicy = insurancePolicies.find((policy) => policy.id === policyId);
-      for (const cover of existingPolicy?.covers ?? []) {
-        if (!cover.id) continue;
-        const deleteResponse = await fetch(
-          `/api/insurance/${encodeURIComponent(profileId)}/policy/${encodeURIComponent(savedPolicyId)}/covers/${encodeURIComponent(cover.id)}`,
-          { method: "DELETE" },
-        );
-        if (!deleteResponse.ok) {
-          const deleteBody = (await deleteResponse.json().catch(() => null)) as { message?: string | null } | null;
-          throw new Error(getApiErrorMessage(deleteBody, `Unable to replace insurance cover right now (status ${deleteResponse.status}).`));
-        }
-      }
-    }
-
-    const returnedCovers = policyBody?.data?.covers ?? [];
-    if (!returnedCovers.length) {
-      const coverResponse = await fetch(`/api/insurance/${encodeURIComponent(profileId)}/policy/${encodeURIComponent(savedPolicyId)}/covers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(coverPayloads.map((cover) => ({ ...cover, id: null }))),
-      });
-      const coverBody = (await coverResponse.json().catch(() => null)) as { data?: PolicyCoverRecord[] | null; message?: string | null } | null;
-
-      if (!coverResponse.ok) {
-        throw new Error(getApiErrorMessage(coverBody, `Unable to save insurance cover right now (status ${coverResponse.status}).`));
-      }
-    }
-
-    await loadInsurancePolicies(profileId);
+    const nextRecords = upsertFinancialCollection("insurance", profileState.insurance ?? [], record, policyId);
+    const savedRecords = await saveFinancialCollection("insurance", profileId, nextRecords);
+    setProfileState((current) => ({ ...current, insurance: savedRecords }));
   }
 
   async function handleSaveRecordModal() {
@@ -1536,23 +1443,7 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
           break;
         }
         case "insurance":
-          if (editingId && !insurancePolicies.some((policy) => policy.id === editingId)) {
-            const benefit = insuranceBenefits[0] ?? createInsuranceBenefitDraft();
-            await saveFinancialRecordModal(
-              profileId,
-              recordModal.section,
-              {
-                ...values,
-                coverRequired: benefit.coverRequired,
-                sumInsured: benefit.sumInsured,
-                premiumAmount: benefit.premiumAmount,
-                frequency: benefit.frequency,
-              },
-              editingId,
-            );
-          } else {
-            await saveInsurancePolicyModal(profileId, values, insuranceBenefits, editingId);
-          }
+          await saveInsurancePolicyModal(profileId, values, insuranceBenefits, editingId);
           break;
         default:
           await saveFinancialRecordModal(profileId, recordModal.section, values, editingId);
@@ -1562,7 +1453,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
       setRecordValues({});
       setInsuranceBenefits([createInsuranceBenefitDraft()]);
       await loadWorkflow({ resetStep: false });
-      await loadInsurancePolicies(profileId);
     } catch (saveError) {
       setRecordError(saveError instanceof Error ? saveError.message : "Unable to save this record right now.");
     } finally {
@@ -1593,17 +1483,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
         return;
       }
       case "insurance":
-        if (insurancePolicies.some((policy) => policy.id === recordId)) {
-          const response = await fetch(`/api/insurance/${encodeURIComponent(profileId)}/policy/${encodeURIComponent(recordId)}`, {
-            method: "DELETE",
-            cache: "no-store",
-          });
-          if (!response.ok) {
-            const body = (await response.json().catch(() => null)) as { message?: string; error?: string } | null;
-            throw new Error(body?.message || body?.error || "Unable to delete this insurance policy right now.");
-          }
-          return;
-        }
         await deleteFinancialCollectionItem(section, profileId, recordId);
         return;
       default:
@@ -1616,9 +1495,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
 
   function removeDeletedRecordsFromProfile(section: FactFindPopupSection, recordIds: string[]) {
     const recordIdSet = new Set(recordIds);
-    if (section === "insurance") {
-      setInsurancePolicies((current) => current.filter((policy) => !policy.id || !recordIdSet.has(policy.id)));
-    }
 
     setProfileState((current) => {
       switch (section) {
@@ -1660,7 +1536,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
 
       setDeleteConfirm(null);
       await loadWorkflow({ resetStep: false });
-      await loadInsurancePolicies(profileId);
     } catch (deleteRecordError) {
       setDeleteError(deleteRecordError instanceof Error ? deleteRecordError.message : "Unable to delete this record right now.");
     } finally {
@@ -1695,7 +1570,6 @@ export function FactFindSection({ clientId, profile }: FactFindSectionProps) {
       removeDeletedRecordsFromProfile(section, uniqueRecordIds);
       setSelectedRecordIds((current) => current.filter((id) => !uniqueRecordIds.includes(id)));
       await loadWorkflow({ resetStep: false });
-      await loadInsurancePolicies(profileId);
     } catch (bulkDeleteErrorResult) {
       setBulkDeleteError(
         bulkDeleteErrorResult instanceof Error ? bulkDeleteErrorResult.message : "Unable to delete the selected records right now.",

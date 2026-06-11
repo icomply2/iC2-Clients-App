@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ClientInsuranceRecord, ClientPolicyRecord, ClientProfile, PolicyCoverRecord } from "@/lib/api/types";
+import { useRouter } from "next/navigation";
+import type { ClientInsuranceRecord, ClientProfile, InsurancePolicyRecord } from "@/lib/api/types";
+import { deleteFinancialCollectionItem, saveFinancialCollection } from "@/lib/services/profile-collections";
 import styles from "./page.module.css";
 
 type InsuranceSectionProps = {
-  clientId: string;
   profile: ClientProfile;
   useMockFallback?: boolean;
 };
@@ -26,6 +27,7 @@ type InsuranceCover = {
 
 type InsurancePolicy = {
   id: string;
+  apiId: string | null;
   ownerValue: string;
   ownerName: string;
   insurer: string;
@@ -92,6 +94,15 @@ function formatCurrency(value?: string | number | null) {
   }).format(numericValue);
 }
 
+function toCurrencyNumber(value?: string | number | null) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const numericValue = typeof value === "number" ? value : Number(String(value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
 function toStoredCurrencyValue(value: string) {
   const normalizedValue = normalizeCurrencyInput(value);
 
@@ -135,110 +146,62 @@ function findMatchingOption(rawValue: string | null | undefined, options: Select
   );
 }
 
-function normalizePolicyCover(cover: PolicyCoverRecord, duplicateIdCounts?: Map<string, number>): InsuranceCover {
-  const rawApiId = normalizeApiId(cover.id);
+function normalizePolicyDetail(detail: InsurancePolicyRecord, index: number, duplicateIdCounts?: Map<string, number>): InsuranceCover {
+  const rawApiId = normalizeApiId(detail.id);
   const apiId = rawApiId && (duplicateIdCounts?.get(rawApiId) ?? 1) === 1 ? rawApiId : null;
 
   return {
-    id: createId("cover"),
+    id: apiId ?? createId(`cover-${index}`),
     apiId,
-    coverType: cover.coverType ?? "",
-    sumInsured: typeof cover.sumInsured === "number" ? cover.sumInsured : null,
-    premiumAmount: typeof cover.premiumAmount === "number" ? cover.premiumAmount : null,
-    premiumFrequency: cover.premiumFrequency ?? "Monthly",
+    coverType: detail.coverType ?? "",
+    sumInsured: toCurrencyNumber(detail.sumInsured),
+    premiumAmount: toCurrencyNumber(detail.premiumAmount),
+    premiumFrequency: detail.premiumFrequency?.type ?? detail.premiumFrequency?.value ?? "Monthly",
   };
 }
 
-function normalizePolicyCovers(covers: PolicyCoverRecord[] | null | undefined) {
+function normalizePolicyDetails(details: InsurancePolicyRecord[] | null | undefined) {
   const duplicateIdCounts = new Map<string, number>();
-  for (const cover of covers ?? []) {
-    const apiId = normalizeApiId(cover.id);
+  for (const detail of details ?? []) {
+    const apiId = normalizeApiId(detail.id);
     if (apiId) {
       duplicateIdCounts.set(apiId, (duplicateIdCounts.get(apiId) ?? 0) + 1);
     }
   }
 
-  return (covers ?? []).map((cover) => normalizePolicyCover(cover, duplicateIdCounts));
+  return (details ?? []).map((detail, index) => normalizePolicyDetail(detail, index, duplicateIdCounts));
 }
 
-function mapApiPolicyToViewModel(policy: ClientPolicyRecord, ownerOptions: SelectOption[], superOptions: SelectOption[]): InsurancePolicy {
-  const matchedOwner = findMatchingOption(policy.policyOwner, ownerOptions);
-  const matchedSuperFund = findMatchingOption(policy.linkedSuperFund, superOptions);
-
-  return {
-    id: policy.id ?? createId("policy"),
-    ownerValue: matchedOwner?.value ?? "",
-    ownerName: matchedOwner?.label ?? policy.policyOwner ?? "",
-    insurer: policy.insurer ?? "",
-    policyNumber: policy.policyNumber ?? "",
-    status: policy.status ?? "Active",
-    superFundValue: matchedSuperFund?.value ?? "",
-    superFundName: matchedSuperFund?.label ?? policy.linkedSuperFund ?? "",
-    covers: normalizePolicyCovers(policy.covers),
-  };
-}
-
-function buildPoliciesFromLegacyRecords(records: ClientInsuranceRecord[] | null | undefined, ownerOptions: SelectOption[], superOptions: SelectOption[]) {
-  const policies = new Map<string, InsurancePolicy>();
-
-  for (const record of records ?? []) {
+function buildPoliciesFromProfileInsurance(records: ClientInsuranceRecord[] | null | undefined, ownerOptions: SelectOption[], superOptions: SelectOption[]) {
+  return (records ?? []).map((record, index): InsurancePolicy => {
     const matchedOwner = findMatchingOption(record.owner?.id ?? record.owner?.name, ownerOptions);
-    const matchedSuper = findMatchingOption(record.superFund?.id ?? record.superFund?.type, superOptions);
-    const policyKey = [
-      matchedOwner?.label ?? record.owner?.name ?? "",
-      record.insurer ?? "",
-      record.status ?? "Active",
-      matchedSuper?.label ?? record.superFund?.type ?? "",
-    ].join("|");
+    const matchedSuper = record.superFund?.id ? findMatchingOption(record.superFund.id, superOptions) : null;
+    const apiId = normalizeApiId(record.id);
 
-    if (!policies.has(policyKey)) {
-      policies.set(policyKey, {
-        id: createId("policy"),
-        ownerValue: matchedOwner?.value ?? record.owner?.id ?? "",
-        ownerName: matchedOwner?.label ?? record.owner?.name ?? "",
-        insurer: record.insurer ?? "",
-        policyNumber: "",
-        status: record.status ?? "Active",
-        superFundValue: matchedSuper?.value ?? record.superFund?.id ?? "",
-        superFundName: matchedSuper?.label ?? record.superFund?.type ?? "",
-        covers: [],
-      });
-    }
-
-    const policy = policies.get(policyKey);
-    if (!policy) {
-      continue;
-    }
-
-    policy.covers.push({
-      id: createId("cover"),
-      apiId: normalizeApiId(record.id),
-      coverType: record.coverRequired ?? "",
-      sumInsured: record.sumInsured ? Number(record.sumInsured) : null,
-      premiumAmount: record.premiumAmount ? Number(record.premiumAmount) : null,
-      premiumFrequency: record.frequency?.value ?? record.frequency?.type ?? "Monthly",
-    });
-  }
-
-  return Array.from(policies.values());
+    return {
+      id: apiId ?? createId(`policy-${index}`),
+      apiId,
+      ownerValue: matchedOwner?.value ?? record.owner?.id ?? "",
+      ownerName: matchedOwner?.label ?? record.owner?.name ?? "",
+      insurer: record.insurer ?? "",
+      policyNumber: record.policyNumber ?? "",
+      status: record.status ?? "Active",
+      superFundValue: matchedSuper?.value ?? "",
+      superFundName: matchedSuper?.label ?? "No linked super fund",
+      covers: normalizePolicyDetails(record.policyDetails),
+    };
+  });
 }
 
-function toPolicyPayload(policy: InsurancePolicy, clientId: string): ClientPolicyRecord {
+function toPolicyPayload(policy: InsurancePolicy): ClientInsuranceRecord {
   return {
-    id: policy.id.startsWith("policy-") ? null : policy.id,
-    clientId,
-    policyOwner: policy.ownerName || null,
-    insurer: policy.insurer.trim() || null,
+    id: policy.apiId,
+    owner: policy.ownerValue || policy.ownerName ? { id: policy.ownerValue || null, name: policy.ownerName || null } : null,
     policyNumber: policy.policyNumber.trim() || null,
+    insurer: policy.insurer.trim() || null,
     status: policy.status || null,
-    linkedSuperFund: policy.superFundName || null,
-    covers: policy.covers.map((cover) => ({
-      id: cover.apiId,
-      coverType: cover.coverType || null,
-      sumInsured: cover.sumInsured,
-      premiumAmount: cover.premiumAmount,
-      premiumFrequency: cover.premiumFrequency || null,
-    })),
+    superFund: policy.superFundValue ? { id: policy.superFundValue, type: policy.superFundName || null } : { id: "", type: "" },
+    policyDetails: policy.covers.map(toPolicyDetail),
   };
 }
 
@@ -246,47 +209,18 @@ function calculatePolicyPremiumTotal(policy: InsurancePolicy) {
   return policy.covers.reduce((total, cover) => total + (cover.premiumAmount ?? 0), 0);
 }
 
-function toCoverPayload(cover: InsuranceCover): PolicyCoverRecord {
+function toPolicyDetail(cover: InsuranceCover): InsurancePolicyRecord {
   return {
     id: cover.apiId,
     coverType: cover.coverType || null,
-    sumInsured: cover.sumInsured,
-    premiumAmount: cover.premiumAmount,
-    premiumFrequency: cover.premiumFrequency || null,
+    sumInsured: cover.sumInsured === null ? null : cover.sumInsured.toFixed(2),
+    premiumAmount: cover.premiumAmount === null ? null : cover.premiumAmount.toFixed(2),
+    premiumFrequency: { type: cover.premiumFrequency || "", value: cover.premiumFrequency || "" },
   };
 }
 
-function getApiErrorMessage(payload: unknown, fallback: string) {
-  if (!payload || typeof payload !== "object") {
-    return fallback;
-  }
-
-  if ("message" in payload && typeof payload.message === "string" && payload.message.trim()) {
-    return payload.message;
-  }
-
-  if ("errors" in payload && payload.errors && typeof payload.errors === "object") {
-    const entries = Object.values(payload.errors as Record<string, unknown>).flatMap((value) =>
-      Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [],
-    );
-    if (entries.length) {
-      return entries[0];
-    }
-  }
-
-  if ("modelErrors" in payload && Array.isArray(payload.modelErrors) && payload.modelErrors.length) {
-    const firstModelError = payload.modelErrors.find(
-      (item): item is { errorMessage?: string | null } => Boolean(item && typeof item === "object"),
-    );
-    if (firstModelError?.errorMessage) {
-      return firstModelError.errorMessage;
-    }
-  }
-
-  return fallback;
-}
-
-export function InsuranceSection({ clientId, profile, useMockFallback = false }: InsuranceSectionProps) {
+export function InsuranceSection({ profile, useMockFallback = false }: InsuranceSectionProps) {
+  const router = useRouter();
   const ownerOptions = useMemo(
     () =>
       [
@@ -310,13 +244,12 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     [profile.superannuation],
   );
 
-  const legacyPolicies = useMemo(
-    () => buildPoliciesFromLegacyRecords(profile.insurance, ownerOptions, superOptions),
+  const profilePolicies = useMemo(
+    () => buildPoliciesFromProfileInsurance(profile.insurance, ownerOptions, superOptions),
     [ownerOptions, profile.insurance, superOptions],
   );
 
-  const [policies, setPolicies] = useState<InsurancePolicy[]>(legacyPolicies);
-  const [isLoadingPolicies, setIsLoadingPolicies] = useState(false);
+  const [policies, setPolicies] = useState<InsurancePolicy[]>(profilePolicies);
   const [insuranceError, setInsuranceError] = useState<string | null>(null);
   const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
   const [editingPolicyId, setEditingPolicyId] = useState<string | null>(null);
@@ -339,45 +272,29 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
   const [isSavingCover, setIsSavingCover] = useState(false);
 
   useEffect(() => {
-    let isCancelled = false;
+    setPolicies(profilePolicies);
+  }, [profilePolicies]);
 
-    async function loadPolicies() {
-      setIsLoadingPolicies(true);
-      setInsuranceError(null);
+  function getFallbackMessage() {
+    return "Live client data is temporarily unavailable. Insurance changes in this screen are local only right now.";
+  }
 
-      try {
-        const response = await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policies`, { cache: "no-store" });
-        const payload = (await response.json().catch(() => null)) as { data?: ClientPolicyRecord[] | null; message?: string | null } | null;
-
-        if (!response.ok) {
-          throw new Error(getApiErrorMessage(payload, `Unable to load insurance right now (status ${response.status}).`));
-        }
-
-        if (isCancelled) {
-          return;
-        }
-
-        setPolicies((payload?.data ?? []).map((policy) => mapApiPolicyToViewModel(policy, ownerOptions, superOptions)));
-      } catch (error) {
-        if (isCancelled) {
-          return;
-        }
-
-        setPolicies(legacyPolicies);
-        setInsuranceError(error instanceof Error ? error.message : "Unable to load insurance right now.");
-      } finally {
-        if (!isCancelled) {
-          setIsLoadingPolicies(false);
-        }
-      }
+  async function savePolicyCollection(nextPolicies: InsurancePolicy[]) {
+    if (useMockFallback) {
+      throw new Error(getFallbackMessage());
     }
 
-    void loadPolicies();
+    if (!profile.id) {
+      throw new Error("Unable to save insurance without a client profile id.");
+    }
 
-    return () => {
-      isCancelled = true;
-    };
-  }, [clientId, legacyPolicies, ownerOptions, superOptions]);
+    const submittedRecords = nextPolicies.map(toPolicyPayload);
+    const savedRecords = await saveFinancialCollection("insurance", profile.id, submittedRecords);
+    const savedPolicies = buildPoliciesFromProfileInsurance(savedRecords ?? submittedRecords, ownerOptions, superOptions);
+    setPolicies(savedPolicies);
+    router.refresh();
+    return savedPolicies;
+  }
 
   function resetPolicyForm() {
     setPolicyOwnerId(ownerOptions[0]?.value ?? "");
@@ -429,13 +346,14 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     const existingPolicy = policies.find((policy) => policy.id === editingPolicyId) ?? null;
     const nextPolicy: InsurancePolicy = {
       id: editingPolicyId ?? createId("policy"),
+      apiId: existingPolicy?.apiId ?? null,
       ownerValue: owner.value,
       ownerName: owner.label,
       insurer: policyInsurer.trim(),
       policyNumber: policyNumber.trim(),
       status: policyStatus,
       superFundValue: policySuperFundId,
-      superFundName: superFund?.label ?? "",
+      superFundName: superFund?.label ?? "No linked super fund",
       covers: existingPolicy?.covers ?? [],
     };
 
@@ -443,27 +361,10 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     setInsuranceError(null);
 
     try {
-      const endpoint = editingPolicyId
-        ? `/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(editingPolicyId)}`
-        : `/api/insurance/${encodeURIComponent(clientId)}/policy`;
-      const method = editingPolicyId ? "PUT" : "POST";
-      const response = await fetch(endpoint, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toPolicyPayload(nextPolicy, clientId)),
-      });
-
-      const payload = (await response.json().catch(() => null)) as { data?: ClientPolicyRecord | null; message?: string | null } | null;
-
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(payload, `Unable to save insurance policy right now (status ${response.status}).`));
-      }
-
-      const savedPolicy = mapApiPolicyToViewModel(payload?.data ?? toPolicyPayload(nextPolicy, clientId), ownerOptions, superOptions);
-
-      setPolicies((current) =>
-        editingPolicyId ? current.map((policy) => (policy.id === editingPolicyId ? savedPolicy : policy)) : [...current, savedPolicy],
-      );
+      const nextPolicies = editingPolicyId
+        ? policies.map((policy) => (policy.id === editingPolicyId ? nextPolicy : policy))
+        : [...policies, nextPolicy];
+      await savePolicyCollection(nextPolicies);
       setIsPolicyModalOpen(false);
       resetPolicyForm();
     } catch (error) {
@@ -512,66 +413,18 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     setInsuranceError(null);
 
     try {
-      const response =
-        editingCoverId && activePolicy
-          ? await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(activePolicyId)}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(
-                toPolicyPayload(
-                  {
-                    ...activePolicy,
-                    covers: activePolicy.covers.map((cover) => (cover.id === editingCoverId ? nextCover : cover)),
-                  },
-                  clientId,
-                ),
-              ),
-            })
-          : await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(activePolicyId)}/covers`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify([toCoverPayload(nextCover)]),
-            });
+      const nextPolicies = policies.map((policy) => {
+        if (policy.id !== activePolicyId) {
+          return policy;
+        }
 
-      const payload = (await response.json().catch(() => null)) as {
-        data?: PolicyCoverRecord[] | ClientPolicyRecord | null;
-        message?: string | null;
-      } | null;
+        return {
+          ...policy,
+          covers: editingCoverId ? policy.covers.map((cover) => (cover.id === editingCoverId ? nextCover : cover)) : [...policy.covers, nextCover],
+        };
+      });
 
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(payload, `Unable to save insurance cover right now (status ${response.status}).`));
-      }
-
-      if (editingCoverId && activePolicy) {
-        const returnedPolicy = payload?.data && !Array.isArray(payload.data) ? mapApiPolicyToViewModel(payload.data, ownerOptions, superOptions) : null;
-
-        setPolicies((current) =>
-          current.map((policy) =>
-            policy.id === activePolicyId
-              ? returnedPolicy ?? {
-                  ...policy,
-                  covers: policy.covers.map((cover) => (cover.id === editingCoverId ? nextCover : cover)),
-                }
-              : policy,
-          ),
-        );
-      } else {
-        const returnedCovers = Array.isArray(payload?.data) ? normalizePolicyCovers(payload.data) : null;
-        const returnedCover = returnedCovers?.length === 1 ? returnedCovers[0] : nextCover;
-
-        setPolicies((current) =>
-          current.map((policy) => {
-            if (policy.id !== activePolicyId) {
-              return policy;
-            }
-
-            return {
-              ...policy,
-              covers: returnedCovers && returnedCovers.length > 1 ? returnedCovers : [...policy.covers, returnedCover],
-            };
-          }),
-        );
-      }
+      await savePolicyCollection(nextPolicies);
 
       setIsCoverModalOpen(false);
       resetCoverForm(null);
@@ -590,16 +443,13 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
     setInsuranceError(null);
 
     try {
-      const response = await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(policyDeleteId)}`, {
-        method: "DELETE",
-      });
-
-      const payload = (await response.json().catch(() => null)) as { message?: string | null } | null;
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(payload, `Unable to delete insurance policy right now (status ${response.status}).`));
+      const deletedPolicy = policies.find((policy) => policy.id === policyDeleteId);
+      if (deletedPolicy?.apiId && profile.id) {
+        await deleteFinancialCollectionItem("insurance", profile.id, deletedPolicy.apiId);
       }
 
       setPolicies((current) => current.filter((policy) => policy.id !== policyDeleteId));
+      router.refresh();
       setPolicyDeleteId(null);
     } catch (error) {
       setInsuranceError(error instanceof Error ? error.message : "Unable to delete insurance policy right now.");
@@ -615,59 +465,14 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
 
     try {
       const activePolicy = policies.find((policy) => policy.id === coverDeleteState.policyId);
-      const activeCover = activePolicy?.covers.find((cover) => cover.id === coverDeleteState.coverId) ?? null;
 
-      if (!activePolicy || !activeCover) {
+      if (!activePolicy) {
         setCoverDeleteState(null);
         return;
       }
 
-      if (!activeCover.apiId) {
-        const response = await fetch(`/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(coverDeleteState.policyId)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            toPolicyPayload(
-              {
-                ...activePolicy,
-                covers: activePolicy.covers.filter((cover) => cover.id !== coverDeleteState.coverId),
-              },
-              clientId,
-            ),
-          ),
-        });
-
-        const payload = (await response.json().catch(() => null)) as { data?: ClientPolicyRecord | null; message?: string | null } | null;
-        if (!response.ok) {
-          throw new Error(getApiErrorMessage(payload, `Unable to delete insurance cover right now (status ${response.status}).`));
-        }
-
-        const returnedPolicy = payload?.data ? mapApiPolicyToViewModel(payload.data, ownerOptions, superOptions) : null;
-        setPolicies((current) =>
-          current.map((policy) =>
-            policy.id === coverDeleteState.policyId
-              ? returnedPolicy ?? { ...policy, covers: policy.covers.filter((cover) => cover.id !== coverDeleteState.coverId) }
-              : policy,
-          ),
-        );
-        setCoverDeleteState(null);
-        return;
-      }
-
-      const response = await fetch(
-        `/api/insurance/${encodeURIComponent(clientId)}/policy/${encodeURIComponent(coverDeleteState.policyId)}/covers/${encodeURIComponent(
-          activeCover.apiId,
-        )}`,
-        { method: "DELETE" },
-      );
-
-      const payload = (await response.json().catch(() => null)) as { message?: string | null } | null;
-      if (!response.ok) {
-        throw new Error(getApiErrorMessage(payload, `Unable to delete insurance cover right now (status ${response.status}).`));
-      }
-
-      setPolicies((current) =>
-        current.map((policy) =>
+      await savePolicyCollection(
+        policies.map((policy) =>
           policy.id === coverDeleteState.policyId
             ? {
                 ...policy,
@@ -692,7 +497,6 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
       </div>
 
       {useMockFallback ? <p className={styles.actionNotice}>Live client data is temporarily unavailable. Insurance changes in this screen are local only right now.</p> : null}
-      {isLoadingPolicies ? <p className={styles.dataNotice}>Loading insurance policies...</p> : null}
       {insuranceError ? <p className={styles.actionNotice}>{insuranceError}</p> : null}
 
       <section className={styles.insurancePolicies}>
@@ -708,7 +512,7 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
                 <div className={styles.policyMeta}>
                   <div><strong>Owner:</strong> {policy.ownerName || "-"}</div>
                   <div><strong>Insurer:</strong> {policy.insurer || "-"}</div>
-                  <div><strong>Policy No:</strong> {policy.policyNumber || "-"}</div>
+                  <div><strong>Policy No:</strong> {policy.policyNumber}</div>
                   <div><strong>Status:</strong> {policy.status || "-"}</div>
                   <div><strong>Linked Super Fund:</strong> {policy.superFundName || "-"}</div>
                   <div><strong>Total Premium:</strong> {formatCurrency(totalPremium)}</div>
@@ -776,7 +580,7 @@ export function InsuranceSection({ clientId, profile, useMockFallback = false }:
                   </div>
                 </>
               ) : (
-                <div className={styles.policyEmptyState}>No cover details added yet for this policy.</div>
+                <div className={styles.policyEmptyState}>No cover details</div>
               )}
                   </>
                 );

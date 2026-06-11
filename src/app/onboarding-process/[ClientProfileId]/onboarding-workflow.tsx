@@ -6,6 +6,7 @@ import { AssetsSection } from "@/app/clients/[clientId]/assets-section";
 import { DependentSection } from "@/app/clients/[clientId]/dependent-section";
 import { EntitiesSection } from "@/app/clients/[clientId]/entities-section";
 import { FinancialRecordsSection } from "@/app/clients/[clientId]/financial-records-section";
+import { InsuranceSection } from "@/app/clients/[clientId]/insurance-section";
 import type { ClientEmploymentRecord, ClientProfile, PersonRecord } from "@/lib/api/types";
 import {
   deleteEmploymentRecord,
@@ -30,6 +31,7 @@ type StepKey =
   | "income"
   | "expenses"
   | "riskprofile"
+  | "documents"
   | "review";
 
 type PersonDraft = {
@@ -126,6 +128,7 @@ const STEPS: { key: StepKey; label: string }[] = [
   { key: "income", label: "Income" },
   { key: "expenses", label: "Expenses" },
   { key: "riskprofile", label: "Risk Profile" },
+  { key: "documents", label: "Documents" },
   { key: "review", label: "Review & Declaration" },
 ];
 
@@ -1670,7 +1673,7 @@ export function OnboardingWorkflow({ profile }: { profile: ClientProfile }) {
       case "insurance":
         return (
           <section className={styles.onboardingCard}>
-            <FinancialRecordsSection profile={profile} kind="insurance" hideSectionTitle />
+            <InsuranceSection profile={profile} />
           </section>
         );
       case "income":

@@ -158,12 +158,28 @@ function buildFinancialSavePayload<K extends FinancialCollectionKind>(kind: K, r
           coverRequired: item.coverRequired ?? null,
           sumInsured: item.sumInsured ?? null,
           premiumAmount: item.premiumAmount ?? null,
+          policyNumber: item.policyNumber ?? null,
           frequency: normalizeFrequency(item.frequency),
           joint: Boolean(item.joint),
           insurer: item.insurer ?? null,
           status: item.status ?? null,
           superFund: normalizeLinkedRecord(item.superFund) ?? { id: "", type: "" },
           owner: normalizeOwner(item.owner),
+          policyDetails: (item.policyDetails ?? []).map((detail) => ({
+            id: detail.id ?? null,
+            coverType: detail.coverType ?? null,
+            sumInsured: detail.sumInsured ?? null,
+            insurerName: detail.insurerName ?? null,
+            heldSuper: detail.heldSuper ?? null,
+            benefitPeriod: detail.benefitPeriod ?? null,
+            benefitType: detail.benefitType ?? null,
+            occupationType: detail.occupationType ?? null,
+            premiumType: detail.premiumType ?? null,
+            premiumAmount: detail.premiumAmount ?? null,
+            premiumFrequency: normalizeFrequency(detail.premiumFrequency),
+            subTotalPremium: detail.subTotalPremium ?? null,
+            waitingPeriod: detail.waitingPeriod ?? null,
+          })),
         };
       }
     }
@@ -202,7 +218,18 @@ function mergeFinancialCollection<K extends FinancialCollectionKind>(
       submittedRecords.find((submittedRecord) => submittedRecord.id && returnedRecord.id && submittedRecord.id === returnedRecord.id) ??
       submittedRecords.find((submittedRecord) => JSON.stringify(submittedRecord.owner) === JSON.stringify(returnedRecord.owner));
 
-    return { ...returnedRecord, ...matchedRecord };
+    const mergedRecord = { ...returnedRecord, ...matchedRecord };
+
+    if ("id" in returnedRecord) {
+      mergedRecord.id = returnedRecord.id ?? matchedRecord?.id ?? null;
+    }
+
+    const returnedInsuranceRecord = returnedRecord as ClientInsuranceRecord;
+    if (Array.isArray(returnedInsuranceRecord.policyDetails)) {
+      (mergedRecord as ClientInsuranceRecord).policyDetails = returnedInsuranceRecord.policyDetails;
+    }
+
+    return mergedRecord;
   });
 }
 
